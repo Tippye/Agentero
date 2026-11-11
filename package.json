@@ -147,6 +147,7 @@
 		"next-themes": "^0.4.6",
 		"onnxruntime-web": "^1.27.0",
 		"pdf-lib": "^1.17.1",
+		"perfect-freehand": "1.2.3",
 		"platejs": "^53.3.14",
 		"qrcode": "^1.5.4",
 		"radix-ui": "^1.6.2",

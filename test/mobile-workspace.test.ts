@@ -1,0 +1,655 @@
+// @vitest-environment happy-dom
+
+import type { ReactNode } from "react";
+import { act, createElement, useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PdfViewerProps } from "@/components/viewer/pdf/types";
+import type { PaperMetadata } from "@/lib/paper/types";
+
+const state = vi.hoisted(() => ({
+	t: (key: string) => key,
+	papers: [] as PaperMetadata[],
+	bytes: new ArrayBuffer(8),
+	pdfMounts: 0,
+	notesMounts: 0,
+	agentMounts: 0,
+	pdf: null as PdfViewerProps | null,
+	load: vi.fn(),
+	error: vi.fn(),
+	refresh: vi.fn(async () => {}),
+	fetchMissing: vi.fn(async () => false),
+}));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
+	useMobileVault: () => ({
+		vaultPath: "/private/Vault",
+		loading: false,
+		retry: vi.fn(),
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-mobile-papers", () => ({
+	useMobilePapers: () => ({
+		papers: state.papers,
+		loading: false,
+		refresh: state.refresh,
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-mobile-paper-sync", () => ({
+	useMobilePaperSync: () => ({
+		states: {},
+		setPinned: vi.fn(),
+		fetchMissing: state.fetchMissing,
+		progressText: null,
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-mobile-agents", () => ({
+	useMobileAgents: () => ({
+		agents: [],
+		loading: false,
+		selectedAgent: null,
+		selectedAgentId: null,
+		selectAgent: vi.fn(),
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-bridge-status", () => ({
+	useBridgeStatus: () => ({
+		status: { paired: false, connected: false },
+		setStatus: vi.fn(),
+		pairPending: null,
+		disconnect: vi.fn(),
+		resume: vi.fn(),
+		resetAvailable: false,
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-pair-offer-links", () => ({
+	usePairOfferLinks: vi.fn(),
+}));
+vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
+vi.mock("@/lib/mobile/import-pdf", () => ({ importMobilePdfs: vi.fn() }));
+vi.mock("@/lib/mobile/paper-files", () => ({
+	loadMobilePaperPdf: state.load,
+	mobilePaperPaths: (_vault: string, paper: PaperMetadata) => ({
+		paperAbsPath: `/private/Vault/${paper.path}`,
+		paperRelPath: paper.path,
+		notesPath: `/private/Vault/${paper.path}/NOTES.md`,
+	}),
+}));
+vi.mock("@/components/viewer/pdf/pdf-viewer", () => ({
+	PdfViewer: (props: PdfViewerProps) => {
+		state.pdf = props;
+		const [page, setPage] = useState(1);
+		const [zoom, setZoom] = useState(100);
+		useEffect(() => {
+			state.pdfMounts += 1;
+		}, []);
+		return createElement(
+			"article",
+			{ "data-pdf-document": props.docId },
+			createElement("output", { "data-position": true }, `${page}:${zoom}`),
+			createElement(
+				"button",
+				{
+					type: "button",
+					onClick: () => {
+						setPage(7);
+						setZoom(175);
+					},
+				},
+				"change-reading-position",
+			),
+			createElement(
+				"button",
+				{ type: "button", onClick: () => props.onInkDirtyChange?.(true) },
+				"unsaved-ink",
+			),
+			createElement(
+				"button",
+				{ type: "button", onClick: () => props.onInkDirtyChange?.(false) },
+				"saved-ink",
+			),
+			createElement(
+				"button",
+				{ type: "button", onClick: () => props.onInkModeChange?.(true) },
+				"arm-pen",
+			),
+			createElement(
+				"button",
+				{ type: "button", onClick: () => props.onInkModeChange?.(false) },
+				"disarm-pen",
+			),
+		);
+	},
+}));
+vi.mock("@/components/mobile/mobile-notes-editor", () => ({
+	MobileNotesEditor: ({
+		onDirtyChange,
+	}: {
+		onDirtyChange: (dirty: boolean) => void;
+	}) => {
+		const [draft, setDraft] = useState("");
+		useEffect(() => {
+			state.notesMounts += 1;
+		}, []);
+		return createElement("textarea", {
+			"aria-label": "test-notes",
+			value: draft,
+			onChange: (event: { target: { value: string } }) => {
+				setDraft(event.target.value);
+				onDirtyChange(true);
+			},
+		});
+	},
+}));
+vi.mock("@/components/mobile/remote/mobile-remote-agent-page", () => ({
+	MobileRemoteAgentPage: () => {
+		const [draft, setDraft] = useState("");
+		const [session, setSession] = useState("session-1");
+		useEffect(() => {
+			state.agentMounts += 1;
+		}, []);
+		return createElement(
+			"section",
+			{ "data-agent-document": true },
+			createElement("textarea", {
+				"aria-label": "test-agent",
+				value: draft,
+				onChange: (event: { target: { value: string } }) =>
+					setDraft(event.target.value),
+			}),
+			createElement("output", { "data-agent-session": true }, session),
+			createElement(
+				"button",
+				{ type: "button", onClick: () => setSession("session-2") },
+				"choose-session",
+			),
+		);
+	},
+}));
+vi.mock("@/components/mobile/mobile-agent-page", () => ({
+	MobileAgentPage: () => null,
+}));
+vi.mock("@/components/mobile/mobile-sidebar", () => ({
+	MobileSidebar: ({
+		open,
+		navigation,
+		onSync,
+		onClose,
+	}: {
+		open: boolean;
+		navigation: ReactNode;
+		onSync: () => void;
+		onClose: () => void;
+	}) =>
+		open
+			? createElement(
+					"aside",
+					null,
+					navigation,
+					createElement(
+						"button",
+						{
+							type: "button",
+							onClick: () => {
+								onSync();
+								onClose();
+							},
+						},
+						"open-sync",
+					),
+				)
+			: null,
+}));
+vi.mock("@/components/mobile/mobile-sync-panel", () => ({
+	MobileSyncPanel: ({
+		open,
+		onOpenChange,
+	}: {
+		open: boolean;
+		onOpenChange: (open: boolean) => void;
+	}) =>
+		open
+			? createElement(
+					"button",
+					{ type: "button", onClick: () => onOpenChange(false) },
+					"close-sync",
+				)
+			: null,
+}));
+vi.mock("@/components/mobile/mobile-pairing", () => ({
+	MobilePairing: ({ onDone }: { onDone: () => void }) =>
+		createElement(
+			"button",
+			{ type: "button", onClick: onDone },
+			"cancel-pairing",
+		),
+}));
+vi.mock("@/components/mobile/mobile-bridge-reset", () => ({
+	MobileBridgeReset: () => null,
+}));
+vi.mock("@/components/paper/paper-title", () => ({
+	PaperTitle: ({ text }: { text: string }) => text,
+}));
+
+import MobileApp from "@/components/mobile/mobile-app";
+
+let width = 599;
+let root: ReturnType<typeof createRoot>;
+let container: HTMLDivElement;
+const observers = new Set<() => void>();
+let ariaDisabledDescriptor: PropertyDescriptor | undefined;
+const paper = (id: string): PaperMetadata => ({
+	id,
+	path: `papers/${id}`,
+	type: "pdf",
+	title: `Paper ${id}`,
+	authors: [],
+	tags: [],
+	status: "completed",
+	is_read: false,
+	added_at: "2026-11-01",
+	updated_at: "2026-11-01",
+});
+const groupsWidth = (group: HTMLElement): number => {
+	const parentPanel = group.parentElement?.closest<HTMLElement>("[data-panel]");
+	return parentPanel
+		? panelWidth(parentPanel)
+		: width - (width >= 840 ? 80 : 0);
+};
+const panelWidth = (panel: HTMLElement): number => {
+	const group = panel.parentElement;
+	if (!group) return width;
+	const siblings = [...group.children].filter((element) =>
+		element.hasAttribute("data-panel"),
+	);
+	const total = siblings.reduce(
+		(sum, element) =>
+			sum + Number((element as HTMLElement).style.flexGrow || 1),
+		0,
+	);
+	const handles = [...group.children].filter(
+		(element) =>
+			element.hasAttribute("data-separator") &&
+			!(element as HTMLElement).hidden,
+	).length;
+	return (
+		(Math.max(0, groupsWidth(group) - handles) *
+			Number(panel.style.flexGrow || 1)) /
+		(total || 1)
+	);
+};
+const rect = (element: HTMLElement): DOMRect => {
+	const panel = element.hasAttribute("data-panel");
+	const separator = element.hasAttribute("data-separator");
+	const measuredWidth = panel
+		? panelWidth(element)
+		: separator
+			? element.hidden
+				? 0
+				: 1
+			: element.hasAttribute("data-group")
+				? groupsWidth(element)
+				: width;
+	const parent = element.parentElement;
+	const left = parent?.hasAttribute("data-group")
+		? [...parent.children]
+				.slice(0, [...parent.children].indexOf(element))
+				.reduce(
+					(sum, sibling) =>
+						sum +
+						(sibling.hasAttribute("data-panel")
+							? panelWidth(sibling as HTMLElement)
+							: (sibling as HTMLElement).hidden
+								? 0
+								: 1),
+					0,
+				)
+		: 0;
+	return {
+		x: left,
+		y: 0,
+		left,
+		top: 0,
+		right: left + measuredWidth,
+		bottom: 800,
+		width: measuredWidth,
+		height: 800,
+		toJSON: () => ({}),
+	};
+};
+async function resize(next: number) {
+	width = next;
+	await act(async () => {
+		for (const notify of [...observers]) notify();
+	});
+	// Container classification changes panel geometry in the next layout delivery.
+	await act(async () => {
+		for (const notify of [...observers]) notify();
+	});
+}
+async function click(label: string) {
+	const element = [
+		...document.querySelectorAll<HTMLButtonElement>("button"),
+	].find(
+		(button) =>
+			!button.closest("[hidden]") &&
+			(button.getAttribute("aria-label") === label ||
+				button.textContent === label),
+	);
+	expect(element, label).toBeDefined();
+	await act(async () => {
+		element?.click();
+	});
+	await act(async () => {
+		for (const notify of [...observers]) notify();
+	});
+}
+async function fill(label: string, value: string) {
+	const field = container.querySelector<HTMLTextAreaElement>(
+		`[aria-label="${label}"]`,
+	);
+	expect(field).not.toBeNull();
+	await act(() => {
+		Object.getOwnPropertyDescriptor(
+			HTMLTextAreaElement.prototype,
+			"value",
+		)?.set?.call(field, value);
+		field?.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+}
+function pane(id: string) {
+	return container.querySelector<HTMLElement>(`[data-workspace-pane="${id}"]`);
+}
+async function ready() {
+	await vi.waitFor(async () => {
+		await act(async () => {});
+		expect(state.pdf).not.toBeNull();
+	});
+}
+
+beforeEach(async () => {
+	vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+	// happy-dom omits the standard ARIA reflection used by the real resize library.
+	ariaDisabledDescriptor = Object.getOwnPropertyDescriptor(
+		HTMLElement.prototype,
+		"ariaDisabled",
+	);
+	Object.defineProperty(HTMLElement.prototype, "ariaDisabled", {
+		configurable: true,
+		get() {
+			return this.getAttribute("aria-disabled");
+		},
+	});
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			callback: () => void;
+			elements = new Set<HTMLElement>();
+			constructor(callback: ResizeObserverCallback) {
+				this.callback = () =>
+					callback(
+						[...this.elements].map((element) => ({
+							target: element,
+							contentRect: rect(element),
+							borderBoxSize: [
+								{ inlineSize: rect(element).width, blockSize: 800 },
+							],
+							contentBoxSize: [
+								{ inlineSize: rect(element).width, blockSize: 800 },
+							],
+							devicePixelContentBoxSize: [
+								{ inlineSize: rect(element).width, blockSize: 800 },
+							],
+						})),
+						this,
+					);
+				observers.add(this.callback);
+			}
+			observe(element: Element) {
+				if (element instanceof HTMLElement) this.elements.add(element);
+			}
+			unobserve(element: Element) {
+				if (element instanceof HTMLElement) this.elements.delete(element);
+			}
+			disconnect() {
+				this.elements.clear();
+				observers.delete(this.callback);
+			}
+		},
+	);
+	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+		function () {
+			return rect(this);
+		},
+	);
+	vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(
+		function () {
+			return rect(this).width;
+		},
+	);
+	vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(800);
+	vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(
+		function () {
+			return rect(this).left;
+		},
+	);
+	vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockReturnValue(0);
+	width = 599;
+	observers.clear();
+	vi.clearAllMocks();
+	state.papers = [paper("first"), paper("second")];
+	state.pdf = null;
+	state.pdfMounts = 0;
+	state.notesMounts = 0;
+	state.agentMounts = 0;
+	state.load.mockResolvedValue({ source: null, bytes: state.bytes });
+	container = document.createElement("div");
+	document.body.appendChild(container);
+	root = createRoot(container);
+	await act(async () => {
+		root.render(createElement(MobileApp));
+	});
+});
+afterEach(async () => {
+	await act(() => root.unmount());
+	container.remove();
+	vi.restoreAllMocks();
+	if (ariaDisabledDescriptor)
+		Object.defineProperty(
+			HTMLElement.prototype,
+			"ariaDisabled",
+			ariaDisabledDescriptor,
+		);
+	else Reflect.deleteProperty(HTMLElement.prototype, "ariaDisabled");
+	vi.unstubAllGlobals();
+	observers.clear();
+});
+
+describe("stable tablet workspace DOM", () => {
+	it("adapts 599/600/839/840 and presets without replacing PDF bytes, position, notes draft, or Agent session", async () => {
+		await click("Paper first");
+		await ready();
+		const pdf = container.querySelector("[data-pdf-document]");
+		const notes = container.querySelector('[aria-label="test-notes"]');
+		const agent = container.querySelector("[data-agent-document]");
+		await click("change-reading-position");
+		await click("reader.notes");
+		await fill("test-notes", "unsaved analysis");
+		await resize(600);
+		expect(
+			container
+				.querySelector("[data-workspace-width]")
+				?.getAttribute("data-workspace-width"),
+		).toBe("medium");
+		expect(pane("pdf")?.hidden).toBe(false);
+		expect(pane("notes")?.hidden).toBe(false);
+		await click("workspace.discuss");
+		await fill("test-agent", "unsent question");
+		await click("choose-session");
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(pane("agent")?.hidden).toBe(false);
+		expect(pane("notes")?.hidden).toBe(true);
+		await resize(839);
+		expect(pane("library")?.hidden).toBe(true);
+		await resize(840);
+		expect(pane("library")?.hidden).toBe(false);
+		await click("workspace.compare");
+		expect(pane("agent")?.hidden).toBe(true);
+		await resize(599);
+		expect(pane("pdf")?.hidden).toBe(true);
+		expect(pane("notes")?.hidden).toBe(false);
+		await click("tabs.agent");
+		expect(pane("agent")?.hidden).toBe(false);
+		expect(pane("reader")?.hidden).toBe(true);
+		await resize(840);
+		await click("workspace.read");
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(container.querySelector('[aria-label="test-notes"]')).toBe(notes);
+		expect(container.querySelector("[data-agent-document]")).toBe(agent);
+		expect(container.querySelector("[data-position]")?.textContent).toBe(
+			"7:175",
+		);
+		expect((notes as HTMLTextAreaElement).value).toBe("unsaved analysis");
+		expect(
+			container.querySelector<HTMLTextAreaElement>('[aria-label="test-agent"]')
+				?.value,
+		).toBe("unsent question");
+		expect(container.querySelector("[data-agent-session]")?.textContent).toBe(
+			"session-2",
+		);
+		expect(state.pdf?.sourceBytes).toBe(state.bytes);
+		expect(state.load).toHaveBeenCalledTimes(1);
+		expect([state.pdfMounts, state.notesMounts, state.agentMounts]).toEqual([
+			1, 1, 1,
+		]);
+	});
+
+	it("keeps the reader mounted for Agent navigation, sync and pairing while guarding dirty replacement/back", async () => {
+		await resize(840);
+		await click("Paper first");
+		await ready();
+		const pdf = container.querySelector("[data-pdf-document]");
+		await click("workspace.compare");
+		await fill("test-notes", "keep this draft");
+		await click("Paper second");
+		expect(state.pdf?.paperRelPath).toBe("papers/first");
+		await click("reader.back");
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		await click("tabs.agent");
+		await click("tabs.library");
+		await click("settings.menu");
+		await click("open-sync");
+		await click("close-sync");
+		await click("workspace.discuss");
+		const provider = container.querySelector<HTMLSelectElement>(
+			'[aria-label="remote.provider"]',
+		);
+		await act(() => {
+			if (provider) {
+				provider.value = "agentero-bridge";
+				provider.dispatchEvent(new Event("change", { bubbles: true }));
+			}
+		});
+		await click("connect.title");
+		await click("cancel-pairing");
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(state.pdfMounts).toBe(1);
+	});
+
+	it("resizes through the public separator and restores the user's split after switching presets", async () => {
+		await resize(600);
+		await click("Paper first");
+		await ready();
+		await click("workspace.compare");
+		const separator = container.querySelector<HTMLElement>(
+			"#mobile-document-pdf-separator",
+		);
+		expect(separator).not.toBeNull();
+		const before = Number(separator?.getAttribute("aria-valuenow"));
+		await act(() => {
+			separator?.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+			);
+		});
+		const keyed = Number(separator?.getAttribute("aria-valuenow"));
+		expect(keyed).toBeGreaterThan(before);
+		const x = separator?.getBoundingClientRect().left ?? 0;
+		await act(() => {
+			separator?.dispatchEvent(
+				new PointerEvent("pointerdown", {
+					pointerType: "mouse",
+					isPrimary: true,
+					pointerId: 1,
+					button: 0,
+					buttons: 1,
+					clientX: x,
+					clientY: 300,
+					bubbles: true,
+				}),
+			);
+			document.dispatchEvent(
+				new PointerEvent("pointermove", {
+					pointerType: "mouse",
+					isPrimary: true,
+					pointerId: 1,
+					button: 0,
+					buttons: 1,
+					clientX: x + 35,
+					clientY: 300,
+					bubbles: true,
+				}),
+			);
+			document.dispatchEvent(
+				new PointerEvent("pointerup", {
+					pointerType: "mouse",
+					isPrimary: true,
+					pointerId: 1,
+					button: 0,
+					clientX: x + 35,
+					clientY: 300,
+					bubbles: true,
+				}),
+			);
+		});
+		const dragged = Number(separator?.getAttribute("aria-valuenow"));
+		expect(dragged).toBeGreaterThan(keyed);
+		await click("workspace.read");
+		await click("workspace.compare");
+		expect(Number(separator?.getAttribute("aria-valuenow"))).toBeCloseTo(
+			dragged,
+			1,
+		);
+		expect(state.pdfMounts).toBe(1);
+		expect(state.notesMounts).toBe(1);
+	});
+
+	it("treats unsaved ink independently from clean notes and keeps armed tools out of edge navigation", async () => {
+		await click("Paper first");
+		await ready();
+		await click("unsaved-ink");
+		await click("reader.back");
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		expect(container.querySelector("[data-pdf-document]")).not.toBeNull();
+		await click("saved-ink");
+		await click("arm-pen");
+		const edge = pane("reader")?.firstElementChild as HTMLElement;
+		const send = (type: string, x: number, touches: boolean) => {
+			const event = new Event(type, { bubbles: true, cancelable: true });
+			Object.defineProperties(event, {
+				touches: { value: touches ? [{ clientX: x, clientY: 20 }] : [] },
+				changedTouches: { value: [{ clientX: x, clientY: 20 }] },
+			});
+			edge.dispatchEvent(event);
+			return event;
+		};
+		await act(() => {
+			send("touchstart", 2, true);
+			send("touchmove", 130, true);
+			send("touchend", 130, false);
+		});
+		expect(container.querySelector("[data-pdf-document]")).not.toBeNull();
+		await click("disarm-pen");
+		await click("reader.back");
+		expect(container.querySelector("[data-pdf-document]")).toBeNull();
+	});
+});

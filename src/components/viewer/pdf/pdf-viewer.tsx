@@ -53,6 +53,7 @@ import { PdfBottomBar } from "@/components/viewer/pdf/chrome/pdf-bottom-bar";
 import { PdfCardStack } from "@/components/viewer/pdf/chrome/pdf-card-stack";
 import { PdfFiguresPanel } from "@/components/viewer/pdf/chrome/pdf-figures-panel";
 import { PdfFindBar } from "@/components/viewer/pdf/chrome/pdf-find-bar";
+import { PdfInkToolbar } from "@/components/viewer/pdf/chrome/pdf-ink-toolbar";
 import { PdfJumpBackChip } from "@/components/viewer/pdf/chrome/pdf-jump-back-chip";
 import { PdfLeftToolbar } from "@/components/viewer/pdf/chrome/pdf-left-toolbar";
 import { PdfOutlinePanel } from "@/components/viewer/pdf/chrome/pdf-outline-panel";
@@ -68,6 +69,7 @@ import { usePdfCitations } from "@/components/viewer/pdf/hooks/use-pdf-citations
 import { usePdfCrossrefPreview } from "@/components/viewer/pdf/hooks/use-pdf-crossref-preview";
 import { usePdfFind } from "@/components/viewer/pdf/hooks/use-pdf-find";
 import { usePdfHighlights } from "@/components/viewer/pdf/hooks/use-pdf-highlights";
+import { usePdfInk } from "@/components/viewer/pdf/hooks/use-pdf-ink";
 import { usePdfJumpBack } from "@/components/viewer/pdf/hooks/use-pdf-jump-back";
 import { usePdfLayoutCluster } from "@/components/viewer/pdf/hooks/use-pdf-layout-cluster";
 import { usePdfLinkInk } from "@/components/viewer/pdf/hooks/use-pdf-link-ink";
@@ -125,6 +127,7 @@ import type {
 } from "@/components/viewer/pdf/types";
 import { ActiveCardScrollSync } from "@/components/viewer/pdf/viewport/active-card-scroll-sync";
 import { DockviewViewport } from "@/components/viewer/pdf/viewport/dockview-viewport";
+import { InkInputBridge } from "@/components/viewer/pdf/viewport/ink-input-bridge";
 import { KeyboardScrollHandler } from "@/components/viewer/pdf/viewport/keyboard-scroll-handler";
 import { PanDragHandler } from "@/components/viewer/pdf/viewport/pan-handler";
 import { PdfScroller } from "@/components/viewer/pdf/viewport/pdf-scroller";
@@ -141,6 +144,7 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { markOnce } from "@/lib/core/perf";
+import { isMobileApp } from "@/lib/core/tauri";
 import { cn } from "@/lib/core/utils";
 import { isPdfViewerSource } from "@/lib/paper";
 import { arxivUrls } from "@/lib/paper/arxiv";
@@ -157,6 +161,10 @@ import {
 import { embedPdfDocumentId } from "@/lib/pdf/document-id";
 import { HIGHLIGHT_HEX_LIST } from "@/lib/pdf/highlight/palette";
 import { partitionHighlightPaint } from "@/lib/pdf/highlight/translated-geometry";
+import {
+	exportInkPdfCopy,
+	inkExportDestinationAllowed,
+} from "@/lib/pdf/ink/export";
 import {
 	getPdfAiRuntime,
 	layoutAnalysisStore,
@@ -502,6 +510,9 @@ function pdfSelectionMenuContext(input: {
 
 function PdfViewerInner({
 	runtime,
+	onInkDirtyChange,
+	onInkModeChange,
+	onInkExport,
 	docId,
 	baseDocId,
 	embeddedTarget,
@@ -1322,6 +1333,73 @@ function PdfViewerInner({
 		reflowOutput,
 		docId,
 	);
+	const mobileInk =
+		(runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
+	const inkEditable =
+		mobileInk &&
+		!layoutTranslateActive &&
+		!reflowDisplayDocumentId &&
+		!embeddedTarget &&
+		!translationPane;
+	const { editor: inkEditor, mode: inkMode } = usePdfInk({
+		vaultPath,
+		paperRelPath,
+		enabled:
+			!plainViewer && !isRemotePaper && !translationOnly && !translationPane,
+		editable: inkEditable,
+		isActive,
+		onInkDirtyChange,
+		onInkModeChange,
+	});
+	const inkPageSize = useCallback(
+		(page: number) =>
+			docCapRef.current?.getDocument(docId)?.pages[page - 1]?.size ?? null,
+		[docId],
+	);
+	const handleExportInk = useCallback(async () => {
+		if (!inkEditor) return;
+		try {
+			const pages = await inkEditor.controller.exportPages(totalPages);
+			const document = docCapRef.current?.getDocument(docId);
+			if (!engine || !document) throw new Error(t("figures.viewerUnavailable"));
+			// saveAsCopy never writes the original PDF or the annotation sidecars.
+			const original = new Uint8Array(
+				await engine.saveAsCopy(document).toPromise(),
+			);
+			const bytes = await exportInkPdfCopy(original, pages);
+			const name = `${paperAbsPath ? basenameOf(paperAbsPath) : "paper"}-ink.pdf`;
+			if (onInkExport) await onInkExport(bytes, name);
+			else if (!mobileInk) {
+				const { save } = await import("@tauri-apps/plugin-dialog");
+				const path = await save({
+					defaultPath: name,
+					filters: [{ name: "PDF", extensions: ["pdf"] }],
+				});
+				if (path) {
+					if (!paperAbsPath || !inkExportDestinationAllowed(path, paperAbsPath))
+						throw new Error(t("ink.exportCopyOnly"));
+					const { writeVaultBytes } = await import("@/lib/vault/fs");
+					await writeVaultBytes(path, bytes);
+				}
+			}
+		} catch (error) {
+			notifyError(t("ink.exportFailed"), {
+				description:
+					error instanceof Error && error.message !== "ink.unsaved"
+						? error.message
+						: t("ink.unsaved"),
+			});
+		}
+	}, [
+		inkEditor,
+		totalPages,
+		docId,
+		engine,
+		t,
+		paperAbsPath,
+		onInkExport,
+		mobileInk,
+	]);
 
 	usePdfTranslationSelection({
 		enabled: layoutTranslateActive && !translationOnly && !plainViewer,
@@ -1651,6 +1729,16 @@ function PdfViewerInner({
 		plainViewer,
 	});
 
+	const handleToggleReaderRegion = useCallback(() => {
+		inkEditor?.setMode("read");
+		toggleRegionSelect();
+	}, [inkEditor, toggleRegionSelect]);
+	useEffect(() => {
+		if (inkMode === "read") return;
+		closeSelectionMenu();
+		if (regionSelecting) toggleRegionSelect();
+	}, [inkMode, regionSelecting, toggleRegionSelect, closeSelectionMenu]);
+
 	// ---- Selection action menu ----
 
 	const {
@@ -1850,7 +1938,7 @@ function PdfViewerInner({
 		openThread,
 		deleteVisualTraceById,
 		deleteHighlightAnnotation,
-		toggleRegionSelect,
+		toggleRegionSelect: handleToggleReaderRegion,
 		// Dual-pane aware — ⌥A and the toolbar Languages button share this path.
 		toggleLayoutTranslate: handleToggleLayoutTranslateWithDualPane,
 	});
@@ -1989,6 +2077,7 @@ function PdfViewerInner({
 			visualCropPending,
 			visualDraftOpen: false,
 			insetCommentCards: !reserveCommentRail,
+			inkEditing: inkEditable && inkMode !== "read",
 			translationOnly,
 			plainViewer,
 		}),
@@ -1998,6 +2087,8 @@ function PdfViewerInner({
 			translationOnly,
 			plainViewer,
 			reserveCommentRail,
+			inkEditable,
+			inkMode,
 		],
 	);
 
@@ -2137,6 +2228,9 @@ function PdfViewerInner({
 	const renderPage = useCallback(
 		({ pageIndex, width, height, rotatedWidth, rotatedHeight }: PageLayout) => (
 			<PdfPageLayers
+				inkEditor={
+					!layoutTranslateActive && !reflowDisplayDocumentId ? inkEditor : null
+				}
 				bookmarkSaving={Boolean(bookmarkEditor.draft?.saving)}
 				onBookmarkPage={bookmarkEditor.canEdit ? handleBookmarkPage : undefined}
 				pageBookmarked={bookmarkedPages.has(pageIndex)}
@@ -2161,6 +2255,8 @@ function PdfViewerInner({
 			/>
 		),
 		[
+			inkEditor,
+			layoutTranslateActive,
 			docId,
 			paperRelPath,
 			paperAbsPath,
@@ -2508,7 +2604,7 @@ function PdfViewerInner({
 					regionSelecting={regionSelecting}
 					visualCropPending={visualCropPending}
 					engine={engine}
-					onToggleRegionSelect={toggleRegionSelect}
+					onToggleRegionSelect={handleToggleReaderRegion}
 					layoutTranslateRunning={layoutTranslateRunning}
 					layoutTranslatePreparing={layoutTranslatePreparing}
 					layoutTranslateWaiting={layoutTranslateWaiting}
@@ -2553,6 +2649,12 @@ function PdfViewerInner({
 						toggleOutline();
 				}}
 			>
+				<InkInputBridge
+					editor={inkEditor}
+					documentId={docId}
+					enabled={inkEditable && isActive}
+					docCapRef={docCapRef}
+				/>
 				<WheelZoomHandler docId={docId} />
 				<KeyboardScrollHandler
 					documentId={docId}
@@ -2603,6 +2705,14 @@ function PdfViewerInner({
 				/>
 			)}
 
+			{inkEditor && !translationOnly && !embeddedTarget && (
+				<PdfInkToolbar
+					editor={inkEditor}
+					editable={inkEditable}
+					pageSize={inkPageSize}
+					onExport={!mobileInk || onInkExport ? handleExportInk : undefined}
+				/>
+			)}
 			{!translationOnly && (!plainViewer || showBottomBar) && (
 				<PdfBottomBar
 					currentPage={currentPage}

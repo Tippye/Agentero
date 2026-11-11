@@ -1,4 +1,26 @@
 {
+	"ink": {
+		"tools": "Handwriting tools",
+		"read": "Read and navigate",
+		"pen": "Pen",
+		"highlighter": "Highlighter",
+		"eraser": "Erase a stroke",
+		"lasso": "Lasso selection",
+		"color": "Ink color",
+		"width": "Stroke width",
+		"undo": "Undo handwriting",
+		"redo": "Redo handwriting",
+		"copy": "Copy selected strokes",
+		"delete": "Delete selected strokes",
+		"retry": "Retry saving handwriting",
+		"discard": "Discard unsaved handwriting",
+		"export": "Export PDF with handwriting",
+		"exportCopyOnly": "Save the annotated copy outside the original paper folder.",
+		"exportFailed": "The annotated PDF copy could not be saved.",
+		"saveFailed": "Handwriting could not be saved. Your pending changes are still available.",
+		"conflict": "Handwriting changed on disk. Review the current page before retrying your pending changes.",
+		"unsaved": "Finish saving or discard the pending handwriting before leaving."
+	},
 	"pdf": {
 		"empty": "No paper available.",
 		"loading": "Loading PDF…",

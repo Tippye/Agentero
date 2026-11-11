@@ -48,6 +48,12 @@ export type SuggestedHighlight = {
 export type PdfViewerProps = {
 	/** Host workflow capabilities; inferred from isMobileApp when omitted. */
 	runtime?: import("./capabilities").PdfViewerRuntime;
+	/** Includes an active pen stroke, saves in flight, and retained failed edits. */
+	onInkDirtyChange?: (dirty: boolean) => void;
+	/** True while an ink editing tool is armed; suppress parent edge-back gestures. */
+	onInkModeChange?: (active: boolean) => void;
+	/** Mobile save/share routing; desktop defaults to the native save dialog. */
+	onInkExport?: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
 	/**
 	 * PDF source: local `blob:` (bytes via fs) or remote https. Prefer local
 	 * vault PDF; remote URL is fallback when download fails.
