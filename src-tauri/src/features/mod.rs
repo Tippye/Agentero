@@ -21,6 +21,7 @@ pub mod host_hooks;
 pub mod jobs;
 
 pub mod lifecycle;
+pub mod remote_agent;
 
 #[path = "../app/open_request/mod.rs"]
 pub mod open_request;
