@@ -331,7 +331,7 @@ describe("mobile local-first shell", () => {
 				.querySelector<HTMLButtonElement>('[aria-label="reader.back"]')
 				?.click(),
 		);
-		expect(state.error).toHaveBeenCalledWith("reader.unsavedNotes");
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
 		expect(host.querySelector("[data-reader]")).not.toBeNull();
 		await act(() => state.dirty?.(false));
 		await act(() =>

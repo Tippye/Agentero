@@ -1,4 +1,26 @@
 {
+	"ink": {
+		"tools": "手写工具",
+		"read": "阅读与导航",
+		"pen": "钢笔",
+		"highlighter": "荧光笔",
+		"eraser": "按笔擦除",
+		"lasso": "套索选择",
+		"color": "笔迹颜色",
+		"width": "笔迹宽度",
+		"undo": "撤销手写",
+		"redo": "重做手写",
+		"copy": "复制所选笔迹",
+		"delete": "删除所选笔迹",
+		"retry": "重试保存笔迹",
+		"discard": "丢弃未保存的笔迹",
+		"export": "导出带手写批注的 PDF",
+		"exportCopyOnly": "请将带批注的副本保存到原论文目录之外。",
+		"exportFailed": "带批注的 PDF 副本保存失败。",
+		"saveFailed": "笔迹保存失败，待保存的修改仍已保留。",
+		"conflict": "磁盘上的笔迹已变化，请查看当前页面后重试待保存的修改。",
+		"unsaved": "请完成保存或丢弃待保存的笔迹后再离开。"
+	},
 	"pdf": {
 		"empty": "暂无论文。",
 		"loading": "正在加载 PDF…",

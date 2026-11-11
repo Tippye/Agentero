@@ -65,7 +65,9 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 
 `MemStore`（`engine.rs` 测试内的内存 `RemoteStore`，带请求计数与可注入的 PUT 配额）覆盖这三条：`idle_pass_costs_one_request`、`idle_devices_do_not_ping_pong_head`（含「真实改动仍会发布并被对端拉取」）、`interrupted_upload_resumes_without_resending`；日志本身的追加/去重/换 store 失效在 `local.rs` 测试内。
 
-合并规则：单侧改动直接采纳；双侧同改 `*.md` 保留 mtime 较新者、较旧者存为 `<name> (conflict <时间).md`；`*.table.json` 同样保留两份，冲突副本保留完整 `.table.json` 扩展名以便在科研表格编辑器中核对；其余文件（sidecar/marks/二进制）按 mtime LWW；删除 vs 修改保留修改。Git 使用自身合并与冲突流程。
+合并规则：单侧改动直接采纳；双侧同改 `*.md` 保留 mtime 较新者、较旧者存为 `<name> (conflict <时间).md`；`*.table.json` 同样保留两份，冲突副本保留完整 `.table.json` 扩展名以便在科研表格编辑器中核对。规范的 `marks/annotations.json` 与逐页 `marks/ink/pN.json` 按 ID 和逻辑版本合并，删除使用墓碑，未知或冲突载荷保留原始副本；其余 sidecar/二进制按 mtime LWW。删除 vs 修改保留修改。Git 使用自身合并与冲突流程。
+
+笔迹的本地发布还须保持[原生保存](pdf-ink.md)的持久性：规范逐页文件及完整 SHA-256 命名的原始冲突副本先 flush 临时文件，再 rename，Unix 随后 flush ink、marks 与论文目录；只有这些步骤成功，pass 才继续上传、HEAD 与 base 推进。重命名后的 flush 失败返回 `sync_ink_durability_uncertain`，保留可能已可见的新字节，不能回滚或把错误解释成原文件未变。重试时，即便相同冲突副本已经存在，也先重新确认其落盘，再替换可能持有唯一已确认笔迹的规范文件。此规则不扩展其他文件的既有同步 IO 策略。
 
 ## 同步范围（Sync Scope）
 

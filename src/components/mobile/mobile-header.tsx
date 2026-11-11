@@ -12,6 +12,7 @@ export function MobileHeader({
 	onBrandClick,
 	showBrand = true,
 	showStatus = true,
+	wide = false,
 	leading,
 	trailing,
 }: {
@@ -23,18 +24,24 @@ export function MobileHeader({
 	onBrandClick?: () => void;
 	showBrand?: boolean;
 	showStatus?: boolean;
+	wide?: boolean;
 	leading?: ReactNode;
 	trailing?: ReactNode;
 }) {
 	return (
-		<header className="fixed inset-x-0 top-0 z-30 flex h-16 shrink-0 select-none items-center gap-3 border-b bg-background px-4 md:static md:h-auto md:min-h-16 md:px-6">
+		<header
+			className={cn(
+				"relative z-30 flex min-h-16 shrink-0 select-none items-center gap-3 border-b bg-background px-4",
+				wide && "px-6",
+			)}
+		>
 			{leading}
 			<div className="flex min-w-0 flex-1 items-center gap-2">
-				<div className={cn("md:hidden", !showBrand && "hidden")}>
+				<div className={cn((wide || !showBrand) && "hidden")}>
 					{onBrandClick ? (
 						<button
 							type="button"
-							className="rounded-md outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring active:opacity-70"
+							className="grid size-11 place-items-center rounded-md outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring active:opacity-70"
 							aria-label={brandButtonLabel}
 							onClick={onBrandClick}
 						>

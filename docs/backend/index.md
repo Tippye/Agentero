@@ -124,6 +124,7 @@ ACP / SSH 子进程由 Rust 与 ACP SDK 启动，不注册 Tauri shell 插件。
 | 知乎接入（内置 Agent / 开放平台） | [zhihu.md](zhihu.md) |
 | 远程 Vault | [remote.md](remote.md) |
 | 云同步（S3 / WebDAV / Git） | [sync.md](sync.md) |
+| PDF 笔迹、原生 CAS 与副本导出 | [pdf-ink.md](pdf-ink.md) |
 | 搜索 | [search.md](search.md) |
 | 设置 | [settings.md](settings.md) |
 | 本地桌面应用检测 | [desktop-apps.md](desktop-apps.md) |

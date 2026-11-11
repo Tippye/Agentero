@@ -7386,6 +7386,7 @@ dependencies = [
  "paste",
  "rustc_version",
  "specta-macros",
+ "uuid",
 ]
 
 [[package]]

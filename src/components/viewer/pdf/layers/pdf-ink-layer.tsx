@@ -1,0 +1,116 @@
+import { memo, useEffect, useSyncExternalStore } from "react";
+import type { InkEditor } from "@/lib/pdf/ink/editor";
+import {
+	type InkShape,
+	inkBounds,
+	inkOutline,
+	inkSvgPath,
+} from "@/lib/pdf/ink/geometry";
+
+const outlines = new WeakMap<InkShape, string>();
+const InkPath = memo(function InkPath({
+	stroke,
+	complete = true,
+	dim = false,
+}: {
+	stroke: InkShape;
+	complete?: boolean;
+	dim?: boolean;
+}) {
+	let d = complete ? outlines.get(stroke) : undefined;
+	if (d === undefined) {
+		d = inkSvgPath(inkOutline(stroke, complete));
+		if (complete) outlines.set(stroke, d);
+	}
+	const [r, g, b, a] = stroke.color;
+	return (
+		<path
+			d={d}
+			fill={`rgb(${r},${g},${b})`}
+			opacity={(a / 255) * (dim ? 0.25 : 1)}
+			style={{
+				mixBlendMode: stroke.tool === "highlighter" ? "multiply" : "normal",
+			}}
+		/>
+	);
+});
+
+/** The existing UnrotatedPageFrame owns page rotation and CSS zoom. */
+export const PdfInkLayer = memo(function PdfInkLayer({
+	editor,
+	page,
+	width,
+	height,
+}: {
+	editor: InkEditor;
+	page: number;
+	width: number;
+	height: number;
+}) {
+	const state = useSyncExternalStore(editor.controller.subscribe, () =>
+		editor.controller.getPage(page),
+	);
+	const tools = useSyncExternalStore(editor.subscribe, editor.getState);
+	useEffect(() => {
+		void editor.controller.load(page);
+	}, [editor, page]);
+	const moving = tools.moving?.page === page ? tools.moving.strokes : null;
+	const movedIds = new Set(moving?.map((stroke) => stroke.id));
+	const erasedIds = new Set(
+		tools.erasing?.page === page ? tools.erasing.ids : [],
+	);
+	const strokes = moving
+		? [...state.strokes.filter((stroke) => !movedIds.has(stroke.id)), ...moving]
+		: state.strokes;
+	const selection =
+		tools.selection?.page === page
+			? inkBounds(
+					strokes.filter((stroke) => tools.selection?.ids.includes(stroke.id)),
+				)
+			: null;
+	const lasso = tools.lasso?.page === page ? tools.lasso.points : null;
+	return (
+		<svg
+			data-pdf-ink-page={page}
+			data-ink-ready={!!state.snapshot && !state.loading && !state.error}
+			aria-hidden="true"
+			className="pointer-events-none absolute inset-0 z-[9] overflow-hidden"
+			width="100%"
+			height="100%"
+			viewBox={`0 0 ${width} ${height}`}
+		>
+			{strokes.map((stroke) => (
+				<InkPath
+					key={stroke.id}
+					stroke={stroke}
+					dim={erasedIds.has(stroke.id)}
+				/>
+			))}
+			{tools.draft?.page === page && (
+				<InkPath stroke={tools.draft.stroke} complete={false} />
+			)}
+			{selection && (
+				<rect
+					{...selection}
+					fill="none"
+					stroke="var(--primary)"
+					strokeWidth={1}
+					strokeDasharray="4 3"
+					vectorEffect="non-scaling-stroke"
+				/>
+			)}
+			{lasso && (
+				<path
+					d={lasso
+						.map((point, index) => `${index ? "L" : "M"}${point.x},${point.y}`)
+						.join(" ")}
+					fill="none"
+					stroke="var(--primary)"
+					strokeWidth={1.5}
+					strokeDasharray="4 3"
+					vectorEffect="non-scaling-stroke"
+				/>
+			)}
+		</svg>
+	);
+});

@@ -66,6 +66,7 @@ import { CommentCardsLayer } from "@/components/viewer/pdf/layers/comment-cards-
 import { HighlightAnnotationMenu } from "@/components/viewer/pdf/layers/highlight-annotation-menu";
 import { LayoutTranslateOverlay } from "@/components/viewer/pdf/layers/layout-translate-overlay";
 import { PASSIVE_LINK_RENDERER } from "@/components/viewer/pdf/layers/link-annotation";
+import { PdfInkLayer } from "@/components/viewer/pdf/layers/pdf-ink-layer";
 import { PdfTextSelectionLayer } from "@/components/viewer/pdf/layers/pdf-text-selection-layer";
 import {
 	PASSIVE_HIGHLIGHT_RENDERER,
@@ -99,6 +100,7 @@ import {
 	sentenceHighlightTints,
 } from "@/lib/pdf/highlight/sentence-tint";
 import type { HighlightQuoteTint } from "@/lib/pdf/highlight/translated-geometry";
+import type { InkEditor } from "@/lib/pdf/ink/editor";
 import {
 	isLayoutRegionActivation,
 	isLayoutTranslateItemPainted,
@@ -421,6 +423,7 @@ export type PdfPageLayoutSlice = {
 
 /** Interaction modes that unmount or gate page layers. */
 export type PdfPageModeSlice = {
+	inkEditing?: boolean;
 	regionSelecting: boolean;
 	visualCropPending: boolean;
 	visualDraftOpen: boolean;
@@ -502,6 +505,7 @@ type AnnotationCapabilityProvides = ReturnType<
 >["provides"];
 
 export type PdfPageLayersProps = {
+	inkEditor?: InkEditor | null;
 	onBookmarkPage?: (pageIndex: number) => void;
 	pageBookmarked?: boolean;
 	bookmarkSaving?: boolean;
@@ -613,6 +617,7 @@ const PageTranslateTab = memo(function PageTranslateTab({
 });
 
 export const PdfPageLayers = memo(function PdfPageLayers({
+	inkEditor,
 	onBookmarkPage,
 	pageBookmarked = false,
 	bookmarkSaving = false,
@@ -1291,6 +1296,21 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				</button>
 			)}
 			{paperRaster}
+			{inkEditor && !reflowDocumentId && !mode.plainViewer && (
+				<UnrotatedPageFrame
+					rotation={pageRotation}
+					widthPx={frameWidth}
+					heightPx={frameHeight}
+					className="z-[9]"
+				>
+					<PdfInkLayer
+						editor={inkEditor}
+						page={pageIndex + 1}
+						width={pageSize?.width ?? frameWidth / pageScale}
+						height={pageSize?.height ?? frameHeight / pageScale}
+					/>
+				</UnrotatedPageFrame>
+			)}
 			<SearchLayer
 				documentId={docId}
 				pageIndex={pageIndex}
@@ -1317,7 +1337,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					className="z-[5]"
 				>
 					{/* Unmount text selection while framing a visual region. */}
-					{mode.regionSelecting ? null : (
+					{mode.regionSelecting || mode.inkEditing ? null : (
 						<PdfTextSelectionLayer
 							documentId={docId}
 							pageIndex={pageIndex}

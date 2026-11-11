@@ -1,4 +1,12 @@
-import { BookOpen, Check, ChevronDown, FileText, History } from "lucide-react";
+import {
+	BookOpen,
+	Check,
+	ChevronDown,
+	Columns2,
+	FileText,
+	History,
+	MessagesSquare,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
@@ -10,6 +18,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { AgentDescriptor } from "@/lib/agent/api";
 import { cn } from "@/lib/core/utils";
+import type {
+	MobileWorkspacePreset,
+	MobileWorkspaceWidth,
+} from "@/lib/mobile/workspace";
 
 const MODES: Array<{ id: MobileReaderMode; icon: typeof BookOpen }> = [
 	{ id: "pdf", icon: BookOpen },
@@ -19,11 +31,68 @@ const MODES: Array<{ id: MobileReaderMode; icon: typeof BookOpen }> = [
 export function MobileReaderModeToggle({
 	mode,
 	onChange,
+	preset = "read",
+	widthClass = "narrow",
+	onPresetChange,
 }: {
 	mode: MobileReaderMode;
 	onChange: (mode: MobileReaderMode) => void;
+	preset?: MobileWorkspacePreset;
+	widthClass?: MobileWorkspaceWidth;
+	onPresetChange?: (preset: MobileWorkspacePreset) => void;
 }) {
 	const { t } = useTranslation("mobile");
+	if (onPresetChange) {
+		const choices: {
+			id: MobileWorkspacePreset;
+			icon: typeof BookOpen;
+			label: string;
+		}[] = [
+			{
+				id: "read",
+				icon: BookOpen,
+				label: widthClass === "narrow" ? t("reader.pdf") : t("workspace.read"),
+			},
+			{
+				id: "compare",
+				icon: Columns2,
+				label:
+					widthClass === "narrow" ? t("reader.notes") : t("workspace.compare"),
+			},
+			{
+				id: "discuss",
+				icon: MessagesSquare,
+				label:
+					widthClass === "narrow" ? t("tabs.agent") : t("workspace.discuss"),
+			},
+		];
+		return (
+			<div
+				role="toolbar"
+				aria-label={t("workspace.presets")}
+				className="flex shrink-0 gap-0.5 rounded-lg border bg-muted p-0.5"
+			>
+				{choices.map(({ id, icon: Icon, label }) => (
+					<button
+						key={id}
+						type="button"
+						aria-label={label}
+						aria-pressed={preset === id}
+						onClick={() => onPresetChange(id)}
+						className={cn(
+							"flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-2",
+							preset === id && "bg-background shadow-raised",
+						)}
+					>
+						<Icon className="size-4" />
+						{widthClass !== "narrow" ? (
+							<span className="text-sm">{label}</span>
+						) : null}
+					</button>
+				))}
+			</div>
+		);
+	}
 	return (
 		<div className="flex shrink-0 rounded-lg border bg-muted p-0.5">
 			{MODES.map(({ id, icon: Icon }) => (

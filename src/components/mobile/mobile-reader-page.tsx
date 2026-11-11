@@ -1,12 +1,25 @@
 import { LoaderCircle } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { MobileNotesEditor } from "@/components/mobile/mobile-notes-editor";
+import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
 import { notifyError } from "@/lib/core/notify";
-import { cn } from "@/lib/core/utils";
+import { exportMobileInkPdf } from "@/lib/mobile/export-pdf";
 import { loadMobilePaperPdf, mobilePaperPaths } from "@/lib/mobile/paper-files";
+import type {
+	MobileWorkspacePreset,
+	MobileWorkspaceWidth,
+} from "@/lib/mobile/workspace";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 const MobilePdfViewer = lazy(() =>
@@ -15,24 +28,41 @@ const MobilePdfViewer = lazy(() =>
 	})),
 );
 
+export type MobileReaderPageProps = {
+	paper: PaperMetadata;
+	vaultPath: string;
+	mode: MobileReaderMode;
+	active: boolean;
+	preset?: MobileWorkspacePreset;
+	widthClass?: MobileWorkspaceWidth;
+	onNotesDirtyChange: (dirty: boolean) => void;
+	onInkDirtyChange?: (dirty: boolean) => void;
+	onInkModeChange?: (active: boolean) => void;
+	onInkExport?: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
+	fetchMissing?: (paper: PaperMetadata) => Promise<boolean>;
+};
+
 export function MobileReaderPage({
 	paper,
 	vaultPath,
 	mode,
 	active,
+	preset = "read",
+	widthClass: suppliedWidth,
 	onNotesDirtyChange,
+	onInkDirtyChange,
+	onInkModeChange,
+	onInkExport,
 	fetchMissing,
-}: {
-	paper: PaperMetadata;
-	vaultPath: string;
-	mode: MobileReaderMode;
-	active: boolean;
-	onNotesDirtyChange: (dirty: boolean) => void;
-	fetchMissing?: (paper: PaperMetadata) => Promise<boolean>;
-}) {
+}: MobileReaderPageProps) {
 	const { t } = useTranslation("mobile");
-	const root = useRef<HTMLElement>(null);
-	const [wide, setWide] = useState(false);
+	const measurement = useMobileWorkspaceWidth<HTMLElement>(
+		suppliedWidth === undefined,
+	);
+	const widthClass = suppliedWidth ?? measurement.widthClass;
+	const compare = widthClass !== "narrow" && preset === "compare";
+	const notesVisible = compare || (widthClass === "narrow" && mode === "notes");
+	const pdfVisible = compare || !notesVisible;
 	const [pdf, setPdf] = useState<{
 		source: string | null;
 		bytes: ArrayBuffer | null;
@@ -47,15 +77,12 @@ export function MobileReaderPage({
 		}
 	}, [vaultPath, paper]);
 
-	useEffect(() => {
-		const element = root.current;
-		if (!element) return;
-		const measure = () => setWide(element.getBoundingClientRect().width >= 840);
-		measure();
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, []);
+	const paperDirectory = paths?.paperAbsPath;
+	const exportInk = useCallback(
+		(bytes: Uint8Array, name: string) =>
+			exportMobileInkPdf(bytes, name, paperDirectory),
+		[paperDirectory],
+	);
 
 	useEffect(() => {
 		void attempt;
@@ -88,69 +115,73 @@ export function MobileReaderPage({
 
 	return (
 		<section
-			ref={root}
-			className={cn(
-				"flex h-full min-h-0",
-				wide ? "flex-row divide-x" : "flex-col",
-			)}
+			ref={measurement.ref}
+			data-reader-width={widthClass}
+			className="h-full min-h-0 min-w-0"
 		>
-			<div
-				className={cn(
-					"h-full min-h-0 min-w-0 flex-1",
-					!wide && mode !== "pdf" && "hidden",
-				)}
-			>
-				{pdfError ? (
-					<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-muted-foreground text-sm">
-						{pdfError}
-						<Button
-							type="button"
-							variant="outline"
-							className="min-h-11"
-							onClick={() => setAttempt((value) => value + 1)}
-						>
-							{t("local.retry")}
-						</Button>
-					</div>
-				) : (
-					<Suspense fallback={<PdfLoading />}>
-						{pdf && paths ? (
-							<MobilePdfViewer
-								source={pdf.source}
-								sourceBytes={pdf.bytes}
-								docId={paths.paperAbsPath}
-								paperRelPath={paths.paperRelPath}
-								paperAbsPath={paths.paperAbsPath}
+			<MobilePaneGroup
+				id="mobile-document"
+				layoutKey={`${widthClass}:${preset}:${mode}`}
+				panes={[
+					{
+						id: "pdf",
+						visible: pdfVisible,
+						weight: 1,
+						separatorLabel: t("workspace.resizeNotes"),
+						content: pdfError ? (
+							<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-muted-foreground text-sm">
+								{pdfError}
+								<Button
+									type="button"
+									variant="outline"
+									className="min-h-11"
+									onClick={() => setAttempt((value) => value + 1)}
+								>
+									{t("local.retry")}
+								</Button>
+							</div>
+						) : (
+							<Suspense fallback={<PdfLoading />}>
+								{pdf && paths ? (
+									<MobilePdfViewer
+										source={pdf.source}
+										sourceBytes={pdf.bytes}
+										docId={paths.paperAbsPath}
+										paperRelPath={paths.paperRelPath}
+										paperAbsPath={paths.paperAbsPath}
+										vaultPath={vaultPath}
+										isActive={active && pdfVisible}
+										onInkDirtyChange={onInkDirtyChange}
+										onInkModeChange={onInkModeChange}
+										onInkExport={onInkExport ?? exportInk}
+										className="h-full"
+									/>
+								) : (
+									<PdfLoading />
+								)}
+							</Suspense>
+						),
+					},
+					{
+						id: "notes",
+						visible: notesVisible,
+						weight: 1,
+						content: paths ? (
+							<MobileNotesEditor
+								key={paths.notesPath}
+								path={paths.notesPath}
 								vaultPath={vaultPath}
-								isActive={active && (wide || mode === "pdf")}
-								className="h-full"
+								active={active && notesVisible}
+								onDirtyChange={onNotesDirtyChange}
 							/>
 						) : (
-							<PdfLoading />
-						)}
-					</Suspense>
-				)}
-			</div>
-			<div
-				className={cn(
-					"h-full min-h-0 min-w-0 flex-1",
-					!wide && mode !== "notes" && "hidden",
-				)}
-			>
-				{paths ? (
-					<MobileNotesEditor
-						key={paths.notesPath}
-						path={paths.notesPath}
-						vaultPath={vaultPath}
-						active={active && (wide || mode === "notes")}
-						onDirtyChange={onNotesDirtyChange}
-					/>
-				) : (
-					<div className="p-6 text-muted-foreground text-sm">
-						{t("reader.pdfUnavailable")}
-					</div>
-				)}
-			</div>
+							<div className="p-6 text-muted-foreground text-sm">
+								{t("reader.pdfUnavailable")}
+							</div>
+						),
+					},
+				]}
+			/>
 		</section>
 	);
 }

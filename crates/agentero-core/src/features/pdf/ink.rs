@@ -31,7 +31,7 @@ fn require(ok: bool, message: &'static str) -> Result<()> {
 
 /// Lamport counter, incremented above all observed revisions when editing an ID.
 /// Actor is a stable, non-nil replica UUID. Wall clocks never determine winners.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InkRevision {
     pub counter: u64,
@@ -57,14 +57,14 @@ impl InkRevision {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum InkTool {
     Pen,
     Highlighter,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InkPoint {
     pub x: f64,
@@ -78,7 +78,7 @@ pub struct InkPoint {
     pub tilt: Option<[f64; 2]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InkStroke {
     pub id: Uuid,
@@ -138,7 +138,7 @@ impl InkStroke {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InkTombstone {
     pub id: Uuid,
@@ -147,7 +147,7 @@ pub struct InkTombstone {
     pub deleted_at_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InkPage {
     pub version: u32,
