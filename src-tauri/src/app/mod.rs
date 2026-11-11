@@ -78,6 +78,7 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
     app.manage(crate::features::vault::doctor::DoctorDirtyPathsState::default());
     app.manage(ExternalRenameRepairStore::new());
     app.manage(crate::integration::sync::SyncService::default());
+    app.manage(crate::integration::sync::credentials::SyncCredentialService::default());
     app.manage(crate::features::web::html_preview::HtmlPreviewGrants::default());
 
     #[cfg(desktop)]
@@ -537,8 +538,7 @@ pub fn run() {
             });
         }
 
-        // Auto sync: resume background schedulers for configured vaults.
-        #[cfg(desktop)]
+        // Desktop watches files; mobile uses foreground lifecycle and save hints.
         app.state::<crate::integration::sync::SyncService>()
             .start_all(app.handle());
 
@@ -629,6 +629,18 @@ pub fn run() {
                         Some(view),
                     );
                 }
+            }
+        });
+    }
+
+    #[cfg(mobile)]
+    {
+        builder = builder.on_window_event(|window, event| {
+            let service = window.state::<crate::integration::sync::SyncService>();
+            match event {
+                tauri::WindowEvent::Suspended => service.set_foreground(window.app_handle(), false),
+                tauri::WindowEvent::Resumed => service.set_foreground(window.app_handle(), true),
+                _ => {}
             }
         });
     }

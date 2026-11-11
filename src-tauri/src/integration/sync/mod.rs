@@ -1,25 +1,42 @@
-//! Desktop shell around the shared sync engine in
+//! Native shell around the shared sync engine in
 //! `agentero_core::features::sync`: IPC commands (`commands`), the auto-sync
 //! scheduler and the in-process run lease below. The engine itself (S3 /
 //! WebDAV stores, three-way merge, CAS protocol, conflict copies) lives in
 //! core and is shared with the headless CLI (`agentero sync …`).
 
 pub mod commands;
+pub mod credentials;
 pub mod scheduler;
 
 pub use agentero_core::features::sync::{config, engine, local, snapshot};
 
 use std::collections::HashSet;
+#[cfg(mobile)]
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 /// Serializes sync passes per vault and owns the auto-sync scheduler tasks
 /// (managed tauri state). Cross-process passes (CLI alongside the Host) are
 /// serialized by the file lock inside `engine::sync_vault_locked`; this lease
 /// additionally drives the in-app `running` status.
-#[derive(Default)]
+#[cfg_attr(desktop, derive(Default))]
 pub struct SyncService {
     running: Mutex<HashSet<String>>,
     schedulers: Mutex<scheduler::SchedulerMap>,
+    #[cfg(mobile)]
+    foreground: AtomicBool,
+}
+
+#[cfg(mobile)]
+impl Default for SyncService {
+    fn default() -> Self {
+        Self {
+            running: Mutex::default(),
+            schedulers: Mutex::default(),
+            #[cfg(mobile)]
+            foreground: AtomicBool::new(true),
+        }
+    }
 }
 
 /// Ownership of one vault's in-flight sync. Dropping the future on timeout or

@@ -33,6 +33,11 @@ pub enum PutOutcome {
 /// The storage operations the sync engine relies on. Futures are `Send` so
 /// generic engine functions stay usable from Tauri commands.
 pub trait RemoteStore: Send + Sync {
+    /// Auth-selected stable namespace when it cannot be inferred from config
+    /// (official cloud accounts). Never use the rotating bearer as identity.
+    fn namespace_identity(&self) -> impl Future<Output = Result<Option<String>, AppError>> + Send {
+        async { Ok(None) }
+    }
     /// Verify credentials and that the store root is usable; backends that
     /// can (WebDAV) create the configured root when missing.
     fn ensure_root(&self) -> impl Future<Output = Result<(), AppError>> + Send;
@@ -72,6 +77,12 @@ impl SyncStore {
 }
 
 impl RemoteStore for SyncStore {
+    async fn namespace_identity(&self) -> Result<Option<String>, AppError> {
+        match self {
+            Self::Agentero(client) => client.namespace_identity().await,
+            _ => Ok(None),
+        }
+    }
     async fn ensure_root(&self) -> Result<(), AppError> {
         match self {
             Self::S3(c) => c.ensure_root().await,

@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 describe("local mobile catalog refresh", () => {
-	it("waits for the local vault then rescans on open and foreground without a Bridge", async () => {
+	it("rescans on open, foreground, and this Vault's completed sync before listing papers", async () => {
 		await render(null);
 		expect(io.list).not.toHaveBeenCalled();
 		await render("/private/Vault");
@@ -70,11 +70,22 @@ describe("local mobile catalog refresh", () => {
 			window.dispatchEvent(new Event("focus"));
 		});
 		expect(io.rescan).toHaveBeenCalledTimes(2);
+		io.rescan.mockImplementationOnce(async () => {
+			io.list.mockResolvedValue([
+				{ id: "synced", path: "papers/synced" },
+			] as PaperMetadata[]);
+			return 1;
+		});
+		await act(async () => {
+			io.sync?.({ payload: { vaultPath: "/other", status: "idle" } });
+		});
+		expect(io.rescan).toHaveBeenCalledTimes(2);
 		await act(async () => {
 			io.sync?.({ payload: { vaultPath: "/private/Vault", status: "idle" } });
 		});
 		expect(io.list).toHaveBeenCalledTimes(3);
-		expect(io.rescan).toHaveBeenCalledTimes(2);
+		expect(io.rescan).toHaveBeenCalledTimes(3);
+		expect(snapshot.papers[0]?.id).toBe("synced");
 	});
 
 	it("retains the last successful library when a foreground rescan fails", async () => {

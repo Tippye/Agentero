@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
+import { useMobilePaperSync } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
@@ -22,6 +23,7 @@ import { MobileNav, type MobileTab } from "@/components/mobile/mobile-nav";
 import { MobilePairing } from "@/components/mobile/mobile-pairing";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
+import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
 import { MobileRemoteAgentPage } from "@/components/mobile/remote/mobile-remote-agent-page";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,7 @@ export default function MobileApp() {
 	const [tab, setTab] = useState<MobileTab>("library");
 	const [libraryQuery, setLibraryQuery] = useState("");
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [syncOpen, setSyncOpen] = useState(false);
 	const [pairingRequested, setPairingRequested] = useState(false);
 	const [pendingOffer, setPendingOffer] = useState<string | null>(null);
 	const [selectedPaper, setSelectedPaper] = useState<PaperMetadata | null>(
@@ -66,6 +69,14 @@ export default function MobileApp() {
 		loading: papersLoading,
 		refresh,
 	} = useMobilePapers({ vaultPath });
+	const rescanAfterSync = useCallback(() => refresh(true), [refresh]);
+	const refreshAfterDownload = useCallback(() => refresh(), [refresh]);
+	const paperSync = useMobilePaperSync({
+		vaultPath,
+		papers,
+		active: !syncOpen,
+		onChanged: refreshAfterDownload,
+	});
 	const {
 		agents,
 		loading: agentsLoading,
@@ -311,8 +322,9 @@ export default function MobileApp() {
 									paper={selectedPaper}
 									vaultPath={vaultPath}
 									mode={readerMode}
-									active={tab === "library" && !pairingRequested}
+									active={tab === "library" && !pairingRequested && !syncOpen}
 									onNotesDirtyChange={setNotesDirty}
+									fetchMissing={paperSync.fetchMissing}
 								/>
 							</EdgeSwipeBack>
 						</div>
@@ -323,6 +335,9 @@ export default function MobileApp() {
 							selected={selectedPaper}
 							onSelect={setSelectedPaper}
 							query={libraryQuery}
+							syncStates={paperSync.states}
+							onPinChange={paperSync.setPinned}
+							syncProgress={paperSync.progressText}
 						/>
 					) : null}
 					<div
@@ -393,7 +408,15 @@ export default function MobileApp() {
 					/>
 				</DialogContent>
 			</Dialog>
+			<MobileSyncPanel
+				open={syncOpen}
+				vaultPath={vaultPath}
+				onOpenChange={setSyncOpen}
+				onSynced={rescanAfterSync}
+			/>
 			<MobileSidebar
+				onSync={() => setSyncOpen(true)}
+				syncDisabled={!vaultPath}
 				navigation={
 					<MobileNav
 						tab={tab}

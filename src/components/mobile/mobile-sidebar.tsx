@@ -2,6 +2,7 @@ import {
 	Check,
 	ChevronDown,
 	Circle,
+	Cloud,
 	Folder,
 	Laptop,
 	LogOut,
@@ -30,6 +31,8 @@ export function MobileSidebar({
 	onClose,
 	onStatus,
 	onPairAnother,
+	onSync,
+	syncDisabled = false,
 	navigation,
 }: {
 	open: boolean;
@@ -37,6 +40,8 @@ export function MobileSidebar({
 	onClose: () => void;
 	onStatus: (status: BridgeClientStatus) => void;
 	onPairAnother: () => void;
+	onSync: () => void;
+	syncDisabled?: boolean;
 	navigation?: ReactNode;
 }) {
 	const { t } = useTranslation("mobile");
@@ -134,6 +139,19 @@ export function MobileSidebar({
 						</span>
 						<Check className="size-4 text-emerald-600 dark:text-emerald-400" />
 					</div>
+					<Button
+						type="button"
+						variant="outline"
+						className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
+						disabled={syncDisabled}
+						onClick={() => {
+							onSync();
+							onClose();
+						}}
+					>
+						<Cloud className="size-5 text-muted-foreground" />
+						{t("sync.title")}
+					</Button>
 					{status.paired ? (
 						<section className="rounded-xl border bg-background shadow-raised">
 							<button
