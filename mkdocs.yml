@@ -92,6 +92,7 @@ nav:
       - 概览: development/index.md
       - 使用记录总结 (#239): development/usage-analytics.md
       - A2A 本机与远端协作: development/A2A.md
+      - 平板端实施方案（共享部分）: development/tablet-shared.md
 
   - 测试:
       - 概览: test/index.md
