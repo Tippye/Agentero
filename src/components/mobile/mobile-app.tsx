@@ -9,6 +9,7 @@ import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
+import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import {
 	EdgeSwipeBack,
 	useHorizontalSwipe,
@@ -61,7 +62,8 @@ export default function MobileApp() {
 		retry: retryVault,
 	} = useMobileVault();
 
-	const { status, setStatus, pairPending } = useBridgeStatus();
+	const { status, setStatus, pairPending, disconnect, resume, resetAvailable } =
+		useBridgeStatus(agentProvider === "agentero-bridge" || pairingRequested);
 	const paired = status.paired;
 	const connected = status.connected;
 	const {
@@ -379,6 +381,18 @@ export default function MobileApp() {
 							<p className="max-w-sm text-muted-foreground text-sm">
 								{t("agent.connectionRequired")}
 							</p>
+							{paired ? (
+								<Button
+									variant="outline"
+									className="min-h-12"
+									onClick={() => void resume()}
+								>
+									{t("local.retry")}
+								</Button>
+							) : null}
+							{resetAvailable ? (
+								<MobileBridgeReset onStatus={setStatus} />
+							) : null}
 							<Button
 								className="min-h-12"
 								onClick={() => setPairingRequested(true)}
@@ -430,6 +444,7 @@ export default function MobileApp() {
 				}
 				open={sidebarOpen}
 				status={status}
+				onDisconnect={disconnect}
 				onClose={() => setSidebarOpen(false)}
 				onStatus={setStatus}
 				onPairAnother={() => {

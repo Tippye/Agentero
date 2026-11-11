@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import agenteroLogo from "@/assets/agentero-logo.svg";
+import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -19,6 +20,11 @@ import {
 	listenBridgeProgress,
 	type PairPendingEvent,
 } from "@/lib/bridge/client";
+import {
+	bridgeRecoveryKey,
+	canResetBridgeIdentity,
+} from "@/lib/bridge/recovery";
+import { notifyError } from "@/lib/core/notify";
 
 function describeBridgeError(
 	message: string | undefined,
@@ -73,6 +79,7 @@ export function MobilePairing({
 	const [offerUrl, setOfferUrl] = useState("");
 	const [connecting, setConnecting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [resetAvailable, setResetAvailable] = useState(false);
 	const [scannerOpen, setScannerOpen] = useState(false);
 	const [linkOpen, setLinkOpen] = useState(false);
 	useBridgeProgressToast();
@@ -86,19 +93,24 @@ export function MobilePairing({
 			try {
 				const next = await bridgeConnect({
 					offerUrl: offer,
-					deviceName: navigator.userAgent.includes("iPad") ? "iPad" : "iPhone",
+					deviceName: "Agentero",
 				});
 				setLinkOpen(false);
 				onStatus(next);
 				onDone();
 			} catch (cause) {
 				toast.dismiss("bridge-progress");
-				setError(
-					describeBridgeError(
-						cause instanceof Error ? cause.message : undefined,
-						t("errors.networkPermission"),
-					) ?? t("errors.connect"),
-				);
+				const recovery = bridgeRecoveryKey(cause);
+				const message = recovery
+					? t(recovery)
+					: (describeBridgeError(
+							cause instanceof Error ? cause.message : undefined,
+							t("errors.networkPermission"),
+						) ?? t("errors.connect"));
+				setError(message);
+				setResetAvailable(canResetBridgeIdentity(cause));
+				if (canResetBridgeIdentity(cause)) setLinkOpen(false);
+				notifyError(message);
 			} finally {
 				setConnecting(false);
 			}
@@ -186,6 +198,9 @@ export function MobilePairing({
 								t("errors.networkPermission"),
 							)}
 					</p>
+				) : null}
+				{resetAvailable ? (
+					<MobileBridgeReset onStatus={onStatus} onComplete={onDone} />
 				) : null}
 			</div>
 			{scannerOpen ? (

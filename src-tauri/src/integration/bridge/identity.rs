@@ -1,4 +1,6 @@
 use crate::core::error::AppError;
+use crate::core::fs::{atomic_write_with, with_file_mutation, AtomicOpts};
+use crate::integration::credentials::{CredentialError, CredentialStore};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -8,6 +10,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const IDENTITY_FILE: &str = "identity.json";
 const DEVICES_FILE: &str = "devices.json";
@@ -267,84 +270,453 @@ impl BridgeClientIdentityStore {
     }
 
     pub fn load_or_create(&self) -> Result<BridgeClientIdentity, AppError> {
-        #[cfg(target_os = "ios")]
+        self.load_file(true)
+    }
+
+    fn load_file(&self, create: bool) -> Result<BridgeClientIdentity, AppError> {
+        with_file_mutation(|| {
+            if let Some(raw) = read_optional(&self.dir.join(CLIENT_IDENTITY_FILE))? {
+                let identity: BridgeClientIdentity = serde_json::from_slice(&raw)
+                    .map_err(|_| IdentityFailure::Invalid.app_error())?;
+                // Desktop's explicit Pair preserves the established v1 upgrade.
+                // Resume and mobile migration never rotate an invalid/old signer.
+                if identity.v != 1 || !create {
+                    return validate_client_identity(identity).map_err(IdentityFailure::app_error);
+                }
+            } else if !create {
+                return Err(IdentityFailure::Missing.app_error());
+            }
+            let identity = BridgeClientIdentity::create();
+            write_private_json(&self.dir.join(CLIENT_IDENTITY_FILE), &identity)?;
+            Ok(identity)
+        })
+    }
+}
+
+fn validate_client_identity(
+    identity: BridgeClientIdentity,
+) -> Result<BridgeClientIdentity, IdentityFailure> {
+    if identity.v != 2 || identity.device_id.trim().is_empty() {
+        return Err(IdentityFailure::Invalid);
+    }
+    let signing = identity
+        .signing_key()
+        .map_err(|_| IdentityFailure::Invalid)?;
+    let verifying = identity
+        .verifying_key()
+        .map_err(|_| IdentityFailure::Invalid)?;
+    if signing.verifying_key().to_bytes() != verifying.to_bytes() {
+        return Err(IdentityFailure::Invalid);
+    }
+    Ok(identity)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum IdentityFailure {
+    Missing,
+    Invalid,
+    Locked,
+    Unavailable,
+    CleanupPending,
+}
+impl IdentityFailure {
+    pub(super) fn app_error(self) -> AppError {
+        let (code, message) = match self {
+            Self::Missing => (
+                "bridge_identity_missing",
+                "The paired Bridge signing identity is missing",
+            ),
+            Self::Invalid => (
+                "bridge_identity_invalid",
+                "The saved Bridge signing identity is invalid; recovery is required",
+            ),
+            Self::Locked => (
+                "bridge_identity_locked",
+                "Unlock the system credential store and try again",
+            ),
+            Self::Unavailable => (
+                "bridge_identity_unavailable",
+                "The system credential store is unavailable",
+            ),
+            Self::CleanupPending => (
+                "bridge_identity_cleanup_pending",
+                "Bridge identity is safely stored; legacy cleanup must be retried",
+            ),
+        };
+        AppError::domain(code, message)
+    }
+}
+impl From<CredentialError> for IdentityFailure {
+    fn from(error: CredentialError) -> Self {
+        match error {
+            CredentialError::Locked => Self::Locked,
+            CredentialError::Unavailable => Self::Unavailable,
+            CredentialError::InvalidRecord | CredentialError::InvalidKey => Self::Invalid,
+        }
+    }
+}
+
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, AppError> {
+    match fs::read(path) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && fs::symlink_metadata(path).is_err() =>
         {
-            if let Some(identity) = load_ios_client_identity()? {
-                Ok(identity)
-            } else if let Some(identity) = self.load_legacy_identity()? {
-                save_ios_client_identity(&identity)?;
-                let _ = fs::remove_file(self.dir.join(CLIENT_IDENTITY_FILE));
-                Ok(identity)
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+const CLIENT_RECORD_KEY: &str = "bridge.client-identity.v2";
+// Rust-only envelope. Preserve the exact original JSON, including timestamp and
+// key encodings; neither it nor its secret fields become an IPC payload.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SecureClientIdentity {
+    v: u8,
+    identity_json: Option<String>,
+    cleared: bool,
+    cleanup_complete: bool,
+}
+impl SecureClientIdentity {
+    fn active(raw: String) -> Self {
+        Self {
+            v: 2,
+            identity_json: Some(raw),
+            cleared: false,
+            cleanup_complete: true,
+        }
+    }
+    fn cleared(complete: bool) -> Self {
+        Self {
+            v: 2,
+            identity_json: None,
+            cleared: true,
+            cleanup_complete: complete,
+        }
+    }
+    fn validate(&self) -> Result<(), IdentityFailure> {
+        if self.v != 2
+            || (self.cleared && self.identity_json.is_some())
+            || (!self.cleared && (!self.cleanup_complete || self.identity_json.is_none()))
+        {
+            return Err(IdentityFailure::Invalid);
+        }
+        Ok(())
+    }
+    fn parse(&self) -> Result<BridgeClientIdentity, IdentityFailure> {
+        self.validate()?;
+        if self.cleared {
+            return Err(if self.cleanup_complete {
+                IdentityFailure::Missing
             } else {
-                let identity = BridgeClientIdentity::create();
-                save_ios_client_identity(&identity)?;
-                Ok(identity)
+                IdentityFailure::CleanupPending
+            });
+        }
+        parse_mobile_identity(
+            self.identity_json
+                .as_deref()
+                .ok_or(IdentityFailure::Invalid)?
+                .as_bytes(),
+        )
+    }
+}
+fn parse_mobile_identity(raw: &[u8]) -> Result<BridgeClientIdentity, IdentityFailure> {
+    let value: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|_| IdentityFailure::Invalid)?;
+    let object = value.as_object().ok_or(IdentityFailure::Invalid)?;
+    let fields = ["v", "deviceId", "publicKeyB64", "secretKeyB64", "createdAt"];
+    if object.len() != fields.len() || fields.iter().any(|key| !object.contains_key(*key)) {
+        return Err(IdentityFailure::Invalid);
+    }
+    let identity = serde_json::from_slice(raw).map_err(|_| IdentityFailure::Invalid)?;
+    validate_client_identity(identity)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum LegacySource {
+    IosKeychain,
+    Json,
+}
+#[derive(Clone)]
+struct LegacySnapshot {
+    source: LegacySource,
+    raw: Vec<u8>,
+}
+pub(super) trait LegacyIdentityStorage: Send + Sync {
+    fn read(&self, source: LegacySource) -> Result<Option<Vec<u8>>, IdentityFailure>;
+    fn remove_matching(
+        &self,
+        source: LegacySource,
+        expected: &[u8],
+    ) -> Result<bool, IdentityFailure>;
+}
+struct LegacyFiles {
+    dir: PathBuf,
+}
+impl LegacyIdentityStorage for LegacyFiles {
+    fn read(&self, source: LegacySource) -> Result<Option<Vec<u8>>, IdentityFailure> {
+        match source {
+            LegacySource::Json => {
+                with_file_mutation(|| read_optional(&self.dir.join(CLIENT_IDENTITY_FILE)))
+                    .map_err(|_| IdentityFailure::Unavailable)
+            }
+            LegacySource::IosKeychain => legacy_keychain_read(),
+        }
+    }
+    fn remove_matching(
+        &self,
+        source: LegacySource,
+        expected: &[u8],
+    ) -> Result<bool, IdentityFailure> {
+        match source {
+            LegacySource::Json => with_file_mutation(|| {
+                let path = self.dir.join(CLIENT_IDENTITY_FILE);
+                let current = read_optional(&path)?;
+                if current.as_deref() != Some(expected) {
+                    return Ok(false);
+                }
+                fs::remove_file(path)?;
+                Ok(true)
+            })
+            .map_err(|_| IdentityFailure::Unavailable),
+            LegacySource::IosKeychain => {
+                if legacy_keychain_read()?.as_deref() != Some(expected) {
+                    return Ok(false);
+                }
+                legacy_keychain_remove()?;
+                Ok(true)
             }
         }
-
-        #[cfg(not(target_os = "ios"))]
-        self.load_or_create_file()
     }
-
-    fn load_legacy_identity(&self) -> Result<Option<BridgeClientIdentity>, AppError> {
-        let path = self.dir.join(CLIENT_IDENTITY_FILE);
-        if path.is_file() {
-            let identity: BridgeClientIdentity = read_json(&path)?;
-            return Ok(valid_client_identity(identity));
-        }
-        Ok(None)
+}
+#[cfg(target_os = "ios")]
+fn legacy_keychain_read() -> Result<Option<Vec<u8>>, IdentityFailure> {
+    use security_framework::passwords::get_generic_password;
+    use security_framework_sys::base::{errSecInteractionNotAllowed, errSecItemNotFound};
+    match get_generic_password(IOS_KEYCHAIN_SERVICE, IOS_KEYCHAIN_ACCOUNT) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(error) if error.code() == errSecItemNotFound => Ok(None),
+        Err(error) if error.code() == errSecInteractionNotAllowed => Err(IdentityFailure::Locked),
+        Err(_) => Err(IdentityFailure::Unavailable),
     }
+}
+#[cfg(not(target_os = "ios"))]
+fn legacy_keychain_read() -> Result<Option<Vec<u8>>, IdentityFailure> {
+    Ok(None)
+}
+#[cfg(target_os = "ios")]
+fn legacy_keychain_remove() -> Result<(), IdentityFailure> {
+    security_framework::passwords::delete_generic_password(
+        IOS_KEYCHAIN_SERVICE,
+        IOS_KEYCHAIN_ACCOUNT,
+    )
+    .map_err(|_| IdentityFailure::Unavailable)
+}
+#[cfg(not(target_os = "ios"))]
+fn legacy_keychain_remove() -> Result<(), IdentityFailure> {
+    Ok(())
+}
 
-    #[cfg(not(target_os = "ios"))]
-    fn load_or_create_file(&self) -> Result<BridgeClientIdentity, AppError> {
-        if let Some(identity) = self.load_legacy_identity()? {
-            return Ok(identity);
+pub(super) struct ClientIdentityRepository {
+    store: Option<CredentialStore>,
+    strict: bool,
+    files: BridgeClientIdentityStore,
+    legacy: Arc<dyn LegacyIdentityStorage>,
+    pending: tokio::sync::Mutex<Option<(SecureClientIdentity, Option<LegacySnapshot>)>>,
+}
+impl ClientIdentityRepository {
+    pub(super) fn new(store: Option<CredentialStore>) -> Self {
+        let files = BridgeClientIdentityStore::at_default_path();
+        Self {
+            strict: store.is_some() || cfg!(any(target_os = "ios", target_os = "android")),
+            store,
+            legacy: Arc::new(LegacyFiles {
+                dir: files.dir.clone(),
+            }),
+            files,
+            pending: tokio::sync::Mutex::new(None),
         }
-        let identity = BridgeClientIdentity::create();
-        write_private_json(&self.dir.join(CLIENT_IDENTITY_FILE), &identity)?;
+    }
+    pub(super) async fn acquire(&self, create: bool) -> Result<BridgeClientIdentity, AppError> {
+        if !self.strict {
+            let files = self.files.clone();
+            return tokio::task::spawn_blocking(move || files.load_file(create))
+                .await
+                .map_err(|_| IdentityFailure::Unavailable.app_error())?;
+        }
+        self.mobile_acquire(create)
+            .await
+            .map_err(IdentityFailure::app_error)
+    }
+    async fn read_legacy(
+        &self,
+        source: LegacySource,
+    ) -> Result<Option<LegacySnapshot>, IdentityFailure> {
+        let legacy = self.legacy.clone();
+        tokio::task::spawn_blocking(move || {
+            legacy
+                .read(source)
+                .map(|raw| raw.map(|raw| LegacySnapshot { source, raw }))
+        })
+        .await
+        .map_err(|_| IdentityFailure::Unavailable)?
+    }
+    async fn clean_exact(&self, snapshot: LegacySnapshot) -> Result<(), IdentityFailure> {
+        let legacy = self.legacy.clone();
+        let removed = tokio::task::spawn_blocking(move || {
+            legacy.remove_matching(snapshot.source, &snapshot.raw)
+        })
+        .await
+        .map_err(|_| IdentityFailure::CleanupPending)?;
+        if removed.unwrap_or(false) {
+            Ok(())
+        } else {
+            Err(IdentityFailure::CleanupPending)
+        }
+    }
+    async fn clean_matching(&self, identity: &BridgeClientIdentity) -> Result<(), IdentityFailure> {
+        for source in [LegacySource::IosKeychain, LegacySource::Json] {
+            let snapshot = self
+                .read_legacy(source)
+                .await
+                .map_err(|_| IdentityFailure::CleanupPending)?;
+            if let Some(snapshot) = snapshot {
+                // A verified native record is authoritative. Corrupt/conflicting
+                // legacy bytes are retained, never used to rotate the signer.
+                if parse_mobile_identity(&snapshot.raw).ok().as_ref() == Some(identity) {
+                    self.clean_exact(snapshot).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+    async fn commit_pending(
+        &self,
+        pending: &mut Option<(SecureClientIdentity, Option<LegacySnapshot>)>,
+    ) -> Result<SecureClientIdentity, IdentityFailure> {
+        let store = self.store.as_ref().ok_or(IdentityFailure::Unavailable)?;
+        let (record, legacy) = pending.as_ref().ok_or(IdentityFailure::Invalid)?.clone();
+        record.validate()?;
+        store
+            .write(CLIENT_RECORD_KEY, &record)
+            .await
+            .map_err(IdentityFailure::from)?;
+        let verified = store
+            .read::<SecureClientIdentity>(CLIENT_RECORD_KEY)
+            .await
+            .map_err(IdentityFailure::from)?;
+        if verified.as_ref() != Some(&record) {
+            return Err(IdentityFailure::Unavailable);
+        }
+        *pending = None;
+        if let Some(snapshot) = legacy {
+            self.clean_exact(snapshot).await?;
+        }
+        Ok(record)
+    }
+    async fn mobile_acquire(&self, create: bool) -> Result<BridgeClientIdentity, IdentityFailure> {
+        let mut pending = self.pending.lock().await;
+        let store = self.store.as_ref().ok_or(IdentityFailure::Unavailable)?;
+        // Unknown native outcomes retain and retry exactly the same candidate.
+        let saved = if pending.is_some() {
+            Some(self.commit_pending(&mut pending).await?)
+        } else {
+            store
+                .read::<SecureClientIdentity>(CLIENT_RECORD_KEY)
+                .await
+                .map_err(IdentityFailure::from)?
+        };
+        let mut selected = None;
+        if let Some(saved) = saved {
+            saved.validate()?;
+            if !saved.cleared {
+                let identity = saved.parse()?;
+                self.clean_matching(&identity).await?;
+                return Ok(identity);
+            }
+            if !saved.cleanup_complete {
+                return Err(IdentityFailure::CleanupPending);
+            }
+            if !create {
+                return Err(IdentityFailure::Missing);
+            }
+            // A cleared marker never falls back to legacy, even after restart.
+            for source in [LegacySource::IosKeychain, LegacySource::Json] {
+                if self
+                    .read_legacy(source)
+                    .await
+                    .map_err(|_| IdentityFailure::CleanupPending)?
+                    .is_some()
+                {
+                    return Err(IdentityFailure::CleanupPending);
+                }
+            }
+        } else {
+            for source in [LegacySource::IosKeychain, LegacySource::Json] {
+                if let Some(snapshot) = self.read_legacy(source).await? {
+                    parse_mobile_identity(&snapshot.raw)?;
+                    selected = Some(snapshot);
+                    break;
+                }
+            }
+        }
+        let raw = if let Some(snapshot) = &selected {
+            String::from_utf8(snapshot.raw.clone()).map_err(|_| IdentityFailure::Invalid)?
+        } else {
+            if !create {
+                return Err(IdentityFailure::Missing);
+            }
+            serde_json::to_string(&BridgeClientIdentity::create())
+                .map_err(|_| IdentityFailure::Invalid)?
+        };
+        *pending = Some((SecureClientIdentity::active(raw), selected));
+        let record = self.commit_pending(&mut pending).await?;
+        let identity = record.parse()?;
+        self.clean_matching(&identity).await?;
         Ok(identity)
     }
-}
-
-fn valid_client_identity(identity: BridgeClientIdentity) -> Option<BridgeClientIdentity> {
-    (identity.v >= 2
-        && identity
-            .signing_key()
-            .map(|key| key.verifying_key().to_bytes())
-            .ok()
-            == identity.verifying_key().map(|key| key.to_bytes()).ok())
-    .then_some(identity)
-}
-
-#[cfg(target_os = "ios")]
-fn load_ios_client_identity() -> Result<Option<BridgeClientIdentity>, AppError> {
-    use security_framework::passwords::get_generic_password;
-    use security_framework_sys::base::errSecItemNotFound;
-
-    match get_generic_password(IOS_KEYCHAIN_SERVICE, IOS_KEYCHAIN_ACCOUNT) {
-        Ok(raw) => {
-            let identity: BridgeClientIdentity = serde_json::from_slice(&raw)?;
-            valid_client_identity(identity)
-                .map(Some)
-                .ok_or_else(|| AppError::message("iOS Keychain bridge identity is invalid"))
+    pub(super) async fn begin_reset(&self) -> Result<(), AppError> {
+        let mut pending = self.pending.lock().await;
+        // Explicit reset alone may replace malformed native records without a read.
+        if !pending.as_ref().is_some_and(|(record, _)| record.cleared) {
+            *pending = Some((SecureClientIdentity::cleared(false), None));
         }
-        Err(error) if error.code() == errSecItemNotFound => Ok(None),
-        Err(error) => Err(AppError::message(format!(
-            "Could not read the iOS Keychain bridge identity: {error}"
-        ))),
+        self.commit_pending(&mut pending)
+            .await
+            .map_err(IdentityFailure::app_error)?;
+        Ok(())
     }
-}
-
-#[cfg(target_os = "ios")]
-fn save_ios_client_identity(identity: &BridgeClientIdentity) -> Result<(), AppError> {
-    use security_framework::passwords::set_generic_password;
-
-    let raw = serde_json::to_vec(identity)?;
-    set_generic_password(IOS_KEYCHAIN_SERVICE, IOS_KEYCHAIN_ACCOUNT, &raw).map_err(|error| {
-        AppError::message(format!(
-            "Could not save the iOS Keychain bridge identity: {error}"
-        ))
-    })
+    pub(super) async fn finish_reset(
+        &self,
+        profiles: &BridgeClientProfileStore,
+    ) -> Result<(), AppError> {
+        let mut pending = self.pending.lock().await;
+        for source in [LegacySource::IosKeychain, LegacySource::Json] {
+            let snapshot = self
+                .read_legacy(source)
+                .await
+                .map_err(|_| IdentityFailure::CleanupPending.app_error())?;
+            if let Some(snapshot) = snapshot {
+                self.clean_exact(snapshot)
+                    .await
+                    .map_err(IdentityFailure::app_error)?;
+            }
+        }
+        let profiles = profiles.clone();
+        tokio::task::spawn_blocking(move || profiles.clear())
+            .await
+            .map_err(|_| IdentityFailure::CleanupPending.app_error())?
+            .map_err(|_| IdentityFailure::CleanupPending.app_error())?;
+        // Completion is durable too; a partial/unknown reset cannot report success.
+        *pending = Some((SecureClientIdentity::cleared(true), None));
+        self.commit_pending(&mut pending)
+            .await
+            .map_err(IdentityFailure::app_error)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -365,23 +737,61 @@ impl BridgeClientProfileStore {
     }
 
     pub fn load(&self) -> Result<Option<BridgeClientProfile>, AppError> {
-        let path = self.dir.join(CLIENT_PROFILE_FILE);
-        if !path.is_file() {
-            return Ok(None);
-        }
-        read_json(&path).map(Some)
+        self.snapshot()?
+            .map(|raw| serde_json::from_slice(&raw).map_err(AppError::from))
+            .transpose()
+    }
+
+    pub(super) fn snapshot(&self) -> Result<Option<Vec<u8>>, AppError> {
+        with_file_mutation(|| read_optional(&self.dir.join(CLIENT_PROFILE_FILE)))
+    }
+
+    fn write_profile(&self, profile: &BridgeClientProfile) -> Result<(), AppError> {
+        fs::create_dir_all(&self.dir)?;
+        atomic_write_with(
+            &self.dir.join(CLIENT_PROFILE_FILE),
+            &serde_json::to_vec_pretty(profile)?,
+            &AtomicOpts::OWNER_ONLY,
+        )?;
+        Ok(())
     }
 
     pub fn save(&self, profile: &BridgeClientProfile) -> Result<(), AppError> {
-        write_private_json(&self.dir.join(CLIENT_PROFILE_FILE), profile)
+        with_file_mutation(|| self.write_profile(profile))
+    }
+
+    pub(super) fn save_if_snapshot(
+        &self,
+        expected: &Option<Vec<u8>>,
+        profile: &BridgeClientProfile,
+    ) -> Result<bool, AppError> {
+        with_file_mutation(|| {
+            if read_optional(&self.dir.join(CLIENT_PROFILE_FILE))? != *expected {
+                return Ok(false);
+            }
+            self.write_profile(profile)?;
+            Ok(true)
+        })
+    }
+
+    fn clear(&self) -> Result<(), AppError> {
+        with_file_mutation(|| {
+            let path = self.dir.join(CLIENT_PROFILE_FILE);
+            if read_optional(&path)?.is_some() {
+                fs::remove_file(path)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn mark_paired(&self) -> Result<(), AppError> {
-        let Some(mut profile) = self.load()? else {
-            return Err(AppError::message("Bridge connection profile is missing"));
-        };
-        profile.paired = true;
-        self.save(&profile)
+        with_file_mutation(|| {
+            let raw = read_optional(&self.dir.join(CLIENT_PROFILE_FILE))?
+                .ok_or_else(|| AppError::message("Bridge connection profile is missing"))?;
+            let mut profile: BridgeClientProfile = serde_json::from_slice(&raw)?;
+            profile.paired = true;
+            self.write_profile(&profile)
+        })
     }
 }
 
@@ -417,6 +827,10 @@ fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AppErr
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "identity_tests.rs"]
+pub(super) mod mobile_tests;
 
 #[cfg(test)]
 mod tests {
