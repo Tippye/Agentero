@@ -1,6 +1,6 @@
 # Rust DSH Remote v1 primitives
 
-Protocol baseline: ds-harness-remote `11064af` (0.6.4), MIT. The parent integration module enables this module with the application desktop feature (also used by mobile builds). The only new dependency is `snow = "0.9"`; all other dependencies already exist in the application.
+Protocol baseline: ds-harness-remote `11064af` (0.6.4), MIT. The parent integration module enables this module with the application desktop feature (also used by mobile builds). The protocol adapter adds `snow = "0.9"`. Mobile account persistence separately uses the Rust-only keyring-store API; no generic credential plugin commands are registered in the WebView.
 
 The available path is real REST account password login / account-token device registration / device-token refresh / paginated authorized Host discovery, followed by control WebSocket authorization, authenticated Noise IK and encrypted relay frames. `RpcClient` owns the channel in a Tokio task and correlates concurrent requests. It supports DSH secure fragmentation, events, capability probing, and the official `harness.remote.call` result envelope. Only control-socket relay is advertised; independent relay attach, LAN, P2P, TURN, browser authentication and device pairing are not advertised.
 

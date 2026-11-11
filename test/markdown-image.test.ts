@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	collectImageUrlCounts,
 	createManagedAssetGc,
@@ -163,6 +163,64 @@ describe("createManagedAssetGc", () => {
 		expect(n).toBe(1);
 		expect(deleted).toEqual([url]);
 		expect(gc.pendingUrls()).toEqual([]);
+	});
+
+	it("retains expired and flushed entries until the owner's canonical save is confirmed", async () => {
+		vi.useFakeTimers();
+		let confirmed = false;
+		const deleteAsset = vi.fn(async () => true);
+		const gc = createManagedAssetGc({
+			debounceMs: 1000,
+			canDelete: () => confirmed,
+			deleteAsset,
+		});
+		try {
+			gc.observe("/vault/note.md", new Map([["./assets/a.png", 1]]), new Map());
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(deleteAsset).not.toHaveBeenCalled();
+			expect(gc.pendingUrls()).toEqual(["./assets/a.png"]);
+			expect(await gc.flush()).toBe(0);
+			expect(gc.pendingUrls()).toEqual(["./assets/a.png"]);
+			confirmed = true;
+			gc.resume();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(deleteAsset).toHaveBeenCalledExactlyOnceWith(
+				"/vault/note.md",
+				"./assets/a.png",
+			);
+			expect(gc.pendingUrls()).toEqual([]);
+		} finally {
+			gc.cancelAll();
+			vi.useRealTimers();
+		}
+	});
+
+	it("preserves the original cut/undo grace and cancels a held entry when its URL returns", async () => {
+		vi.useFakeTimers();
+		let confirmed = false;
+		const deleteAsset = vi.fn(async () => true);
+		const gc = createManagedAssetGc({
+			debounceMs: 1000,
+			canDelete: () => confirmed,
+			deleteAsset,
+		});
+		try {
+			const refs = new Map([["./assets/a.png", 1]]);
+			gc.observe("/vault/note.md", refs, new Map());
+			await vi.advanceTimersByTimeAsync(300);
+			expect(await gc.flush()).toBe(0);
+			confirmed = true;
+			gc.resume();
+			await vi.advanceTimersByTimeAsync(699);
+			expect(deleteAsset).not.toHaveBeenCalled();
+			gc.observe("/vault/note.md", new Map(), refs);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(deleteAsset).not.toHaveBeenCalled();
+			expect(gc.pendingUrls()).toEqual([]);
+		} finally {
+			gc.cancelAll();
+			vi.useRealTimers();
+		}
 	});
 
 	it("ignores remote urls", () => {
