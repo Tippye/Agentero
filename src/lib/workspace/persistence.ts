@@ -21,6 +21,7 @@ import {
 	vaultRelativePath,
 	writeVaultFile,
 } from "@/lib/vault";
+import { isPreservedVaultWriteConflict } from "@/lib/vault/fs";
 import { primeSeedCache } from "@/lib/vault/seed-cache";
 import { getVaultPath } from "@/lib/vault/store";
 import { applyWikiPaths } from "@/lib/wiki/api";
@@ -124,10 +125,15 @@ const defaultDiskChangeSink: DiskChangeSink = {
  * editor banner, the toast action and any future entry point agree on which
  * pane changes and what its seed becomes.
  */
-function promptMarkdownConflict(path: string, tabId: string): void {
+function promptMarkdownConflict(
+	path: string,
+	tabId: string,
+	description?: string,
+): void {
 	const name = path.split(/[\\/]/).pop() ?? path;
 	notifyReminder(i18n.t("app:diskConflict.title", { name }), {
 		id: `markdown-save-conflict:${tabId}`,
+		description,
 		actionLabel: i18n.t("app:diskConflict.reload"),
 		onAction: () => {
 			void (async () => {
@@ -143,6 +149,21 @@ function promptMarkdownConflict(path: string, tabId: string): void {
 			})();
 		},
 	});
+}
+
+function holdMarkdownConflict(
+	path: string,
+	writerId: string,
+	description?: string,
+): boolean {
+	if (!getTabs().some((tab) => tab.id === writerId)) return false;
+	setTabs((prev) =>
+		prev.map((tab) =>
+			tab.id === writerId ? { ...tab, markdownConflict: true } : tab,
+		),
+	);
+	promptMarkdownConflict(path, writerId, description);
+	return true;
 }
 
 /** One text-like editor kind for disk-change reseeding: which open tabs own
@@ -383,8 +404,10 @@ function persistTextLike(
 				// do NOT silently overwrite — keep the user's in-memory edit and warn.
 				// A body this window wrote is not that external edit, even when the
 				// editor snapshot is still the pre-index text.
+				let expectedContent: string | null = null;
 				try {
 					const disk = await readVaultFile(path);
+					expectedContent = disk;
 					const ownWrite = lastOwnWriteByPath.get(normalizedPath);
 					if (
 						isResearchTablePath(path)
@@ -397,17 +420,7 @@ function persistTextLike(
 										: undefined,
 								)
 					) {
-						if (writer) {
-							setTabs((prev) =>
-								prev.map((tab) =>
-									tab.id === writerId
-										? { ...tab, markdownConflict: true }
-										: tab,
-								),
-							);
-							promptMarkdownConflict(path, writerId);
-							return false;
-						}
+						if (writer && holdMarkdownConflict(path, writerId)) return false;
 						const name = path.split(/[\\/]/).pop() ?? path;
 						const notify = isResearchTablePath(path)
 							? notifyError
@@ -424,7 +437,13 @@ function persistTextLike(
 					if (isResearchTablePath(path)) throw error;
 					// Missing/unreadable file → no conflict to guard against.
 				}
-				await writeVaultFile(path, content);
+				if (kind === "markdown") {
+					// The early read drives editor UX; the host repeats its exact-byte
+					// check under sync's mutation lane at the actual publication point.
+					await writeVaultFile(path, content, { expectedContent });
+				} else {
+					await writeVaultFile(path, content);
+				}
 				lastOwnWriteByPath.set(normalizedPath, { content, writerId });
 				// Advance the seed and remember the body before any await. Wiki
 				// indexing yields long enough for the watcher echo to land; if the
@@ -449,6 +468,15 @@ function persistTextLike(
 				}
 				return true;
 			} catch (e) {
+				if (kind === "markdown" && isPreservedVaultWriteConflict(e)) {
+					lastOwnWriteByPath.delete(normalizedPath);
+					if (!holdMarkdownConflict(path, writerId, errorText(e))) {
+						notifyWarning(errorText(e), {
+							id: `markdown-save-conflict:${normalizedPath}`,
+						});
+					}
+					return false;
+				}
 				notifyError(errorText(e));
 				return false;
 			} finally {

@@ -10,7 +10,11 @@ import {
 	useState,
 } from "react";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
+import i18n from "@/i18n";
+import { errorText } from "@/lib/core/error";
 import { scheduleIdle } from "@/lib/core/idle";
+import { notifyError } from "@/lib/core/notify";
+import { isTauri } from "@/lib/core/tauri";
 import { deserializeMarkdownBody } from "@/lib/markdown/deserialize-md";
 import {
 	frontmatterInterior,
@@ -25,6 +29,8 @@ import {
 import { settleMarkdownSaveAttempt } from "@/lib/markdown/save-state";
 import { stripInlinePlaceholders } from "@/lib/markdown/serialize";
 import { applySourceProjection } from "@/lib/markdown/source-projection";
+import { isPreservedVaultWriteConflict, writeVaultFile } from "@/lib/vault/fs";
+import { parseRemoteJoinedPath } from "@/lib/vault/remote/remote-vault";
 
 const CHANGE_DEBOUNCE_MS = 500;
 
@@ -119,6 +125,8 @@ export function useMarkdownPersistence({
 	const sourceRef = useRef<(() => string) | null>(null);
 	const projectedSourceRef = useRef<string | null>(null);
 	const readyRef = useRef(false);
+	const unmountedRef = useRef(false);
+	const detachedNativeDraftRef = useRef<string | undefined>(undefined);
 	/**
 	 * Tracks the dirty flag so `onDirtyChange` fires only on a real transition.
 	 * Without this, every keystroke would call it and re-render the whole app
@@ -141,12 +149,24 @@ export function useMarkdownPersistence({
 	const reloadGenerationRef = useRef(0);
 	/** Image URL ref-counts; used to GC `./assets/` when an image node is removed. */
 	const imageCountsRef = useRef<Map<string, number> | null>(null);
+	/** The path whose latest canonical write confirmed the current ref counts. */
+	const assetSaveConfirmedRef = useRef<string | null>(null);
+	const assetOwnerPathRef = useRef(filePath);
+	assetOwnerPathRef.current = filePath;
+	const reconcileAssetsRef = useRef<() => void>(() => {});
 	/**
 	 * Debounced asset GC so cut → paste / undo still finds the file.
 	 * Immediate delete used to leave a live `./assets/…` node with a missing file.
 	 */
 	const assetGcRef = useRef(
 		createManagedAssetGc({
+			canDelete: (path) =>
+				path === assetOwnerPathRef.current &&
+				assetSaveConfirmedRef.current === path &&
+				!dirtyRef.current &&
+				!saveBlockedRef.current &&
+				!externalReloadRef.current &&
+				!persistInFlightRef.current,
 			onDeleted: () => {
 				onAssetsChangedRef.current?.();
 			},
@@ -170,6 +190,7 @@ export function useMarkdownPersistence({
 
 	const setDirty = useCallback(
 		(dirty: boolean) => {
+			if (dirty) assetSaveConfirmedRef.current = null;
 			if (dirtyRef.current === dirty) return;
 			dirtyRef.current = dirty;
 			onDirtyChange?.(dirty);
@@ -217,6 +238,7 @@ export function useMarkdownPersistence({
 					return;
 
 				const generation = reloadGenerationRef.current;
+				assetSaveConfirmedRef.current = null;
 				let persisted = false;
 				try {
 					persisted = await onPersist(filePath, markdown, lastSaved);
@@ -227,6 +249,20 @@ export function useMarkdownPersistence({
 				// An external reload replaced the document while this write was in
 				// flight; its snapshot is authoritative, do not settle over it.
 				if (generation !== reloadGenerationRef.current) return;
+				if (
+					unmountedRef.current &&
+					detachedNativeDraftRef.current !== undefined
+				) {
+					persistQueuedRef.current = false;
+					// Only confirmed bytes may advance this detached working copy.
+					// Compare its captured final draft without reading destroyed Plate.
+					if (persisted) {
+						savedRef.current = markdown;
+						setDirty(detachedNativeDraftRef.current !== markdown);
+						assetSaveConfirmedRef.current = dirtyRef.current ? null : filePath;
+					}
+					return;
+				}
 				const settlement = settleMarkdownSaveAttempt({
 					attemptedMarkdown: markdown,
 					currentMarkdown:
@@ -241,6 +277,12 @@ export function useMarkdownPersistence({
 				});
 				savedRef.current = settlement.savedMarkdown;
 				setDirty(settlement.dirty);
+				if (persisted && !settlement.dirty && !unmountedRef.current) {
+					// Undo/paste may have revived an image while IO was pending.
+					// Reconcile the confirmed snapshot before permitting any deletion.
+					reconcileAssetsRef.current();
+					assetSaveConfirmedRef.current = filePath;
+				}
 				if (!persisted) {
 					persistQueuedRef.current = false;
 					return;
@@ -253,6 +295,10 @@ export function useMarkdownPersistence({
 			if (persistInFlightRef.current === task) {
 				persistInFlightRef.current = null;
 				if (persistQueuedRef.current) persistRef.current();
+				else if (assetSaveConfirmedRef.current) {
+					if (unmountedRef.current) void assetGcRef.current.flush();
+					else assetGcRef.current.resume();
+				}
 			}
 		};
 		void task.then(finish, finish);
@@ -262,6 +308,8 @@ export function useMarkdownPersistence({
 	// Latest persist closure, for the unmount flush (captures this file's path).
 	const persistRef = useRef(persist);
 	persistRef.current = persist;
+	const teardownRef = useRef({ filePath, readOnly, onPersist, serialize });
+	teardownRef.current = { filePath, readOnly, onPersist, serialize };
 
 	/**
 	 * Diff `./assets/` ref-counts and hand the delta to the GC.
@@ -281,7 +329,6 @@ export function useMarkdownPersistence({
 			assetGcRef.current.observe(mdPath, prevCounts, nextCounts);
 		}
 	}, [editor, filePathRef]);
-	const reconcileAssetsRef = useRef(reconcileAssets);
 	reconcileAssetsRef.current = reconcileAssets;
 
 	/** Debounced autosave; flushed on unmount, cancelled by external reloads. */
@@ -291,7 +338,11 @@ export function useMarkdownPersistence({
 	}, CHANGE_DEBOUNCE_MS);
 
 	useEffect(() => {
-		if (!saveBlocked) return;
+		if (!saveBlocked) {
+			assetGcRef.current.resume();
+			return;
+		}
+		assetSaveConfirmedRef.current = null;
 		debouncedPersist.cancel();
 		persistQueuedRef.current = false;
 	}, [saveBlocked, debouncedPersist]);
@@ -301,6 +352,8 @@ export function useMarkdownPersistence({
 	// On unmount, flush pending edit + deferred asset GC for this file.
 	useEffect(() => {
 		readyRef.current = true;
+		unmountedRef.current = false;
+		detachedNativeDraftRef.current = undefined;
 		// Seeding the count walks the whole tree; defer it so it never competes
 		// with the first paint. Until it lands, `reconcileAssets` skips the GC
 		// diff (prev counts null), so nothing can be deleted by mistake.
@@ -310,7 +363,73 @@ export function useMarkdownPersistence({
 		const assetGc = assetGcRef.current;
 		return () => {
 			cancelSeed();
+			reconcileAssetsRef.current();
+			if (
+				dirtyRef.current ||
+				persistInFlightRef.current ||
+				saveBlockedRef.current
+			)
+				assetSaveConfirmedRef.current = null;
+			unmountedRef.current = true;
+			const final = teardownRef.current;
+			// Capture before the source/Plate document is destroyed. A rejected
+			// in-flight save can otherwise drop a newer queued source edit on close.
+			const rescueLocalDraft = Boolean(
+				isTauri() &&
+					final.filePath &&
+					!parseRemoteJoinedPath(final.filePath) &&
+					!final.readOnly &&
+					final.onPersist &&
+					dirtyRef.current,
+			);
+			const markdown = rescueLocalDraft ? final.serialize() : undefined;
+			const generation = reloadGenerationRef.current;
+			const expectedOnClose = savedRef.current;
+			const incompleteRichEmpty =
+				sourceRef.current === null &&
+				projectedSourceRef.current === null &&
+				markdown !== undefined &&
+				!markdown.trim() &&
+				Boolean(savedRef.current.trim());
+			detachedNativeDraftRef.current = incompleteRichEmpty
+				? undefined
+				: markdown;
 			debouncedPersist.flush();
+			if (markdown !== undefined && !incompleteRichEmpty && final.filePath) {
+				const path = final.filePath;
+				void (async () => {
+					try {
+						await persistInFlightRef.current;
+					} catch {
+						/* Rescue the immutable final draft after a failed callback. */
+					}
+					if (
+						generation !== reloadGenerationRef.current ||
+						markdown === savedRef.current
+					)
+						return;
+					// The native guard either publishes against this confirmed base or
+					// preserves exact bytes as a .md conflict; it cannot replace sync data.
+					const retry = () =>
+						writeVaultFile(path, markdown, {
+							expectedContent: expectedOnClose,
+						});
+					const report = (error: unknown) =>
+						notifyError(errorText(error), {
+							id: `markdown-final:${path}`,
+							action: isPreservedVaultWriteConflict(error)
+								? undefined
+								: {
+										label: i18n.t("viewer:pdf.bookmarks.retry"),
+										onClick: () => {
+											void retry().catch(report);
+										},
+									},
+						});
+					await retry().catch(report);
+				})();
+			}
+			// flush retains queued files while canonical text is unconfirmed.
 			void assetGc.flush();
 		};
 	}, [editor, debouncedPersist]);
@@ -393,6 +512,8 @@ export function useMarkdownPersistence({
 		(markdown: string) => {
 			// Own-write echo (autosave advanced the seed): nothing to reload.
 			if (markdown === savedRef.current && !dirtyRef.current) return false;
+			assetSaveConfirmedRef.current = null;
+			assetGcRef.current.cancelAll();
 			reloadGenerationRef.current += 1;
 			persistQueuedRef.current = false;
 			debouncedPersist.cancel();

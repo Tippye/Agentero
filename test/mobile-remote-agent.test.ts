@@ -1,12 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
 
-const ipc = vi.hoisted(() => ({ execute: vi.fn(), upload: vi.fn() }));
+const ipc = vi.hoisted(() => ({
+	execute: vi.fn(),
+	upload: vi.fn(),
+	catalog: vi.fn(),
+	logout: vi.fn(),
+}));
 vi.mock("@/lib/core/bindings", () => ({
-	commands: { remoteAgentExecute: ipc.execute, remoteAgentUpload: ipc.upload },
+	commands: {
+		remoteAgentExecute: ipc.execute,
+		remoteAgentUpload: ipc.upload,
+		remoteAgentCatalog: ipc.catalog,
+		remoteAgentLogout: ipc.logout,
+	},
 }));
 vi.mock("@/lib/core/tauri", () => ({ isTauri: () => true }));
 
-import type { Capabilities, Question, SessionRef } from "@/lib/core/bindings";
+import type {
+	Capabilities,
+	Question,
+	RemoteAgentCatalog,
+	RemoteCredentialState,
+	SessionRef,
+} from "@/lib/core/bindings";
+import {
+	canRetrySavedSignIn,
+	canSignIn,
+	credentialMessageKey,
+} from "@/lib/remote-agent/credentials";
 import {
 	canUpload,
 	OperationJournal,
@@ -35,6 +56,81 @@ const session: SessionRef = {
 	},
 	sessionId: "session",
 };
+
+describe("native saved sign-in recovery", () => {
+	const catalog: RemoteAgentCatalog = {
+		providers: [],
+		defaultProvider: "ds-harness-remote",
+		account: null,
+		persistence: "systemStore",
+		credentialState: "missing",
+		canClearSavedSignIn: false,
+	};
+	it("permits native login only after the store is known to be empty", () => {
+		expect(canSignIn(null)).toBe(false);
+		expect(canSignIn(catalog)).toBe(true);
+		const failures: RemoteCredentialState[] = [
+			"notChecked",
+			"locked",
+			"unavailable",
+			"invalid",
+			"reauthenticationRequired",
+			"connectionFailed",
+		];
+		for (const credentialState of failures) {
+			expect(
+				canSignIn({ ...catalog, credentialState, canClearSavedSignIn: true }),
+			).toBe(false);
+			expect(credentialMessageKey(credentialState)).not.toBeNull();
+		}
+		expect(
+			canSignIn({
+				...catalog,
+				persistence: "launchOnly",
+				credentialState: "launchOnly",
+			}),
+		).toBe(true);
+		expect(credentialMessageKey("ready")).toBeNull();
+	});
+	it("keeps failed restore as a usable catalog with an explicit clear action", async () => {
+		ipc.catalog.mockResolvedValueOnce({
+			status: "ok",
+			data: {
+				ok: true,
+				data: {
+					...catalog,
+					credentialState: "invalid",
+					canClearSavedSignIn: true,
+				},
+				error: null,
+			},
+		});
+		const restored = await remoteAgent.catalog();
+		expect(restored.account).toBeNull();
+		expect(restored.canClearSavedSignIn).toBe(true);
+		expect(canSignIn(restored)).toBe(false);
+		expect(canRetrySavedSignIn(restored.credentialState)).toBe(false);
+		expect(canRetrySavedSignIn("locked")).toBe(true);
+		expect(canRetrySavedSignIn("connectionFailed")).toBe(true);
+		expect(canRetrySavedSignIn("reauthenticationRequired")).toBe(false);
+	});
+	it("does not report native sign-out success when durable deletion fails", async () => {
+		ipc.logout.mockResolvedValueOnce({
+			status: "ok",
+			data: {
+				ok: false,
+				data: null,
+				error: {
+					code: "remote_agent_credentials_locked",
+					message: "Unlock the system credential store",
+				},
+			},
+		});
+		await expect(remoteAgent.logout()).rejects.toThrow(
+			"Unlock the system credential store",
+		);
+	});
+});
 
 describe("mobile Remote Agent capabilities and identity", () => {
 	it("requires negotiated operations and route limits rather than assuming provider support", () => {

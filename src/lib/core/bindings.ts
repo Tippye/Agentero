@@ -5153,12 +5153,16 @@ export type RemoteAgentAccount = {
 	server: string,
 	expiresAt: number,
 	info: ConnectionInfo,
+	persistence: RemoteCredentialPersistence,
 };
 
 export type RemoteAgentCatalog = {
 	providers: ProviderDescriptor[],
 	defaultProvider: ProviderId,
 	account: RemoteAgentAccount | null,
+	persistence: RemoteCredentialPersistence,
+	credentialState: RemoteCredentialState,
+	canClearSavedSignIn: boolean,
 };
 
 export type RemoteAgentHostIdentity = {
@@ -5234,6 +5238,10 @@ export type RemoteConnectArgs = {
 	user?: string | null,
 	remotePath: string,
 };
+
+export type RemoteCredentialPersistence = "launchOnly" | "systemStore";
+
+export type RemoteCredentialState = "notChecked" | "launchOnly" | "missing" | "ready" | "locked" | "unavailable" | "invalid" | "reauthenticationRequired" | "connectionFailed";
 
 /**
  *  Source IDs must identify immutable events and survive history/stream replay.
