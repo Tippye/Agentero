@@ -1,4 +1,6 @@
-//! Application coordinator: typed provider operations and launch-only DSH credentials.
+//! Application coordinator: typed provider operations and native DSH credentials.
+mod lifecycle;
+mod stored_account;
 use crate::{
     core::error::{map_err, ApiResult, AppError},
     features::remote_agent::*,
@@ -10,17 +12,11 @@ use crate::{
         RemoteError,
     },
 };
+pub use lifecycle::{RemoteAgentAccounts, RemoteCredentialPersistence, RemoteCredentialState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::HashMap,
-    fs::File,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, fs::File, path::PathBuf, sync::Arc, time::Duration};
 use tauri::{Manager, State};
-use tokio::sync::Mutex;
 
 // Deliberately neither Debug nor Serialize: credentials never enter IPC or logs.
 struct LaunchAccount {
@@ -31,8 +27,6 @@ struct LaunchAccount {
     pins: HashMap<String, String>,
     view: RemoteAgentAccount,
 }
-#[derive(Default)]
-pub struct RemoteAgentAccounts(Mutex<Option<LaunchAccount>>);
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +35,7 @@ pub struct RemoteAgentAccount {
     pub server: String,
     pub expires_at: u64,
     pub info: ConnectionInfo,
+    pub persistence: RemoteCredentialPersistence,
 }
 #[derive(Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +43,9 @@ pub struct RemoteAgentCatalog {
     pub providers: Vec<ProviderDescriptor>,
     pub default_provider: ProviderId,
     pub account: Option<RemoteAgentAccount>,
+    pub persistence: RemoteCredentialPersistence,
+    pub credential_state: RemoteCredentialState,
+    pub can_clear_saved_sign_in: bool,
 }
 // No Debug, and never returned. Password exists only for the explicit login call.
 #[derive(Deserialize, specta::Type)]
@@ -153,45 +151,6 @@ fn configuration(account: &LaunchAccount) -> DshConnectionConfig {
 fn refresh_due(expires_at: u64, now: u64) -> bool {
     expires_at <= now.saturating_add(60_000)
 }
-async fn refresh_account(
-    account: &mut LaunchAccount,
-    provider: &DshRemoteProvider,
-) -> Result<(), AppError> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| missing())?
-        .as_millis() as u64;
-    if account.refresh_pending || account.credentials.refresh_token_expires_at <= now {
-        return Err(AppError::domain(
-            "remote_agent_reauthentication_required",
-            "This launch session requires signing out and signing in again",
-        ));
-    }
-    if !refresh_due(account.credentials.access_token_expires_at, now) {
-        return Ok(());
-    }
-    // Mark before awaiting: cancellation or an unknown refresh response never permits automatic replay.
-    account.refresh_pending = true;
-    let refreshed = account
-        .api
-        .refresh(
-            &account.identity.device_id,
-            &account.credentials.refresh_token,
-        )
-        .await
-        .map_err(remote)?;
-    account.credentials = refreshed;
-    account.view.expires_at = account.credentials.access_token_expires_at;
-    provider
-        .update_access_token(
-            &account.view.info.connection,
-            account.credentials.access_token.clone(),
-        )
-        .await
-        .map_err(remote)?;
-    account.refresh_pending = false;
-    Ok(())
-}
 async fn preflight(
     connection: &ConnectionRef,
     accounts: &RemoteAgentAccounts,
@@ -200,8 +159,10 @@ async fn preflight(
     if connection.provider_id.0 != DEFAULT_PROVIDER_ID {
         return Ok(());
     }
-    let mut current = accounts.0.lock().await;
-    refresh_account(account_for(&mut current, connection)?, provider).await
+    let mut current = accounts.current.lock().await;
+    current
+        .refresh(connection, provider, accounts.store.as_ref())
+        .await
 }
 
 #[tauri::command]
@@ -209,18 +170,26 @@ async fn preflight(
 pub async fn remote_agent_catalog(
     service: State<'_, RemoteAgentService>,
     accounts: State<'_, RemoteAgentAccounts>,
+    provider: State<'_, Arc<DshRemoteProvider>>,
 ) -> Result<ApiResult<RemoteAgentCatalog>, String> {
+    accounts.ensure_restored(&service, &provider).await;
     envelope(
         async {
+            let current = accounts.current.lock().await;
             Ok(RemoteAgentCatalog {
                 providers: service.providers()?,
                 default_provider: service.default_provider()?,
-                account: accounts.0.lock().await.as_ref().map(|a| a.view.clone()),
+                account: current.account.as_ref().map(|a| a.view.clone()),
+                persistence: accounts.persistence(),
+                credential_state: current.credential_state,
+                can_clear_saved_sign_in: accounts.store.is_some()
+                    && current.credential_state != RemoteCredentialState::Missing,
             })
         }
         .await,
     )
 }
+
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_agent_login(
@@ -231,11 +200,12 @@ pub async fn remote_agent_login(
 ) -> Result<ApiResult<RemoteAgentAccount>, String> {
     envelope(
         async {
-            let mut current = accounts.0.lock().await;
-            if current.is_some() {
+            accounts.ensure_restored(&service, &provider).await;
+            let mut current = accounts.current.lock().await;
+            if !current.can_sign_in(accounts.persistence()) {
                 return Err(AppError::domain(
                     "remote_agent_account_active",
-                    "Sign out before changing accounts",
+                    "Clear the saved sign-in before changing accounts",
                 ));
             }
             let api = ServerApi::new(&request.server, Duration::from_secs(20)).map_err(remote)?;
@@ -259,46 +229,31 @@ pub async fn remote_agent_login(
                 provider_id: DEFAULT_PROVIDER_ID.into(),
                 connection_id: ConnectionId(uuid::Uuid::new_v4().to_string()),
             };
-            provider
-                .configure(
-                    connection.connection_id.0.clone(),
-                    DshConnectionConfig {
-                        api: api.clone(),
-                        identity: identity.clone(),
-                        access_token: credentials.access_token.clone(),
-                        pinned_hosts: HashMap::new(),
-                    },
-                )
-                .await
-                .map_err(remote)?;
-            let info = match service
-                .connect(&ConnectRequest {
-                    connection: connection.clone(),
-                    config_version: 1,
-                })
-                .await
-            {
-                Ok(info) => info,
-                Err(error) => {
-                    let _ = provider.forget(&connection).await;
-                    return Err(error);
-                }
-            };
-            let view = RemoteAgentAccount {
-                account: login.account,
-                server: request.server,
-                expires_at: credentials.access_token_expires_at,
-                info,
-            };
-            *current = Some(LaunchAccount {
+            let account = LaunchAccount {
                 api,
                 identity,
-                credentials,
+                credentials: credentials.clone(),
                 refresh_pending: false,
                 pins: HashMap::new(),
-                view: view.clone(),
-            });
-            Ok(view)
+                view: RemoteAgentAccount {
+                    account: login.account,
+                    server: request.server,
+                    expires_at: credentials.access_token_expires_at,
+                    persistence: accounts.persistence(),
+                    info: ConnectionInfo {
+                        connection,
+                        capabilities: Capabilities {
+                            operations: vec![],
+                            authentication: vec![],
+                            backends: vec![],
+                            attachments: None,
+                        },
+                    },
+                },
+            };
+            current
+                .activate(account, accounts.store.as_ref(), &service, &provider)
+                .await
         }
         .await,
     )
@@ -312,14 +267,10 @@ pub async fn remote_agent_logout(
 ) -> Result<ApiResult<()>, String> {
     envelope(
         async {
-            let mut current = accounts.0.lock().await;
-            if let Some(account) = current.take() {
-                let connection = account.view.info.connection;
-                let disconnected = service.disconnect(&connection).await;
-                provider.forget(&connection).await.map_err(remote)?;
-                disconnected?;
-            }
-            Ok(())
+            let mut current = accounts.current.lock().await;
+            current
+                .clear(accounts.store.as_ref(), &service, &provider)
+                .await
         }
         .await,
     )
@@ -346,9 +297,11 @@ pub async fn remote_agent_host_identity(
 ) -> Result<ApiResult<RemoteAgentHostIdentity>, String> {
     envelope(
         async {
-            let mut accounts = accounts.0.lock().await;
-            let account = account_for(&mut accounts, &host.connection)?;
-            refresh_account(account, &provider).await?;
+            let mut current = accounts.current.lock().await;
+            current
+                .refresh(&host.connection, &provider, accounts.store.as_ref())
+                .await?;
+            let account = account_for(&mut current.account, &host.connection)?;
             let identity = account
                 .api
                 .host(&account.credentials.access_token, &host.host_id.0)
@@ -380,9 +333,11 @@ pub async fn remote_agent_trust_host(
 ) -> Result<ApiResult<ConnectionInfo>, String> {
     envelope(
         async {
-            let mut accounts = accounts.0.lock().await;
-            let account = account_for(&mut accounts, &host.connection)?;
-            refresh_account(account, &provider).await?;
+            let mut current = accounts.current.lock().await;
+            current
+                .refresh(&host.connection, &provider, accounts.store.as_ref())
+                .await?;
+            let account = account_for(&mut current.account, &host.connection)?;
             let identity = account
                 .api
                 .host(&account.credentials.access_token, &host.host_id.0)
@@ -393,10 +348,16 @@ pub async fn remote_agent_trust_host(
                 account.pins.get(&host.host_id.0),
                 Some(&expected_fingerprint),
             )?;
+            current
+                .pin(
+                    &host.connection,
+                    host.host_id.0.clone(),
+                    identity.identity_key,
+                    accounts.store.as_ref(),
+                )
+                .await?;
+            let account = account_for(&mut current.account, &host.connection)?;
             service.disconnect(&host.connection).await?;
-            account
-                .pins
-                .insert(host.host_id.0.clone(), identity.identity_key);
             provider
                 .configure(
                     host.connection.connection_id.0.clone(),
@@ -517,8 +478,8 @@ pub async fn remote_agent_upload(
             }
             preflight(&session.workspace.host.connection, &accounts, &provider).await?;
             let capabilities = {
-                let mut current = accounts.0.lock().await;
-                account_for(&mut current, &session.workspace.host.connection)?
+                let mut current = accounts.current.lock().await;
+                account_for(&mut current.account, &session.workspace.host.connection)?
                     .view
                     .info
                     .capabilities

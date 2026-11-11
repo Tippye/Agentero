@@ -108,6 +108,7 @@ log = { workspace = true }
 tauri-plugin-log = { version = "2.9.0", optional = true }
 fern = { version = "0.7.1", optional = true }
 async-trait = "0.1.91"
+thiserror = "2"
 sha2 = "0.11.0"
 hex = "0.4.3"
 walkdir = "2.5.0"
@@ -144,6 +145,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"], option
 tauri-plugin-window-state = { version = "2", optional = true }
 # Blocking client: telemetry flush happens in the synchronous RunEvent::Exit callback.
 posthog-rs = { version = "0.23", default-features = false, optional = true }
+
+# Rust-only API; do not register the plugin's generic secret commands in the webview.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-keyring-store = { version = "=0.3.2", default-features = false }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "=1.0.0"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 security-framework = "3.7"

@@ -7,7 +7,7 @@ import {
 	Send,
 	Square,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	Message,
@@ -42,6 +42,11 @@ import type {
 } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
+import {
+	canRetrySavedSignIn,
+	canSignIn,
+	credentialMessageKey,
+} from "@/lib/remote-agent/credentials";
 import {
 	belongsToConnection,
 	canUpload,
@@ -106,6 +111,10 @@ export function MobileRemoteAgentPage({
 	}
 	const journal = journalRef.current;
 	const capabilities = account?.info.capabilities;
+	const credentialMessage = catalog
+		? credentialMessageKey(catalog.credentialState)
+		: null;
+	const signInAllowed = canSignIn(catalog);
 	const selectedKey = session ? sessionKey(session) : null;
 	const currentSelectionKey = useRef(selectedKey);
 	currentSelectionKey.current = selectedKey;
@@ -126,6 +135,37 @@ export function MobileRemoteAgentPage({
 		setAttachments([]);
 		onSelectionChange?.(value);
 	}
+	const adoptCatalog = useCallback((value: RemoteAgentCatalog) => {
+		setCatalog(value);
+		setProviderId(
+			value.account?.info.connection.providerId ?? value.defaultProvider,
+		);
+		// Keep polling dependencies stable when a failed read only changes credential status.
+		setAccount((previous) =>
+			JSON.stringify(previous) === JSON.stringify(value.account)
+				? previous
+				: value.account,
+		);
+		if (!value.account) {
+			setSession(null);
+			setSnapshot(null);
+			setAttachments([]);
+		}
+	}, []);
+	async function reloadCatalog() {
+		const value = await remoteAgent.catalog();
+		adoptCatalog(value);
+		return value;
+	}
+	async function clearSignIn() {
+		await remoteAgent.logout();
+		await reloadCatalog();
+		setHosts([]);
+		setWorkspaces([]);
+		setWorkspace(null);
+		setSessions([]);
+		chooseSession(null);
+	}
 	async function run(action: () => Promise<void>) {
 		if (busyRef.current) return;
 		busyRef.current = true;
@@ -134,6 +174,11 @@ export function MobileRemoteAgentPage({
 			await action();
 		} catch (error) {
 			notifyError(errorText(error));
+			try {
+				await reloadCatalog();
+			} catch {
+				/* Keep the last observed account if IPC itself is unavailable. */
+			}
 		} finally {
 			busyRef.current = false;
 			setBusy(false);
@@ -156,11 +201,7 @@ export function MobileRemoteAgentPage({
 			.catalog()
 			.then(async (value) => {
 				if (cancelled) return;
-				setCatalog(value);
-				setProviderId(
-					value.account?.info.connection.providerId ?? value.defaultProvider,
-				);
-				setAccount(value.account);
+				adoptCatalog(value);
 				if (value.account) {
 					const rows = await remoteAgent.hosts(value.account.info.connection);
 					if (!cancelled) setHosts(rows);
@@ -172,7 +213,7 @@ export function MobileRemoteAgentPage({
 		return () => {
 			cancelled = true;
 		};
-	}, [active]);
+	}, [active, adoptCatalog]);
 	// Official snapshots include history and currently-owned interactions. Never replay writes on focus/reconnect.
 	useEffect(() => {
 		if (!active || !session || !supports(capabilities, "readSession")) return;
@@ -191,6 +232,12 @@ export function MobileRemoteAgentPage({
 				if (!cancelled) {
 					setLoading(false);
 					notifyError(errorText(error));
+					try {
+						const value = await remoteAgent.catalog();
+						if (!cancelled) adoptCatalog(value);
+					} catch {
+						/* Keep the observed history. */
+					}
 				}
 			}
 		};
@@ -199,7 +246,7 @@ export function MobileRemoteAgentPage({
 			cancelled = true;
 			clearTimeout(timer);
 		};
-	}, [active, session, capabilities]);
+	}, [active, session, capabilities, adoptCatalog]);
 
 	async function refresh() {
 		if (session && supports(capabilities, "readSession")) {
@@ -220,10 +267,14 @@ export function MobileRemoteAgentPage({
 		const outcome = await journal.dispatch(operationId, target, () =>
 			remoteAgent.execute({ operationId, mutation }),
 		);
-		if (outcome.status === "rejected") notifyError(outcome.message);
+		if (outcome.status === "rejected") {
+			notifyError(outcome.message);
+			await reloadCatalog();
+		}
 		return outcome;
 	}
 	async function login() {
+		if (!signInAllowed) return;
 		const submitted = password;
 		setPassword("");
 		const value = await remoteAgent.login({
@@ -232,6 +283,7 @@ export function MobileRemoteAgentPage({
 			password: submitted,
 		});
 		setAccount(value);
+		await reloadCatalog();
 		setHosts(await remoteAgent.hosts(value.info.connection));
 	}
 	async function trustHost() {
@@ -309,7 +361,10 @@ export function MobileRemoteAgentPage({
 			const attachment = outcome.result.attachment;
 			setAttachments((current) => [...current, attachment]);
 		}
-		if (outcome.status === "rejected") notifyError(outcome.message);
+		if (outcome.status === "rejected") {
+			notifyError(outcome.message);
+			await reloadCatalog();
+		}
 	}
 
 	return (
@@ -338,6 +393,43 @@ export function MobileRemoteAgentPage({
 				)}
 			</div>
 			<div className="min-h-0 flex-1 overflow-auto">
+				{catalog && credentialMessage && (
+					<div className="m-4 space-y-3 rounded-lg border p-3" role="status">
+						<p className="text-sm">{t(credentialMessage)}</p>
+						<div className="flex flex-wrap gap-2">
+							{canRetrySavedSignIn(catalog.credentialState) && (
+								<Button
+									variant="outline"
+									className="min-h-12"
+									disabled={busy}
+									onClick={() =>
+										void run(async () => {
+											const value = await reloadCatalog();
+											if (value.account)
+												setHosts(
+													await remoteAgent.hosts(
+														value.account.info.connection,
+													),
+												);
+										})
+									}
+								>
+									{t("remote.credentials.retry")}
+								</Button>
+							)}
+							{catalog.canClearSavedSignIn && (
+								<Button
+									variant="outline"
+									className="min-h-12"
+									disabled={busy}
+									onClick={() => void run(clearSignIn)}
+								>
+									{t("remote.credentials.clear")}
+								</Button>
+							)}
+						</div>
+					</div>
+				)}
 				{!account ? (
 					<form
 						className="mx-auto flex max-w-md flex-col gap-4 p-4"
@@ -415,12 +507,18 @@ export function MobileRemoteAgentPage({
 									/>
 								</label>
 								<p className="text-muted-foreground text-sm">
-									{t("remote.launchOnly")}
+									{catalog
+										? t(
+												catalog.persistence === "systemStore"
+													? "remote.secureSignIn"
+													: "remote.launchOnly",
+											)
+										: t("remote.credentials.checking")}
 								</p>
 								<Button
 									className="min-h-12"
 									type="submit"
-									disabled={busy || !password || !providerId}
+									disabled={busy || !password || !providerId || !signInAllowed}
 								>
 									{t("remote.login")}
 								</Button>
@@ -437,24 +535,18 @@ export function MobileRemoteAgentPage({
 							<div className="min-w-0 flex-1">
 								<p className="truncate">{account.account}</p>
 								<p className="text-muted-foreground">
-									{t("remote.launchOnly")}
+									{t(
+										account.persistence === "systemStore"
+											? "remote.secureSignIn"
+											: "remote.launchOnly",
+									)}
 								</p>
 							</div>
 							<Button
 								variant="outline"
 								className="min-h-11"
 								disabled={busy}
-								onClick={() =>
-									void run(async () => {
-										await remoteAgent.logout();
-										setAccount(null);
-										setHosts([]);
-										setWorkspaces([]);
-										setWorkspace(null);
-										setSessions([]);
-										chooseSession(null);
-									})
-								}
+								onClick={() => void run(clearSignIn)}
 							>
 								{t("remote.logout")}
 							</Button>
@@ -825,7 +917,11 @@ export function MobileRemoteAgentPage({
 					<DialogHeader>
 						<DialogTitle>{t("remote.trustTitle")}</DialogTitle>
 						<DialogDescription>
-							{t("remote.trustDescription")}
+							{t(
+								account?.persistence === "systemStore"
+									? "remote.trustDescriptionSecure"
+									: "remote.trustDescription",
+							)}
 						</DialogDescription>
 					</DialogHeader>
 					<p className="break-words">{identity?.name}</p>
@@ -865,7 +961,11 @@ export function MobileRemoteAgentPage({
 							}
 							onClick={() => void run(trustHost)}
 						>
-							{t("remote.trustConnect")}
+							{t(
+								account?.persistence === "systemStore"
+									? "remote.trustConnectSecure"
+									: "remote.trustConnect",
+							)}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
