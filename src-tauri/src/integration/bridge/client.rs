@@ -1,9 +1,11 @@
+use super::identity::ClientIdentityRepository;
 use super::{
-    connect_relay, next_frame, send_binary, send_text, BridgeClientIdentity,
-    BridgeClientIdentityStore, BridgeClientProfile, BridgeClientProfileStore, BridgeMessage,
-    BridgeOffer, E2eeHandshake, RelayEndpoint, RelayFrame, SessionCipher,
+    connect_relay, next_frame, send_binary, send_text, BridgeClientIdentity, BridgeClientProfile,
+    BridgeClientProfileStore, BridgeMessage, BridgeOffer, E2eeHandshake, RelayEndpoint, RelayFrame,
+    SessionCipher,
 };
 use crate::core::error::AppError;
+use crate::integration::credentials::CredentialStore;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use crypto_box::{PublicKey, SecretKey};
@@ -45,15 +47,23 @@ impl BridgeClientStatus {
 }
 
 pub struct BridgeClientController {
-    runtime: Mutex<Option<ClientRuntime>>,
+    state: Arc<Mutex<ClientState>>,
+    lifecycle: Arc<tokio::sync::Mutex<()>>,
+    identities: Arc<ClientIdentityRepository>,
+    profiles: BridgeClientProfileStore,
 }
-
+#[derive(Default)]
+struct ClientState {
+    generation: u64,
+    cancelled: u64,
+    runtime: Option<ClientRuntime>,
+}
 struct ClientRuntime {
+    profile: BridgeClientProfile,
     status: Arc<Mutex<BridgeClientStatus>>,
     commands: mpsc::Sender<ClientCommand>,
     stop: watch::Sender<bool>,
 }
-
 enum ClientCommand {
     Rpc {
         id: String,
@@ -62,112 +72,308 @@ enum ClientCommand {
         response: oneshot::Sender<Result<Value, AppError>>,
     },
 }
-
-impl BridgeClientController {
-    pub fn new() -> Self {
-        Self {
-            runtime: Mutex::new(None),
+#[derive(Clone)]
+struct ClientOwner {
+    state: Arc<Mutex<ClientState>>,
+    lifecycle: Arc<tokio::sync::Mutex<()>>,
+    generation: u64,
+    profiles: BridgeClientProfileStore,
+    profile: BridgeClientProfile,
+    expected_profile: Option<Vec<u8>>,
+    status: Arc<Mutex<BridgeClientStatus>>,
+}
+struct ClientLaunch {
+    offer: BridgeOffer,
+    identity: BridgeClientIdentity,
+    owner: ClientOwner,
+    commands: mpsc::Receiver<ClientCommand>,
+    stop: watch::Receiver<bool>,
+}
+impl ClientOwner {
+    fn is_current(&self) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|state| state.generation == self.generation && state.runtime.is_some())
+    }
+    fn ensure_current(&self, stop: &watch::Receiver<bool>) -> Result<(), AppError> {
+        if *stop.borrow() || !self.is_current() {
+            return Err(transport_interrupted());
+        }
+        Ok(())
+    }
+    async fn while_current<T>(
+        &self,
+        stop: &mut watch::Receiver<bool>,
+        transport: impl std::future::Future<Output = T>,
+    ) -> Result<T, AppError> {
+        self.ensure_current(stop)?;
+        tokio::select! {
+            biased;
+            _ = stop.changed() => Err(transport_interrupted()),
+            result = transport => { self.ensure_current(stop)?; Ok(result) }
         }
     }
+    fn emit(&self, app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
+        // Keep this short state guard through the synchronous event publication.
+        // A superseded transport must not publish status for its replacement.
+        if let Ok(state) = self.state.lock() {
+            if state.generation == self.generation && state.runtime.is_some() {
+                let _ = app.emit(event, payload);
+            }
+        }
+    }
+    async fn mark_paired(&self) -> Result<bool, AppError> {
+        let _owner = self.lifecycle.lock().await;
+        let state = self.state.lock().map_err(|_| client_lock())?;
+        if state.generation != self.generation || state.runtime.is_none() {
+            return Ok(false);
+        }
+        let mut current = self.status.lock().map_err(|_| client_lock())?;
+        if current.paired {
+            return Ok(true);
+        }
+        let mut profile = self.profile.clone();
+        profile.paired = true;
+        if !self
+            .profiles
+            .save_if_snapshot(&self.expected_profile, &profile)?
+        {
+            return Err(AppError::domain(
+                "bridge_profile_changed",
+                "Bridge profile changed while pairing; reconnect explicitly",
+            ));
+        }
+        current.paired = true;
+        current.last_error = None;
+        Ok(true)
+    }
+}
+fn client_lock() -> AppError {
+    AppError::message("Bridge client lock poisoned")
+}
+fn stale_client() -> AppError {
+    AppError::domain(
+        "bridge_client_stale",
+        "Bridge connection was superseded or disconnected",
+    )
+}
+const UNCERTAIN_TRANSPORT: &str =
+    "Bridge transport closed; an admitted RPC may already have executed";
+fn transport_interrupted() -> AppError {
+    AppError::domain("bridge_client_stale", UNCERTAIN_TRANSPORT)
+}
+fn fail_queued(commands: &mut mpsc::Receiver<ClientCommand>) {
+    while let Ok(ClientCommand::Rpc { response, .. }) = commands.try_recv() {
+        let _ = response.send(Err(transport_interrupted()));
+    }
+}
+fn profile_status(profile: &BridgeClientProfile, offer: &BridgeOffer) -> BridgeClientStatus {
+    BridgeClientStatus {
+        connected: false,
+        paired: profile.paired,
+        server_id: Some(offer.server_id.clone()),
+        host_name: Some(offer.host_name.clone()),
+        relay_endpoint: Some(offer.relay.endpoint.clone()),
+        vault_name: None,
+        last_error: None,
+    }
+}
+impl BridgeClientController {
+    pub fn new() -> Self {
+        Self::with_credentials(None)
+    }
+    pub fn with_credentials(store: Option<CredentialStore>) -> Self {
+        Self::with_repository(
+            Arc::new(ClientIdentityRepository::new(store)),
+            BridgeClientProfileStore::at_default_path(),
+        )
+    }
+    fn with_repository(
+        identities: Arc<ClientIdentityRepository>,
+        profiles: BridgeClientProfileStore,
+    ) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(ClientState::default())),
+            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            identities,
+            profiles,
+        }
+    }
+    fn cancellation(&self) -> Result<u64, AppError> {
+        Ok(self.state.lock().map_err(|_| client_lock())?.cancelled)
+    }
+    fn generation_after(&self, cancellation: u64) -> Result<u64, AppError> {
+        let state = self.state.lock().map_err(|_| client_lock())?;
+        if state.cancelled != cancellation {
+            return Err(stale_client());
+        }
+        Ok(state.generation)
+    }
 
-    pub fn connect(
+    pub async fn connect(
         &self,
         app: AppHandle,
         offer_url: String,
         device_name: String,
     ) -> Result<BridgeClientStatus, AppError> {
-        let device_name = device_name.trim().to_string();
+        self.connect_owned(offer_url, device_name, move |launch| {
+            tauri::async_runtime::spawn(run_client_loop(app, launch));
+        })
+        .await
+    }
+    async fn connect_owned(
+        &self,
+        offer_url: String,
+        device_name: String,
+        launch: impl FnOnce(ClientLaunch),
+    ) -> Result<BridgeClientStatus, AppError> {
+        let cancellation = self.cancellation()?;
+        let _owner = self.lifecycle.lock().await;
+        let generation = self.generation_after(cancellation)?;
+        let device_name = device_name.trim().to_owned();
         if device_name.is_empty() {
             return Err(AppError::message("device name is required"));
         }
+        let offer = BridgeOffer::from_pair_url(&offer_url)?;
+        let expected_profile = self.profiles.snapshot()?;
+        let identity = self.identities.acquire(true).await?;
         let profile = BridgeClientProfile {
             offer_url,
             device_name,
             paired: false,
         };
-        BridgeClientProfileStore::at_default_path().save(&profile)?;
-        self.start_profile(app, profile)
+        let prepared = self.install(profile, offer, identity, expected_profile, generation)?;
+        let status = status_snapshot(&prepared.owner.status)?;
+        launch(prepared);
+        Ok(status)
     }
-
-    pub fn resume(&self, app: AppHandle) -> Result<BridgeClientStatus, AppError> {
-        let Some(profile) = BridgeClientProfileStore::at_default_path().load()? else {
-            return Ok(BridgeClientStatus::disconnected());
-        };
-        if !profile.paired {
-            return Ok(BridgeClientStatus::disconnected());
-        }
-        self.start_profile(app, profile)
+    pub async fn resume(&self, app: AppHandle) -> Result<BridgeClientStatus, AppError> {
+        self.resume_owned(move |launch| {
+            tauri::async_runtime::spawn(run_client_loop(app, launch));
+        })
+        .await
     }
-
-    fn start_profile(
+    async fn resume_owned(
         &self,
-        app: AppHandle,
-        profile: BridgeClientProfile,
+        launch: impl FnOnce(ClientLaunch),
     ) -> Result<BridgeClientStatus, AppError> {
+        let cancellation = self.cancellation()?;
+        let _owner = self.lifecycle.lock().await;
+        let generation = self.generation_after(cancellation)?;
+        let expected_profile = self.profiles.snapshot()?;
+        let Some(raw) = &expected_profile else {
+            return self.status();
+        };
+        let profile: BridgeClientProfile = serde_json::from_slice(raw)?;
+        if !profile.paired {
+            return self.status();
+        }
         let offer = BridgeOffer::from_pair_url(&profile.offer_url)?;
-        let identity = BridgeClientIdentityStore::at_default_path().load_or_create()?;
-        self.disconnect()?;
-
-        let status = Arc::new(Mutex::new(BridgeClientStatus {
-            connected: false,
-            paired: profile.paired,
-            server_id: Some(offer.server_id.clone()),
-            host_name: Some(offer.host_name.clone()),
-            relay_endpoint: Some(offer.relay.endpoint.clone()),
-            vault_name: None,
-            last_error: None,
-        }));
-        let (command_tx, command_rx) = mpsc::channel(64);
+        // Resume is never an identity-creation path, including after reset.
+        {
+            let state = self.state.lock().map_err(|_| client_lock())?;
+            if let Some(runtime) = &state.runtime {
+                let current = status_snapshot(&runtime.status)?;
+                if current.paired
+                    && runtime.profile.offer_url == profile.offer_url
+                    && runtime.profile.device_name == profile.device_name
+                {
+                    return Ok(current);
+                }
+                // Visibility resume must not interrupt a newer explicit Pair.
+                if !current.paired {
+                    return Ok(current);
+                }
+            }
+        }
+        let identity = self.identities.acquire(false).await?;
+        let prepared = self.install(profile, offer, identity, expected_profile, generation)?;
+        let status = status_snapshot(&prepared.owner.status)?;
+        launch(prepared);
+        Ok(status)
+    }
+    fn install(
+        &self,
+        profile: BridgeClientProfile,
+        offer: BridgeOffer,
+        identity: BridgeClientIdentity,
+        expected_profile: Option<Vec<u8>>,
+        expected_generation: u64,
+    ) -> Result<ClientLaunch, AppError> {
+        let mut state = self.state.lock().map_err(|_| client_lock())?;
+        if state.generation != expected_generation {
+            return Err(stale_client());
+        }
+        let generation = state.generation.checked_add(1).ok_or_else(stale_client)?;
+        let status = Arc::new(Mutex::new(profile_status(&profile, &offer)));
+        let (commands, command_rx) = mpsc::channel(64);
         let (stop, stop_rx) = watch::channel(false);
-        *self
-            .runtime
-            .lock()
-            .map_err(|_| AppError::message("Bridge client lock poisoned"))? = Some(ClientRuntime {
-            status: Arc::clone(&status),
-            commands: command_tx,
+        if let Some(old) = state.runtime.take() {
+            let _ = old.stop.send(true);
+        }
+        state.generation = generation;
+        state.runtime = Some(ClientRuntime {
+            profile: profile.clone(),
+            status: status.clone(),
+            commands,
             stop,
         });
-        tauri::async_runtime::spawn(run_client_loop(
-            app,
+        Ok(ClientLaunch {
             offer,
             identity,
-            profile.device_name,
-            Arc::clone(&status),
-            command_rx,
-            stop_rx,
-        ));
-        status_snapshot(&status)
+            owner: ClientOwner {
+                state: self.state.clone(),
+                lifecycle: self.lifecycle.clone(),
+                generation,
+                profiles: self.profiles.clone(),
+                profile,
+                expected_profile,
+                status,
+            },
+            commands: command_rx,
+            stop: stop_rx,
+        })
     }
-
+    /// Stop only the live transport. Durable identity and pairing are preserved.
     pub fn disconnect(&self) -> Result<(), AppError> {
-        let runtime = self
-            .runtime
-            .lock()
-            .map_err(|_| AppError::message("Bridge client lock poisoned"))?
-            .take();
-        if let Some(runtime) = runtime {
+        let mut state = self.state.lock().map_err(|_| client_lock())?;
+        state.generation = state.generation.checked_add(1).ok_or_else(stale_client)?;
+        state.cancelled = state.cancelled.checked_add(1).ok_or_else(stale_client)?;
+        if let Some(runtime) = state.runtime.take() {
             let _ = runtime.stop.send(true);
         }
         Ok(())
     }
-
     pub fn status(&self) -> Result<BridgeClientStatus, AppError> {
-        let guard = self
-            .runtime
-            .lock()
-            .map_err(|_| AppError::message("Bridge client lock poisoned"))?;
-        guard
-            .as_ref()
-            .map(|runtime| status_snapshot(&runtime.status))
-            .transpose()?
-            .map_or_else(|| Ok(BridgeClientStatus::disconnected()), Ok)
+        {
+            let state = self.state.lock().map_err(|_| client_lock())?;
+            if let Some(runtime) = &state.runtime {
+                return status_snapshot(&runtime.status);
+            }
+        }
+        // Public metadata only: default DSH launch/status never reads Bridge keys.
+        match self.profiles.load()? {
+            Some(profile) => {
+                let offer = BridgeOffer::from_pair_url(&profile.offer_url)?;
+                Ok(profile_status(&profile, &offer))
+            }
+            None => Ok(BridgeClientStatus::disconnected()),
+        }
     }
-
+    pub async fn reset_identity(&self) -> Result<BridgeClientStatus, AppError> {
+        let _owner = self.lifecycle.lock().await;
+        self.identities.begin_reset().await?;
+        // Tombstone is durable before transport stop, source deletion or profile purge.
+        self.disconnect()?;
+        self.identities.finish_reset(&self.profiles).await?;
+        self.status()
+    }
     pub async fn rpc(&self, method: String, params: Value) -> Result<Value, AppError> {
         let commands = self
-            .runtime
+            .state
             .lock()
-            .map_err(|_| AppError::message("Bridge client lock poisoned"))?
+            .map_err(|_| client_lock())?
+            .runtime
             .as_ref()
             .map(|runtime| runtime.commands.clone())
             .ok_or_else(|| AppError::message("No desktop connection"))?;
@@ -193,37 +399,45 @@ impl Default for BridgeClientController {
     }
 }
 
-async fn run_client_loop(
-    app: AppHandle,
-    offer: BridgeOffer,
-    identity: BridgeClientIdentity,
-    device_name: String,
-    status: Arc<Mutex<BridgeClientStatus>>,
-    mut commands: mpsc::Receiver<ClientCommand>,
-    mut stop: watch::Receiver<bool>,
-) {
+async fn run_client_loop(app: AppHandle, launch: ClientLaunch) {
+    let ClientLaunch {
+        offer,
+        identity,
+        owner,
+        mut commands,
+        mut stop,
+    } = launch;
+    let status = owner.status.clone();
+    let device_name = owner.profile.device_name.clone();
     let endpoint = match RelayEndpoint::parse(&offer.relay.endpoint) {
         Ok(endpoint) => endpoint,
         Err(error) => {
-            set_error(&app, &status, error.to_string());
+            set_error(&app, &status, error.to_string(), &owner);
             return;
         }
     };
     loop {
-        if *stop.borrow() {
+        if *stop.borrow() || !owner.is_current() {
             return;
         }
         let url = match endpoint.connection_url(&offer.server_id, "client", None) {
             Ok(url) => url,
             Err(error) => {
-                set_error(&app, &status, error.to_string());
+                set_error(&app, &status, error.to_string(), &owner);
                 return;
             }
         };
-        emit_progress(&app, "relayConnecting");
-        match connect_relay(url).await {
+        emit_progress(&app, "relayConnecting", &owner);
+        let connection = match owner.while_current(&mut stop, connect_relay(url)).await {
+            Ok(result) => result,
+            Err(_) => {
+                fail_queued(&mut commands);
+                return;
+            }
+        };
+        match connection {
             Ok(mut socket) => {
-                emit_progress(&app, "e2eeHandshake");
+                emit_progress(&app, "e2eeHandshake", &owner);
                 if let Err(error) = run_client_session(
                     &app,
                     &mut socket,
@@ -231,18 +445,22 @@ async fn run_client_loop(
                     &identity,
                     &device_name,
                     &status,
-                    &BridgeClientProfileStore::at_default_path(),
+                    &owner,
                     &mut commands,
                     &mut stop,
                 )
                 .await
                 {
-                    set_error(&app, &status, error.to_string());
+                    set_error(&app, &status, error.to_string(), &owner);
                 }
             }
-            Err(error) => set_error(&app, &status, error.to_string()),
+            Err(error) => set_error(&app, &status, error.to_string(), &owner),
         }
-        set_connected(&app, &status, false);
+        if owner.ensure_current(&stop).is_err() {
+            fail_queued(&mut commands);
+            return;
+        }
+        set_connected(&app, &status, false, &owner);
         tokio::select! {
             _ = tokio::time::sleep(RECONNECT_DELAY) => {}
             changed = stop.changed() => if changed.is_err() || *stop.borrow() { return; },
@@ -258,48 +476,57 @@ async fn run_client_session(
     identity: &BridgeClientIdentity,
     device_name: &str,
     status: &Arc<Mutex<BridgeClientStatus>>,
-    profile_store: &BridgeClientProfileStore,
+    owner: &ClientOwner,
     commands: &mut mpsc::Receiver<ClientCommand>,
     stop: &mut watch::Receiver<bool>,
 ) -> Result<(), AppError> {
+    owner.ensure_current(stop)?;
     let host_public = decode_public_key(&offer.host_public_key_b64)?;
     let ephemeral = SecretKey::generate(&mut crypto_box::aead::OsRng);
-    send_text(
-        socket,
-        serde_json::to_string(&E2eeHandshake::hello(ephemeral.public_key().as_bytes()))?,
-    )
-    .await?;
-    let RelayFrame::Text(payload) = next_frame(socket).await? else {
+    owner
+        .while_current(
+            stop,
+            send_text(
+                socket,
+                serde_json::to_string(&E2eeHandshake::hello(ephemeral.public_key().as_bytes()))?,
+            ),
+        )
+        .await??;
+    let RelayFrame::Text(payload) = owner.while_current(stop, next_frame(socket)).await?? else {
         return Err(AppError::message("Relay closed during E2EE handshake"));
     };
     if serde_json::from_str::<E2eeHandshake>(&payload)? != E2eeHandshake::E2eeReady {
         return Err(AppError::message("Desktop rejected E2EE handshake"));
     }
     let cipher = SessionCipher::from_keys(&ephemeral, &host_public);
+    let pair_request_id = format!("pair_{}", uuid::Uuid::new_v4().simple());
     let initial = if status_snapshot(status)?.paired {
-        emit_progress(app, "authenticating");
+        emit_progress(app, "authenticating", owner);
         BridgeMessage::Hello {
             device_id: identity.device_id.clone(),
             protocol_version: 1,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     } else {
-        emit_progress(app, "pairing");
+        emit_progress(app, "pairing", owner);
         BridgeMessage::PairRequest {
-            request_id: format!("pair_{}", uuid::Uuid::new_v4().simple()),
+            request_id: pair_request_id.clone(),
             device_id: identity.device_id.clone(),
             device_name: device_name.to_string(),
             device_public_key_b64: identity.public_key_b64.clone(),
         }
     };
-    send_encrypted(socket, &cipher, &initial).await?;
-    set_connected(app, status, true);
-    emit_progress(app, "connected");
+    owner
+        .while_current(stop, send_encrypted(socket, &cipher, &initial))
+        .await??;
+    set_connected(app, status, true, owner);
+    emit_progress(app, "connected", owner);
     let mut pending = HashMap::new();
 
     loop {
-        if *stop.borrow() {
-            fail_pending(&mut pending, "Bridge connection was closed");
+        if *stop.borrow() || !owner.is_current() {
+            fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+            fail_queued(commands);
             return Ok(());
         }
         while let Ok(command) = commands.try_recv() {
@@ -309,29 +536,59 @@ async fn run_client_session(
                 params,
                 response,
             } = command;
+            if let Err(error) = owner.ensure_current(stop) {
+                let _ = response.send(Err(error));
+                fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+                fail_queued(commands);
+                return Ok(());
+            }
             if !status_snapshot(status)?.paired {
                 let _ = response.send(Err(AppError::message(
                     "Pair this device before using remote access",
                 )));
                 continue;
             }
-            if let Err(error) = send_encrypted(
-                socket,
-                &cipher,
-                &BridgeMessage::Rpc {
-                    id: id.clone(),
-                    method,
-                    params,
-                },
-            )
-            .await
+            if let Err(error) = owner
+                .while_current(
+                    stop,
+                    send_encrypted(
+                        socket,
+                        &cipher,
+                        &BridgeMessage::Rpc {
+                            id: id.clone(),
+                            method,
+                            params,
+                        },
+                    ),
+                )
+                .await
+                .and_then(|result| result)
             {
                 let _ = response.send(Err(error));
+                if owner.ensure_current(stop).is_err() {
+                    fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+                    fail_queued(commands);
+                    return Ok(());
+                }
                 continue;
             }
             pending.insert(id, response);
         }
-        match tokio::time::timeout(FRAME_POLL_INTERVAL, next_frame(socket)).await {
+        let frame = match owner
+            .while_current(
+                stop,
+                tokio::time::timeout(FRAME_POLL_INTERVAL, next_frame(socket)),
+            )
+            .await
+        {
+            Ok(frame) => frame,
+            Err(error) => {
+                fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+                fail_queued(commands);
+                return Err(error);
+            }
+        };
+        match frame {
             Err(_) => continue,
             Ok(Err(error)) => {
                 fail_pending(&mut pending, &error.to_string());
@@ -348,55 +605,74 @@ async fn run_client_session(
                     let nonce = URL_SAFE_NO_PAD.decode(nonce_b64).map_err(|_| {
                         AppError::message("Bridge challenge is not valid base64url")
                     })?;
-                    send_encrypted(
-                        socket,
-                        &cipher,
-                        &BridgeMessage::DeviceProof {
-                            signature_b64: identity.sign_challenge(&nonce)?,
-                        },
-                    )
-                    .await?;
+                    if let Err(error) = owner.ensure_current(stop) {
+                        fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+                        fail_queued(commands);
+                        return Err(error);
+                    }
+                    let proof = BridgeMessage::DeviceProof {
+                        signature_b64: identity.sign_challenge(&nonce)?,
+                    };
+                    if let Err(error) = owner
+                        .while_current(stop, send_encrypted(socket, &cipher, &proof))
+                        .await
+                        .and_then(|result| result)
+                    {
+                        fail_pending(&mut pending, UNCERTAIN_TRANSPORT);
+                        fail_queued(commands);
+                        return Err(error);
+                    }
                 } else {
-                    handle_message(app, status, &mut pending, profile_store, message)?;
+                    handle_message(app, status, &mut pending, owner, &pair_request_id, message)
+                        .await?;
                 }
             }
         }
     }
 }
 
-fn handle_message(
+async fn handle_message(
     app: &AppHandle,
     status: &Arc<Mutex<BridgeClientStatus>>,
     pending: &mut HashMap<String, oneshot::Sender<Result<Value, AppError>>>,
-    profile_store: &BridgeClientProfileStore,
+    owner: &ClientOwner,
+    pair_request_id: &str,
     message: BridgeMessage,
 ) -> Result<(), AppError> {
+    if !owner.is_current() {
+        return Ok(());
+    }
     match message {
         BridgeMessage::PairPending {
             request_id,
             verification_code,
         } => {
-            let _ = app.emit(
+            if request_id != pair_request_id {
+                return Ok(());
+            }
+            owner.emit(
+                app,
                 "bridge:pair-pending",
                 serde_json::json!({"requestId": request_id, "verificationCode": verification_code}),
             );
         }
-        BridgeMessage::PairOk { .. } => {
-            profile_store.mark_paired()?;
-            let mut current = status
-                .lock()
-                .map_err(|_| AppError::message("Bridge client status lock poisoned"))?;
-            current.paired = true;
-            current.last_error = None;
-            let _ = app.emit("bridge:status", current.clone());
+        BridgeMessage::PairOk { request_id } => {
+            if !status_snapshot(status)?.paired && request_id != pair_request_id {
+                return Ok(());
+            }
+            if owner.mark_paired().await? {
+                owner.emit(app, "bridge:status", status_snapshot(status)?);
+            }
         }
-        BridgeMessage::PairDenied { reason, .. } => set_error(app, status, reason),
+        BridgeMessage::PairDenied { reason, .. } => set_error(app, status, reason, owner),
         BridgeMessage::ServerInfo { vault_name, .. } => {
             let mut current = status
                 .lock()
                 .map_err(|_| AppError::message("Bridge client status lock poisoned"))?;
             current.vault_name = vault_name;
-            let _ = app.emit("bridge:status", current.clone());
+            let snapshot = current.clone();
+            drop(current);
+            owner.emit(app, "bridge:status", snapshot);
         }
         BridgeMessage::RpcResult {
             id,
@@ -419,7 +695,7 @@ fn handle_message(
         }
         BridgeMessage::Event { name, payload } => {
             let event = format!("bridge:event:{name}");
-            let _ = app.emit(&event, payload);
+            owner.emit(app, &event, payload);
         }
         _ => {}
     }
@@ -452,27 +728,45 @@ fn status_snapshot(
         .map_err(|_| AppError::message("Bridge client status lock poisoned"))
 }
 
-fn set_connected(app: &AppHandle, status: &Arc<Mutex<BridgeClientStatus>>, connected: bool) {
-    if let Ok(mut current) = status.lock() {
+fn set_connected(
+    app: &AppHandle,
+    status: &Arc<Mutex<BridgeClientStatus>>,
+    connected: bool,
+    owner: &ClientOwner,
+) {
+    let snapshot = status.lock().ok().map(|mut current| {
         current.connected = connected;
         if connected {
             current.last_error = None;
         }
-        let _ = app.emit("bridge:status", current.clone());
+        current.clone()
+    });
+    if let Some(snapshot) = snapshot {
+        owner.emit(app, "bridge:status", snapshot);
     }
 }
-
-fn emit_progress(app: &AppHandle, phase: &str) {
-    let _ = app.emit("bridge:progress", phase);
+fn emit_progress(app: &AppHandle, phase: &str, owner: &ClientOwner) {
+    owner.emit(app, "bridge:progress", phase);
 }
-
-fn set_error(app: &AppHandle, status: &Arc<Mutex<BridgeClientStatus>>, error: String) {
-    if let Ok(mut current) = status.lock() {
+fn set_error(
+    app: &AppHandle,
+    status: &Arc<Mutex<BridgeClientStatus>>,
+    error: String,
+    owner: &ClientOwner,
+) {
+    let snapshot = status.lock().ok().map(|mut current| {
         current.connected = false;
         current.last_error = Some(error);
-        let _ = app.emit("bridge:status", current.clone());
+        current.clone()
+    });
+    if let Some(snapshot) = snapshot {
+        owner.emit(app, "bridge:status", snapshot);
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
 
 fn fail_pending(
     pending: &mut HashMap<String, oneshot::Sender<Result<Value, AppError>>>,

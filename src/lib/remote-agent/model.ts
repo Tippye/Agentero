@@ -2,6 +2,7 @@ import type {
 	Capabilities,
 	Capability,
 	ConnectionRef,
+	JournalEntry,
 	OperationOutcome,
 	Question,
 	QuestionAnswer,
@@ -141,6 +142,45 @@ export class OperationJournal {
 	}
 	all(): OperationEntry[] {
 		return [...this.entries.values()];
+	}
+	/** Merge native restart records; restoring observations never sends a request. */
+	restore(connection: ConnectionRef, records: JournalEntry[]): void {
+		for (const record of records) {
+			if (
+				record.version !== 1 ||
+				record.connection.providerId !== connection.providerId ||
+				record.connection.connectionId !== connection.connectionId
+			)
+				throw new Error("Remote operation journal crossed its connection");
+			const context = record.context;
+			const previous = this.entries.get(record.operationId);
+			const target = !context
+				? (previous?.target ??
+					JSON.stringify([
+						connection.providerId,
+						connection.connectionId,
+						null,
+					]))
+				: context.type === "createSession"
+					? workspaceKey(context.workspace)
+					: sessionKey(context.session);
+			if (!belongsToConnection(target, connection))
+				throw new Error("Remote operation journal crossed its target");
+			if (previous && previous.target !== target)
+				throw new Error("Operation ID belongs to another target");
+			if (this.pending.has(record.operationId)) continue;
+			if (
+				previous &&
+				["succeeded", "rejected"].includes(previous.outcome.status)
+			)
+				continue;
+			this.entries.set(record.operationId, {
+				id: record.operationId,
+				target,
+				outcome: record.outcome,
+			});
+		}
+		this.publish();
 	}
 	blocked(target: string): boolean {
 		return this.all().some(

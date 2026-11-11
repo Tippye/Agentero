@@ -18,6 +18,8 @@ pub mod mcp;
 #[cfg(feature = "desktop")]
 pub mod remote;
 #[cfg(feature = "desktop")]
+pub mod remote_agent_journal;
+#[cfg(feature = "desktop")]
 pub mod sync;
 
 #[cfg(all(

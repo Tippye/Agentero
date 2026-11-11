@@ -50,12 +50,29 @@ before checking connectivity/capabilities or awaiting the lookup. A missing,
 expired, unsupported or failed receipt query cannot make that ID eligible for
 redispatch. A definitive receipt can resolve the cached outcome.
 
-The journal is process-local, retains request data for the service lifetime and
-survives disconnect/resume within that lifetime. Durable pending-operation
-storage is an application integration responsibility. After restart the caller
-must restore retained IDs through `lookup_receipt` before submitting new work;
-the service cannot infer a forgotten operation ID. An absent receipt never proves
-the remote operation did not execute. There are no retry loops for mutations.
+The default desktop journal is in-memory. `RemoteAgentService::with_journal`
+accepts an object-safe `OperationJournal`; mobile application integration injects
+the lazy `SqliteOperationJournal` in its private app-data directory, outside every
+Vault. Journal failures block mutations without blocking read-only provider APIs.
+`local_operations` and `local_outcome` restore IDs/outcomes offline without provider
+registration, credential refresh or remote requests.
+
+Only a canonical SHA-256 request digest, typed target/kind references and validated
+outcomes are retained. Prompts, session titles, question answers, attachment bytes,
+local paths and provider diagnostic strings are excluded. Unknown/rejection
+messages are fixed safe text. Imported receipts without a request digest stay
+non-dispatchable and cannot confirm subsequently supplied arguments.
+
+An atomic durable `Unknown` reservation must complete before provider dispatch.
+Cancellation or an outcome-write failure leaves the operation uncertain; after
+provider admission, native callers receive `Unknown`, never a preflight rejection.
+The private SQLite adapter uses a strict versioned schema, FULL synchronous
+transactions, Unix directory fsync and owner-only files. A managed marker prevents
+missing databases or operation directories from being silently recreated; the
+marker lives alongside the operation directory in private app data. Corrupt/future storage fails
+closed. Reservations are atomic across service instances; terminal outcomes never
+downgrade, and uncertain entries are never pruned. An absent official receipt never
+proves the remote operation did not execute. There are no mutation retry loops.
 
 ## Events and recovery
 

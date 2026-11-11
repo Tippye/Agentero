@@ -443,6 +443,16 @@ pub async fn remote_agent_execute(
     }
     envelope(service.execute(&request).await)
 }
+/// Read this device's journal without refreshing credentials or contacting a Host.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_agent_local_operations(
+    connection: ConnectionRef,
+    service: State<'_, RemoteAgentService>,
+) -> Result<ApiResult<Vec<JournalEntry>>, String> {
+    envelope(service.local_operations(&connection).await)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_agent_receipt(

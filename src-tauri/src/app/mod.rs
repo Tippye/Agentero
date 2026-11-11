@@ -51,7 +51,17 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
     let import_concurrency = settings_store.batch_import_concurrency();
     let translate_concurrency = settings_store.auto_translate_import_concurrency();
     app.manage(settings_store);
+    #[cfg(desktop)]
     let remote_agents = crate::features::remote_agent::RemoteAgentService::default();
+    #[cfg(mobile)]
+    let remote_agents = crate::features::remote_agent::RemoteAgentService::with_journal(Arc::new(
+        crate::integration::remote_agent_journal::SqliteOperationJournal::new(
+            app.path()
+                .app_data_dir()
+                .map_err(|error| crate::core::error::AppError::message(error.to_string()))?
+                .join("remote-agent"),
+        ),
+    ));
     let dsh_remote =
         Arc::new(crate::integration::dsh_remote::provider::DshRemoteProvider::default());
     remote_agents.register(dsh_remote.clone())?;
@@ -65,8 +75,10 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
         credentials.clone(),
     ));
     // All native secret consumers share the same backend health and mutation lane.
+    app.manage(
+        crate::integration::bridge::BridgeClientController::with_credentials(credentials.clone()),
+    );
     app.manage(credentials);
-    app.manage(crate::integration::bridge::BridgeClientController::new());
     app.manage(
         crate::features::jobs::JobCenter::with_layout_backend(&layout_backend)
             .with_import_concurrency(import_concurrency)
