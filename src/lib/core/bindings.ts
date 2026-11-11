@@ -663,13 +663,20 @@ export const commands = {
 	zoteroSync: (args: ZoteroSyncArgs, onProgress: Channel<SyncProgress>) => __TAURI_INVOKE<ApiResult<ZoteroSyncResult>>("zotero_sync", { args, onProgress }),
 	/**  Current sync binding + last-pass info for the settings pane. */
 	syncGetStatus: (args: SyncVaultArgs) => typedError<ApiResult<SyncStatus_Serialize>, string>(__TAURI_INVOKE("sync_get_status", { args })),
-	/**  Validate + connection-test + persist the S3 binding for a vault. */
-	syncConfigure: (args: SyncConfigureArgs) => typedError<ApiResult<SyncStatus_Serialize>, string>(__TAURI_INVOKE("sync_configure", { args })),
-	/**  Remove the binding and local sync state (remote data stays untouched). */
+	/**  Validate and probe before publishing a protected credential reference. */
+	syncConfigure: (args: SyncConfigureArgs_Deserialize) => typedError<ApiResult<SyncStatus_Serialize>, string>(__TAURI_INVOKE("sync_configure", { args })),
+	/**  Clear protected generations before reporting a disconnected binding. */
 	syncDisconnect: (args: SyncVaultArgs) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("sync_disconnect", { args })),
 	/**  One full sync pass (manual trigger from the settings pane). */
 	syncNow: (args: SyncVaultArgs) => typedError<ApiResult<SyncOutcome>, string>(__TAURI_INVOKE("sync_now", { args })),
 	syncScopeSizes: (args: SyncVaultArgs) => typedError<ApiResult<SyncScopeSizes>, string>(__TAURI_INVOKE("sync_scope_sizes", { args })),
+	syncGetDownloadPolicy: (args: SyncVaultArgs) => typedError<ApiResult<DownloadPolicy>, string>(__TAURI_INVOKE("sync_get_download_policy", { args })),
+	syncSetDownloadPolicy: (args: SyncDownloadPolicyArgs) => typedError<ApiResult<DownloadPolicy>, string>(__TAURI_INVOKE("sync_set_download_policy", { args })),
+	syncListPaperAvailability: (args: SyncVaultArgs) => typedError<ApiResult<PaperAvailability[]>, string>(__TAURI_INVOKE("sync_list_paper_availability", { args })),
+	syncFetchPaper: (args: SyncPaperArgs) => typedError<ApiResult<SyncOutcome>, string>(__TAURI_INVOKE("sync_fetch_paper", { args })),
+	syncEvictPaper: (args: SyncPaperArgs) => typedError<ApiResult<number>, string>(__TAURI_INVOKE("sync_evict_paper", { args })),
+	/**  Explicit hints supplement native writes/imports; they never bypass auto-sync preferences. */
+	syncNotifyChange: (args: SyncVaultArgs) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("sync_notify_change", { args })),
 	/**
 	 *  Used and included bytes for the signed-in personal or team space.
 	 *  The bearer stays in the keychain; the webview only sees the numbers.
@@ -3117,6 +3124,13 @@ export type DoctorVaultState = {
 	ignoredAliasPaths?: string[],
 };
 
+export type DownloadMode = "full" | "onDemand";
+
+export type DownloadPolicy = {
+	mode: DownloadMode,
+	pinnedPaperIds: string[],
+};
+
 /**  A set of catalog rows sharing the same `id` or `path`. */
 export type DuplicateGroup = {
 	kind: DuplicateKind,
@@ -4397,6 +4411,15 @@ export type PairingRequest = {
 	verificationCode: string,
 };
 
+export type PaperAssetAvailability = {
+	path: string,
+	kind: PaperAssetKind,
+	size: number,
+	materialized: boolean,
+};
+
+export type PaperAssetKind = "pdf" | "source" | "attachment";
+
 export type PaperAssetsReadyEvent = PaperFactPayload;
 
 /**
@@ -4407,6 +4430,12 @@ export type PaperAssetsStatus = {
 	pdf: boolean,
 	tex: boolean,
 	paperMd: boolean,
+};
+
+export type PaperAvailability = {
+	paperId: string,
+	pinned: boolean,
+	assets: PaperAssetAvailability[],
 };
 
 /**  Uniform result shape for every entry (camelCase matches the frontend). */
@@ -5743,7 +5772,9 @@ export type StageImportFileResult = {
 	path: string,
 };
 
-export type SyncBackendConfig = {
+export type SyncBackendConfig = SyncBackendConfig_Serialize | SyncBackendConfig_Deserialize;
+
+export type SyncBackendConfig_Deserialize = {
 	/**  Backend discriminator; S3 fields or WebDAV fields apply accordingly. */
 	backend?: SyncBackendKind,
 	/**  S3-compatible endpoint, e.g. `https://<account>.r2.cloudflarestorage.com`. */
@@ -5781,6 +5812,11 @@ export type SyncBackendConfig = {
 	/**  API origin, for example `https://api.agentero.app`. No trailing slash. */
 	agenteroApi?: string,
 	/**
+	 *  Opaque host-owned credential version. Referenced secrets are resolved by
+	 *  the native host; they must not fall back to inline or anonymous access.
+	 */
+	credentialRef?: string | null,
+	/**
 	 *  Automatic background sync: once on scheduler start (vault open), after
 	 *  30s of vault quiet, and every `interval_minutes`.
 	 */
@@ -5797,6 +5833,67 @@ export type SyncBackendConfig = {
 	 *  in sync. Notes, sidecars and marks always sync. Default: everything.
 	 */
 	scope?: SyncScope,
+};
+
+export type SyncBackendConfig_Serialize = {
+	/**  Backend discriminator; S3 fields or WebDAV fields apply accordingly. */
+	backend: SyncBackendKind,
+	/**  S3-compatible endpoint, e.g. `https://<account>.r2.cloudflarestorage.com`. */
+	endpoint: string,
+	region: string,
+	bucket: string,
+	/**  Optional key prefix inside the bucket (multiple vaults per bucket). */
+	prefix: string,
+	accessKey: string,
+	secretKey: string,
+	/**
+	 *  `{endpoint}/{bucket}/key` instead of `{bucket}.{endpoint}/key`.
+	 *  Path style works with R2 / MinIO / AWS alike, so it is the default.
+	 */
+	forcePathStyle: boolean,
+	/**  WebDAV server directory, e.g. `https://dav.jianguoyun.com/dav/agentero/`. */
+	webdavUrl: string,
+	webdavUsername: string,
+	/**  Masked (`*`) on the way to the WebView, like the S3 secret key. */
+	webdavPassword: string,
+	/**
+	 *  Git remote URL or local path. Credentials are never stored here; the
+	 *  system credential helper / SSH agent is used.
+	 */
+	gitRemote: string,
+	/**
+	 *  Branch to sync. Defaults to `main`; the vault's current branch must
+	 *  already match when it is an existing repository.
+	 */
+	gitBranch: string,
+	/**  `user` or `organization`. Official cloud only. */
+	agenteroSubject: string,
+	/**  Organization id when [`Self::agentero_subject`] is `organization`. */
+	agenteroOrgId: string,
+	/**  API origin, for example `https://api.agentero.app`. No trailing slash. */
+	agenteroApi: string,
+	/**
+	 *  Opaque host-owned credential version. Referenced secrets are resolved by
+	 *  the native host; they must not fall back to inline or anonymous access.
+	 */
+	credentialRef?: string | null,
+	/**
+	 *  Automatic background sync: once on scheduler start (vault open), after
+	 *  30s of vault quiet, and every `interval_minutes`.
+	 */
+	autoSync: boolean,
+	intervalMinutes: number,
+	/**
+	 *  Connection-test probe result: `false` for backends whose PUT rejects
+	 *  or ignores conditional headers (e.g. Aliyun OSS 400 NotImplemented,
+	 *  most WebDAV servers). Sync then degrades to plain PUTs.
+	 */
+	conditionalWrites: boolean,
+	/**
+	 *  Which bulky paper assets (PDF / LaTeX source / attachments) take part
+	 *  in sync. Notes, sidecars and marks always sync. Default: everything.
+	 */
+	scope: SyncScope,
 };
 
 /**
@@ -5824,9 +5921,16 @@ export type SyncCloudUsageArgs = {
 	orgId: string | null,
 };
 
-export type SyncConfigureArgs = {
+export type SyncConfigureArgs = SyncConfigureArgs_Serialize | SyncConfigureArgs_Deserialize;
+
+export type SyncConfigureArgs_Deserialize = {
 	vaultPath: string,
-	config: SyncBackendConfig,
+	config: SyncBackendConfig_Deserialize,
+};
+
+export type SyncConfigureArgs_Serialize = {
+	vaultPath: string,
+	config: SyncBackendConfig_Serialize,
 };
 
 /**
@@ -5839,6 +5943,13 @@ export type SyncConflict = {
 	reason: string,
 };
 
+export type SyncCredentialState = "notConfigured" | "inline" | "ready" | "locked" | "unavailable" | "missing" | "invalid";
+
+export type SyncDownloadPolicyArgs = {
+	vaultPath: string,
+	policy: DownloadPolicy,
+};
+
 export type SyncOutcome = {
 	version: number,
 	uploaded: number,
@@ -5846,6 +5957,11 @@ export type SyncOutcome = {
 	deletedLocal: number,
 	removedRemote: number,
 	conflictCopies: string[],
+};
+
+export type SyncPaperArgs = {
+	vaultPath: string,
+	paperId: string,
 };
 
 /**  Progress event streamed to the UI while a sync runs. */
@@ -5917,7 +6033,8 @@ export type SyncStatus = SyncStatus_Serialize | SyncStatus_Deserialize;
 
 export type SyncStatus_Deserialize = {
 	configured: boolean,
-	config: SyncBackendConfig | null,
+	credentialState: SyncCredentialState,
+	config: SyncBackendConfig_Deserialize | null,
 	running: boolean,
 	lastSyncAt: string | null,
 	lastVersion: number,
@@ -5925,7 +6042,8 @@ export type SyncStatus_Deserialize = {
 
 export type SyncStatus_Serialize = {
 	configured: boolean,
-	config?: SyncBackendConfig | null,
+	credentialState: SyncCredentialState,
+	config?: SyncBackendConfig_Serialize | null,
 	running: boolean,
 	lastSyncAt?: string | null,
 	lastVersion: number,

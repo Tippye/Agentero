@@ -1,91 +1,261 @@
-//! Background auto sync: one task per configured vault that syncs
-//!
-//! - once when the scheduler starts (≈ vault open / app start),
-//! - after the vault has been quiet for 30s following a change,
-//! - every `interval_minutes` as a fallback.
-//!
-//! The task re-reads credentials on every pass, so config edits apply
-//! without a restart; toggling auto sync off aborts the task.
-
-use crate::integration::sync::config;
-use notify_debouncer_full::notify::{RecursiveMode, Watcher};
-use notify_debouncer_full::{new_debouncer, DebouncedEvent};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::Duration;
-use tauri::{AppHandle, Manager};
-
+//! Automatic sync scheduling. Desktop watches files; mobile receives explicit
+//! native write/lifecycle signals and schedules only while foregrounded.
 use super::SyncService;
+use crate::integration::sync::config;
+#[cfg(desktop)]
+use notify_debouncer_full::notify::{RecursiveMode, Watcher};
+#[cfg(desktop)]
+use notify_debouncer_full::{new_debouncer, DebouncedEvent};
+#[cfg(mobile)]
+use std::sync::atomic::Ordering;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use tauri::{AppHandle, Manager};
+#[cfg(any(mobile, test))]
+use tokio::{sync::watch, time::Instant};
 
-/// Quiet period after the last vault change before an auto sync runs.
 const CHANGE_QUIET_SECS: u64 = 30;
-/// Hard cap for the best-effort exit flush, per vault.
+#[cfg(desktop)]
 const EXIT_FLUSH_TIMEOUT_SECS: u64 = 5;
 
+pub(super) struct ScheduledVault {
+    task: tauri::async_runtime::JoinHandle<()>,
+    #[cfg(mobile)]
+    control: watch::Sender<MobileSignals>,
+}
+pub(super) type SchedulerMap = HashMap<String, ScheduledVault>;
+
+fn stop_task(scheduled: ScheduledVault) {
+    #[cfg(desktop)]
+    scheduled.task.abort();
+    #[cfg(mobile)]
+    {
+        // Detach after signalling stop. An admitted pass retains its lease until completion.
+        scheduled.control.send_modify(|state| state.enabled = false);
+        drop(scheduled.task);
+    }
+}
+
 impl SyncService {
-    /// (Re)start the auto-sync task for a vault according to current config.
+    /// Restart according to current metadata. Every pass resolves credentials anew.
     pub fn restart_scheduler(&self, app: &AppHandle, vault_key: &str) {
-        self.stop_scheduler(vault_key);
-        let Some(cfg) = config::get(vault_key) else {
+        let cfg = match config::try_get(vault_key) {
+            Ok(cfg) => cfg,
+            Err(_) => {
+                log::warn!(target: "agentero::sync", "auto-sync configuration unavailable for {vault_key}");
+                self.stop_scheduler(vault_key);
+                return;
+            }
+        };
+        let mut schedulers = self
+            .schedulers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(old) = schedulers.remove(vault_key) {
+            stop_task(old);
+        }
+        let Some(cfg) = cfg.filter(|cfg| cfg.auto_sync) else {
             return;
         };
-        if !cfg.auto_sync {
-            return;
-        }
         let dir = PathBuf::from(vault_key);
         if !dir.is_dir() {
             return;
         }
-        let handle = tauri::async_runtime::spawn(run_loop(
-            app.clone(),
-            vault_key.to_string(),
-            dir,
-            cfg.interval_minutes,
-        ));
-        if let Ok(mut map) = self.schedulers.lock() {
-            map.insert(vault_key.to_string(), handle);
-        }
+        #[cfg(desktop)]
+        let scheduled = ScheduledVault {
+            task: tauri::async_runtime::spawn(run_desktop_loop(
+                app.clone(),
+                vault_key.to_owned(),
+                dir,
+                cfg.interval_minutes,
+            )),
+        };
+        #[cfg(mobile)]
+        let scheduled = {
+            let (control, receiver) =
+                watch::channel(MobileSignals::new(self.foreground.load(Ordering::SeqCst)));
+            let app = app.clone();
+            let key = vault_key.to_owned();
+            let task = tauri::async_runtime::spawn(run_mobile_schedule(
+                receiver,
+                interval_duration(cfg.interval_minutes),
+                move || {
+                    let app = app.clone();
+                    let key = key.clone();
+                    async move {
+                        let service = app.state::<SyncService>();
+                        if !service.foreground.load(Ordering::SeqCst) {
+                            return PassControl::Retry;
+                        }
+                        match config::try_get(&key) {
+                            Ok(Some(cfg)) if cfg.auto_sync => {}
+                            Ok(_) => return PassControl::Stop,
+                            Err(_) => {
+                                log::warn!(target: "agentero::sync", "auto-sync configuration unavailable for {key}");
+                                return PassControl::Retry;
+                            }
+                        }
+                        if service.is_running(&key) {
+                            return PassControl::Retry;
+                        }
+                        if let Err(error) =
+                            super::commands::perform_sync(&app, &service, &key).await
+                        {
+                            log::warn!(target: "agentero::sync", "auto sync {key}: {error}");
+                            if service.is_running(&key) {
+                                return PassControl::Retry;
+                            }
+                        }
+                        PassControl::Completed
+                    }
+                },
+            ));
+            ScheduledVault { task, control }
+        };
+        schedulers.insert(vault_key.to_owned(), scheduled);
     }
 
     pub fn stop_scheduler(&self, vault_key: &str) {
-        if let Ok(mut map) = self.schedulers.lock() {
-            if let Some(handle) = map.remove(vault_key) {
-                handle.abort();
-            }
+        let scheduled = self
+            .schedulers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(vault_key);
+        if let Some(scheduled) = scheduled {
+            stop_task(scheduled);
         }
     }
 
-    /// Start schedulers for every configured vault (app startup).
+    /// Start existing auto-sync bindings at application startup.
     pub fn start_all(&self, app: &AppHandle) {
-        for key in config::list_all().keys() {
+        let configs = match config::try_list_all() {
+            Ok(configs) => configs,
+            Err(_) => {
+                log::warn!(target: "agentero::sync", "auto-sync configuration catalog unavailable");
+                return;
+            }
+        };
+        for key in configs.keys() {
             self.restart_scheduler(app, key);
         }
     }
 
-    /// Best-effort push of every auto-sync vault on app exit, bounded per
-    /// vault so a slow network can hold up quit for at most a few seconds.
-    /// Shares the same lease as manual/automatic passes. Skip a busy vault
-    /// rather than race its local base/state files during shutdown.
-    pub fn flush_on_exit(&self, app: &AppHandle) {
-        let token = tauri::async_runtime::block_on(super::commands::session_bearer(app));
-        for (key, mut cfg) in config::list_all() {
-            if !cfg.auto_sync {
-                continue;
+    /// Notify after a successful native local write, including deletes/moves.
+    /// Desktop retains its file watcher and does not schedule an extra pass.
+    pub fn notify_path_changed(&self, app: &AppHandle, path: &Path) {
+        #[cfg(desktop)]
+        let _ = (app, path);
+        #[cfg(mobile)]
+        {
+            let configs = match config::try_list_all() {
+                Ok(configs) => configs,
+                Err(_) => {
+                    log::warn!(target: "agentero::sync", "local-change sync configuration unavailable");
+                    return;
+                }
+            };
+            for (key, cfg) in configs {
+                if !cfg.auto_sync || !relevant_to_vault(Path::new(&key), path) {
+                    continue;
+                }
+                let exists = self
+                    .schedulers
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .contains_key(&key);
+                if !exists {
+                    self.restart_scheduler(app, &key);
+                }
+                if let Some(scheduled) = self
+                    .schedulers
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .get(&key)
+                {
+                    scheduled.control.send_modify(|state| {
+                        state.change_serial = state.change_serial.wrapping_add(1);
+                        state.changed_at = Some(Instant::now());
+                    });
+                }
             }
-            // Git commits/pushes can exceed the 5s exit budget; interrupting
-            // one may leave index.lock behind. The next launch or interval
-            // picks the work up instead.
-            if cfg.backend == config::SyncBackendKind::Git {
-                log::info!(
-                    target: "agentero::sync",
-                    "exit flush {key}: git backend skipped (next pass will push)"
-                );
+        }
+    }
+
+    /// Native lifecycle gate. Backgrounding never cancels an in-flight pass.
+    pub fn set_foreground(&self, app: &AppHandle, foreground: bool) {
+        #[cfg(desktop)]
+        let _ = (app, foreground);
+        #[cfg(mobile)]
+        {
+            let previous = self.foreground.swap(foreground, Ordering::SeqCst);
+            if previous == foreground {
+                return;
+            }
+            {
+                let schedulers = self
+                    .schedulers
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                for scheduled in schedulers.values() {
+                    scheduled.control.send_modify(|state| {
+                        state.foreground = foreground;
+                        if foreground {
+                            state.resume_serial = state.resume_serial.wrapping_add(1);
+                        }
+                    });
+                }
+            }
+            if foreground {
+                // A configuration may have been added while no worker existed.
+                let Ok(configs) = config::try_list_all() else {
+                    return;
+                };
+                for (key, cfg) in configs {
+                    if !cfg.auto_sync {
+                        continue;
+                    }
+                    let exists = self
+                        .schedulers
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .contains_key(&key);
+                    if !exists {
+                        self.restart_scheduler(app, &key);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Desktop-only bounded exit flush, with credential references resolved by Rust.
+    #[cfg(desktop)]
+    pub fn flush_on_exit(&self, app: &AppHandle) {
+        let Ok(configs) = config::try_list_all() else {
+            return;
+        };
+        let token = tauri::async_runtime::block_on(super::commands::session_bearer(app));
+        for (key, metadata) in configs {
+            if !metadata.auto_sync || metadata.backend == config::SyncBackendKind::Git {
                 continue;
             }
             let dir = PathBuf::from(&key);
             if !dir.is_dir() {
                 continue;
             }
+            let resolved = tauri::async_runtime::block_on(super::credentials::load(app, &key));
+            let mut cfg = match resolved {
+                Ok(Some(cfg)) if cfg.auto_sync && cfg.backend != config::SyncBackendKind::Git => {
+                    cfg
+                }
+                Ok(_) => continue,
+                Err(_) => {
+                    log::warn!(target: "agentero::sync", "exit flush {key}: credentials unavailable; skipped");
+                    continue;
+                }
+            };
             if cfg.backend == config::SyncBackendKind::Agentero {
                 if cfg.agentero_api.trim().is_empty() {
                     cfg.agentero_api = super::commands::account_api_origin();
@@ -106,23 +276,22 @@ impl SyncService {
                 .await
             });
             match result {
-                Ok(Ok(outcome)) => log::info!(
-                    target: "agentero::sync",
-                    "exit flush {key}: version={} up={} down={}",
-                    outcome.version,
-                    outcome.uploaded,
-                    outcome.downloaded
-                ),
-                Ok(Err(e)) => log::warn!(target: "agentero::sync", "exit flush {key}: {e}"),
+                Ok(Ok(outcome)) => {
+                    log::info!(target: "agentero::sync", "exit flush {key}: version={} up={} down={}", outcome.version, outcome.uploaded, outcome.downloaded)
+                }
+                Ok(Err(error)) => log::warn!(target: "agentero::sync", "exit flush {key}: {error}"),
                 Err(_) => log::warn!(target: "agentero::sync", "exit flush {key}: timed out"),
             }
         }
     }
 }
 
-async fn run_loop(app: AppHandle, vault_key: String, dir: PathBuf, interval_minutes: u32) {
-    // Change trigger: the debouncer fires once the vault has been quiet for
-    // CHANGE_QUIET_SECS, so bursts of edits collapse into a single sync.
+fn interval_duration(minutes: u32) -> Duration {
+    Duration::from_secs(u64::from(minutes.max(1)) * 60)
+}
+
+#[cfg(desktop)]
+async fn run_desktop_loop(app: AppHandle, vault_key: String, dir: PathBuf, interval_minutes: u32) {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
     let mut debouncer = match new_debouncer(
         Duration::from_secs(CHANGE_QUIET_SECS),
@@ -132,7 +301,7 @@ async fn run_loop(app: AppHandle, vault_key: String, dir: PathBuf, interval_minu
                 .map(|batch| {
                     batch
                         .iter()
-                        .any(|e| e.event.paths.iter().any(|p| !is_ignored_path(p)))
+                        .any(|event| event.event.paths.iter().any(|path| !is_ignored_path(path)))
                 })
                 .unwrap_or(false);
             if relevant {
@@ -140,49 +309,415 @@ async fn run_loop(app: AppHandle, vault_key: String, dir: PathBuf, interval_minu
             }
         },
     ) {
-        Ok(d) => Some(d),
-        Err(e) => {
-            log::warn!(target: "agentero::sync", "auto-sync watcher init failed: {e}");
+        Ok(debouncer) => Some(debouncer),
+        Err(error) => {
+            log::warn!(target: "agentero::sync", "auto-sync watcher init failed: {error}");
             None
         }
     };
-    if let Some(d) = &mut debouncer {
-        if let Err(e) = d.watcher().watch(&dir, RecursiveMode::Recursive) {
-            log::warn!(target: "agentero::sync", "auto-sync watch failed: {e}");
+    if let Some(debouncer) = &mut debouncer {
+        if let Err(error) = debouncer.watcher().watch(&dir, RecursiveMode::Recursive) {
+            log::warn!(target: "agentero::sync", "auto-sync watch failed: {error}");
         }
     }
-
-    // First tick completes immediately → the "sync on vault open" pass.
-    let mut ticker =
-        tokio::time::interval(Duration::from_secs((interval_minutes.max(1) * 60) as u64));
+    let mut ticker = tokio::time::interval(interval_duration(interval_minutes));
     loop {
         tokio::select! {
-            _ = ticker.tick() => {}
-            changed = rx.recv() => {
-                if changed.is_none() {
-                    break;
-                }
-            }
+            _ = ticker.tick() => {},
+            changed = rx.recv() => { if changed.is_none() { break; } }
         }
-        if let Err(e) = {
+        if let Err(error) = {
             let service = app.state::<SyncService>();
             super::commands::perform_sync(&app, &service, &vault_key).await
         } {
-            // "already running" and transient errors are fine — the next
-            // trigger retries.
-            log::warn!(target: "agentero::sync", "auto sync {vault_key}: {e}");
+            log::warn!(target: "agentero::sync", "auto sync {vault_key}: {error}");
         }
     }
 }
 
-/// Same ignore rules as the snapshot scanner: sync state and VCS noise must
-/// never re-trigger a sync.
-fn is_ignored_path(path: &std::path::Path) -> bool {
-    path.components().any(|c| {
-        let name = c.as_os_str().to_string_lossy();
-        super::snapshot::is_ignored_name(&name)
+fn is_ignored_path(path: &Path) -> bool {
+    path.components()
+        .any(|component| super::snapshot::is_ignored_name(&component.as_os_str().to_string_lossy()))
+}
+#[cfg(any(mobile, test))]
+fn relevant_to_vault(vault: &Path, path: &Path) -> bool {
+    // Match filesystem identity (/var and /private/var on iOS), while retaining
+    // the original configuration key for the credential namespace and run lease.
+    let Ok(vault) = vault.canonicalize() else {
+        return false;
+    };
+    let Some(path) = canonical_changed_path(path) else {
+        return false;
+    };
+    relevant_canonical_paths(&vault, &path)
+}
+
+#[cfg(any(mobile, test))]
+fn canonical_changed_path(path: &Path) -> Option<PathBuf> {
+    let mut cursor = path;
+    let mut missing = Vec::new();
+    loop {
+        match cursor.canonicalize() {
+            Ok(mut resolved) => {
+                for component in missing.into_iter().rev() {
+                    resolved.push(component);
+                }
+                return Some(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Deleted paths cannot be canonicalized. Resolve the nearest
+                // existing ancestor, then reattach only unambiguous normal names.
+                if path
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+                {
+                    return None;
+                }
+                missing.push(cursor.file_name()?.to_os_string());
+                cursor = cursor.parent()?;
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+#[cfg(any(mobile, test))]
+fn relevant_canonical_paths(vault: &Path, path: &Path) -> bool {
+    path.strip_prefix(vault).is_ok_and(|relative| {
+        !relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+            && !is_ignored_path(relative)
     })
 }
 
-/// Per-vault scheduler handles (part of [`SyncService`]).
-pub type SchedulerMap = HashMap<String, tauri::async_runtime::JoinHandle<()>>;
+#[cfg(any(mobile, test))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MobileSignals {
+    enabled: bool,
+    foreground: bool,
+    resume_serial: u64,
+    change_serial: u64,
+    changed_at: Option<Instant>,
+}
+#[cfg(any(mobile, test))]
+impl MobileSignals {
+    fn new(foreground: bool) -> Self {
+        Self {
+            enabled: true,
+            foreground,
+            resume_serial: 0,
+            change_serial: 0,
+            changed_at: None,
+        }
+    }
+}
+#[cfg(any(mobile, test))]
+#[derive(Clone, Copy)]
+enum PassControl {
+    Completed,
+    Retry,
+    Stop,
+}
+
+/// The admitted pass is deliberately awaited outside select: lifecycle changes
+/// affect subsequent admission and never drop a sync future or its lease.
+#[cfg(any(mobile, test))]
+async fn run_mobile_schedule<F, Fut>(
+    mut receiver: watch::Receiver<MobileSignals>,
+    interval: Duration,
+    mut pass: F,
+) where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = PassControl>,
+{
+    let mut initial = true;
+    let mut handled_resume = 0;
+    let mut handled_change = 0;
+    let mut next_interval = Instant::now() + interval;
+    let mut retry_at = None;
+    loop {
+        let signals = *receiver.borrow_and_update();
+        if !signals.enabled {
+            return;
+        }
+        if !signals.foreground {
+            if receiver.changed().await.is_err() {
+                return;
+            }
+            continue;
+        }
+        let now = Instant::now();
+        let mut due = next_interval;
+        if initial || signals.resume_serial != handled_resume {
+            due = now;
+        }
+        if signals.change_serial != handled_change {
+            let quiet = signals.changed_at.unwrap_or(now) + Duration::from_secs(CHANGE_QUIET_SECS);
+            due = due.min(quiet);
+        }
+        if let Some(retry) = retry_at {
+            due = due.max(retry);
+        }
+        tokio::select! {
+            biased;
+            changed = receiver.changed() => { if changed.is_err() { return; } continue; },
+            _ = tokio::time::sleep_until(due) => {}
+        }
+        // A newer change can extend the quiet period just as a timer becomes ready.
+        if *receiver.borrow_and_update() != signals {
+            continue;
+        }
+        match pass().await {
+            PassControl::Stop => return,
+            PassControl::Retry => retry_at = Some(Instant::now() + Duration::from_secs(1)),
+            PassControl::Completed => {
+                initial = false;
+                handled_resume = signals.resume_serial;
+                handled_change = signals.change_serial;
+                next_interval = Instant::now() + interval;
+                retry_at = None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    async fn settle() {
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+    }
+    fn changed(sender: &watch::Sender<MobileSignals>) {
+        sender.send_modify(|state| {
+            state.change_serial += 1;
+            state.changed_at = Some(Instant::now());
+        });
+    }
+    fn spawn_counter(
+        foreground: bool,
+        interval: Duration,
+    ) -> (
+        watch::Sender<MobileSignals>,
+        Arc<AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (sender, receiver) = watch::channel(MobileSignals::new(foreground));
+        let count = Arc::new(AtomicUsize::new(0));
+        let passes = count.clone();
+        let task = tokio::spawn(run_mobile_schedule(receiver, interval, move || {
+            passes.fetch_add(1, Ordering::SeqCst);
+            async { PassControl::Completed }
+        }));
+        (sender, count, task)
+    }
+    #[tokio::test(start_paused = true)]
+    async fn local_changes_coalesce_for_thirty_quiet_seconds() {
+        let (sender, count, task) = spawn_counter(true, Duration::from_secs(900));
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        changed(&sender);
+        settle().await;
+        tokio::time::advance(Duration::from_secs(20)).await;
+        changed(&sender);
+        settle().await;
+        tokio::time::advance(Duration::from_secs(29)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        sender.send_modify(|state| state.enabled = false);
+        task.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn background_defers_changes_and_intervals_until_one_resume_pass() {
+        let (sender, count, task) = spawn_counter(false, Duration::from_secs(60));
+        settle().await;
+        changed(&sender);
+        tokio::time::advance(Duration::from_secs(600)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        sender.send_modify(|state| {
+            state.foreground = true;
+            state.resume_serial += 1;
+        });
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_secs(59)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        sender.send_modify(|state| {
+            state.foreground = false;
+        });
+        settle().await;
+        tokio::time::advance(Duration::from_secs(600)).await;
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        sender.send_modify(|state| state.enabled = false);
+        task.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn background_and_disable_do_not_abort_an_admitted_lease() {
+        let (sender, receiver) = watch::channel(MobileSignals::new(true));
+        let service = Arc::new(SyncService::default());
+        let run_service = service.clone();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut released = Some(released);
+        let task = tokio::spawn(run_mobile_schedule(
+            receiver,
+            Duration::from_secs(60),
+            move || {
+                let service = run_service.clone();
+                let released = released.take().unwrap();
+                async move {
+                    let _lease = service.try_begin("vault").unwrap();
+                    released.await.unwrap();
+                    PassControl::Completed
+                }
+            },
+        ));
+        settle().await;
+        assert!(service.is_running("vault"));
+        sender.send_modify(|state| state.foreground = false);
+        settle().await;
+        tokio::time::advance(Duration::from_secs(300)).await;
+        settle().await;
+        assert!(service.is_running("vault"));
+        sender.send_modify(|state| state.enabled = false);
+        settle().await;
+        assert!(!task.is_finished());
+        release.send(()).unwrap();
+        task.await.unwrap();
+        assert!(!service.is_running("vault"));
+    }
+    #[tokio::test(start_paused = true)]
+    async fn changes_during_a_pass_are_not_lost_and_busy_leases_defer() {
+        let (sender, receiver) = watch::channel(MobileSignals::new(true));
+        let service = Arc::new(SyncService::default());
+        let manual = service.try_begin("vault").unwrap();
+        let passes = Arc::new(AtomicUsize::new(0));
+        let count = passes.clone();
+        let run_service = service.clone();
+        let task = tokio::spawn(run_mobile_schedule(
+            receiver,
+            Duration::from_secs(900),
+            move || {
+                let service = run_service.clone();
+                let count = count.clone();
+                async move {
+                    let Some(_lease) = service.try_begin("vault") else {
+                        return PassControl::Retry;
+                    };
+                    count.fetch_add(1, Ordering::SeqCst);
+                    PassControl::Completed
+                }
+            },
+        ));
+        settle().await;
+        assert_eq!(passes.load(Ordering::SeqCst), 0);
+        changed(&sender);
+        drop(manual);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        settle().await;
+        assert_eq!(passes.load(Ordering::SeqCst), 1);
+        // Even the same monotonic timestamp is a distinct write notification.
+        changed(&sender);
+        settle().await;
+        tokio::time::advance(Duration::from_secs(30)).await;
+        settle().await;
+        assert_eq!(passes.load(Ordering::SeqCst), 2);
+        sender.send_modify(|state| state.enabled = false);
+        task.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn disabled_workers_and_removed_controls_never_start_a_pass() {
+        let mut state = MobileSignals::new(true);
+        state.enabled = false;
+        let (sender, receiver) = watch::channel(state);
+        run_mobile_schedule(receiver, Duration::from_secs(60), || async {
+            panic!("disabled scheduler dispatched")
+        })
+        .await;
+        drop(sender);
+        let (sender, receiver) = watch::channel(MobileSignals::new(false));
+        drop(sender);
+        run_mobile_schedule(receiver, Duration::from_secs(60), || async {
+            PassControl::Stop
+        })
+        .await;
+    }
+    #[cfg(unix)]
+    #[test]
+    fn aliased_roots_match_existing_and_deleted_paths_without_crossing_vaults() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("vault");
+        let alias = fixture.path().join("vault-alias");
+        let outside = fixture.path().join("vault-other");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("notes.md"), "note").unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let canonical_root = root.canonicalize().unwrap();
+        let canonical_file = root.join("notes.md").canonicalize().unwrap();
+        assert!(relevant_to_vault(&alias, &canonical_file));
+        assert!(relevant_to_vault(&canonical_root, &alias.join("notes.md")));
+        // Missing suffixes represent a delete/move event after the file or directory is gone.
+        assert!(relevant_to_vault(
+            &alias,
+            &canonical_root.join("removed/notes.md")
+        ));
+        assert!(relevant_to_vault(
+            &canonical_root,
+            &alias.join("removed/notes.md")
+        ));
+        assert!(!relevant_to_vault(&alias, &outside.join("notes.md")));
+        assert!(!relevant_to_vault(
+            &alias,
+            &alias.join(".agentero/sync/base.json")
+        ));
+        std::os::unix::fs::symlink(&outside, root.join("outside-link")).unwrap();
+        assert!(!relevant_to_vault(
+            &alias,
+            &alias.join("outside-link/removed.md")
+        ));
+    }
+
+    #[test]
+    fn local_trigger_is_vault_scoped_and_ignores_sync_and_vcs_state() {
+        let root = Path::new("/private/vault");
+        assert!(relevant_canonical_paths(
+            root,
+            Path::new("/private/vault/papers/p1/notes.md")
+        ));
+        assert!(!relevant_canonical_paths(
+            root,
+            Path::new("/private/vault-other/notes.md")
+        ));
+        assert!(!relevant_canonical_paths(
+            root,
+            Path::new("/private/vault/.agentero/sync/base.json")
+        ));
+        assert!(!relevant_canonical_paths(
+            root,
+            Path::new("/private/vault/.git/index")
+        ));
+        assert!(!relevant_canonical_paths(
+            root,
+            Path::new("/private/vault/../outside.md")
+        ));
+        assert_eq!(
+            interval_duration(u32::MAX).as_secs(),
+            u64::from(u32::MAX) * 60
+        );
+    }
+}

@@ -108,6 +108,13 @@ impl AgenteroClient {
 }
 
 impl RemoteStore for AgenteroClient {
+    async fn namespace_identity(&self) -> Result<Option<String>, AppError> {
+        let id = self.server_id().await?;
+        if id.trim().is_empty() {
+            return Err(AppError::message("Cloud sync namespace is missing"));
+        }
+        Ok(Some(id))
+    }
     async fn ensure_root(&self) -> Result<(), AppError> {
         self.server_id().await?;
         Ok(())

@@ -3,6 +3,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MobileNotesEditor } from "@/components/mobile/mobile-notes-editor";
 import type { MobileReaderMode } from "@/components/mobile/types";
+import { Button } from "@/components/ui/button";
+import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 import { loadMobilePaperPdf, mobilePaperPaths } from "@/lib/mobile/paper-files";
 import type { PaperMetadata } from "@/lib/paper/types";
@@ -19,12 +21,14 @@ export function MobileReaderPage({
 	mode,
 	active,
 	onNotesDirtyChange,
+	fetchMissing,
 }: {
 	paper: PaperMetadata;
 	vaultPath: string;
 	mode: MobileReaderMode;
 	active: boolean;
 	onNotesDirtyChange: (dirty: boolean) => void;
+	fetchMissing?: (paper: PaperMetadata) => Promise<boolean>;
 }) {
 	const { t } = useTranslation("mobile");
 	const root = useRef<HTMLElement>(null);
@@ -34,6 +38,7 @@ export function MobileReaderPage({
 		bytes: ArrayBuffer | null;
 	} | null>(null);
 	const [pdfError, setPdfError] = useState<string | null>(null);
+	const [attempt, setAttempt] = useState(0);
 	const paths = useMemo(() => {
 		try {
 			return mobilePaperPaths(vaultPath, paper);
@@ -53,10 +58,15 @@ export function MobileReaderPage({
 	}, []);
 
 	useEffect(() => {
+		void attempt;
 		let mounted = true;
 		setPdf(null);
 		setPdfError(null);
-		void loadMobilePaperPdf(vaultPath, paper)
+		void loadMobilePaperPdf(
+			vaultPath,
+			paper,
+			fetchMissing ? () => fetchMissing(paper) : undefined,
+		)
 			.then((loaded) => {
 				if (!mounted) return;
 				if (!loaded.source && !loaded.bytes)
@@ -64,15 +74,17 @@ export function MobileReaderPage({
 				else setPdf(loaded);
 			})
 			.catch((error) => {
-				if (mounted)
-					setPdfError(
-						error instanceof Error ? error.message : t("reader.pdfUnavailable"),
-					);
+				if (mounted) {
+					const message =
+						error instanceof Error ? error.message : t("reader.pdfUnavailable");
+					setPdfError(message);
+					notifyError(message);
+				}
 			});
 		return () => {
 			mounted = false;
 		};
-	}, [vaultPath, paper, t]);
+	}, [vaultPath, paper, t, fetchMissing, attempt]);
 
 	return (
 		<section
@@ -89,8 +101,16 @@ export function MobileReaderPage({
 				)}
 			>
 				{pdfError ? (
-					<div className="grid h-full place-items-center p-6 text-center text-muted-foreground text-sm">
+					<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-muted-foreground text-sm">
 						{pdfError}
+						<Button
+							type="button"
+							variant="outline"
+							className="min-h-11"
+							onClick={() => setAttempt((value) => value + 1)}
+						>
+							{t("local.retry")}
+						</Button>
 					</div>
 				) : (
 					<Suspense fallback={<PdfLoading />}>

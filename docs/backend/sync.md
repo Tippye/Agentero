@@ -2,7 +2,7 @@
 
 多设备间同步整个 Vault 到 S3 兼容对象存储（AWS S3 / R2 / MinIO / OSS / BOS 等）、任意 WebDAV 服务器（坚果云 / Nextcloud / ownCloud / NAS 等），或 Git 远端。当前已落地内容寻址同步与自动同步（状态栏指示、GC、multipart 除外），以及 Git 同步（#781；同步范围经 `.gitignore` 排除）。
 
-引擎位于 `crates/agentero-core/src/features/sync/`（Tauri 无关），桌面端与 headless CLI 共用同一份实现——冲突处理、失败恢复与请求预算语义完全一致；CLI 侧见 `agentero sync`（[cli.md](cli.md)）。桌面端仅在 `src-tauri/src/integration/sync/` 叠加 IPC 命令与调度。
+引擎位于 `crates/agentero-core/src/features/sync/`（Tauri 无关），桌面端与 headless CLI 共用同一份实现——冲突处理、失败恢复与请求预算语义完全一致；CLI 侧见 `agentero sync`（[cli.md](cli.md)）。桌面与平板在 `src-tauri/src/integration/sync/` 叠加类型 IPC、系统凭据和各自的调度；平板首版只开放 S3 / WebDAV。
 
 S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变 manifest + CAS `HEAD`），契约收敛在 `store.rs` 的 `RemoteStore` trait，`SyncStore` 枚举按配置选择实现，引擎对具体后端无感知。新增这类后端 = 新客户端模块实现 trait + 枚举一个变体。Git 不走 blob store：远端就是 Git 仓库本身，见「Git 后端」。设置页可切换后端；已配置的 Vault 锁定后端选择，需先解绑再切换（换后端即指向另一个远端 store）。Azure Blob、百度网盘等无 S3 / WebDAV 对应凭据模型的服务仍不能接入。
 
@@ -17,18 +17,32 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 | `s3.rs` | 最小 S3 客户端：GET / 条件 PUT（`If-Match` / `If-None-Match`）/ DELETE / ListObjectsV2，reqwest + 手写 SigV4（HMAC-SHA256 自实现，RFC 4231 向量测试）；条件写探测与降级（见下） |
 | `webdav.rs` | 最小 WebDAV 客户端：Basic Auth + GET / 条件 PUT / DELETE / MKCOL / PROPFIND（仅取状态码，无 XML 解析），见下节 |
 | `snapshot.rs` | Vault 扫描 → `Manifest`（relPath → sha256/size/mtime）；`size+mtime` 未变复用 base 哈希；忽略 `.agentero` `.git` `node_modules` `.DS_Store` `*.tmp`；`SyncScope` 与分类谓词（见「同步范围」） |
+| `availability.rs` | 本机下载策略、离线固定集合、已落盘/延后条目；不改变远端 `SyncScope` 协议；按论文获取、校验后清缓存、下载状态查询 |
 | `local.rs` | `.agentero/vault.json`（Vault UUID）、`.agentero/sync/{base,state}.json`（`state.json` 含 `lastError`，上次失败原因，成功即清除）、`.agentero/sync/pushed.jsonl`（已上传未发布的 blob，见「请求预算」）；watcher 忽略 `.agentero/`，无事件回环 |
 | `lock.rs` | 跨进程 pass 锁：`.agentero/sync/lock` 上的 advisory 文件锁（flock / LockFileEx），桌面端、CLI 与 cron 在同一 Vault 上串行化；锁随文件句柄释放，进程崩溃不残留 |
 | `engine.rs` | 三方合并 + 应用 + 发布 + 空转短路 / 断点续传（见下）；`sync_vault_locked` 在进入 pass 前取跨进程锁（冲突时报 `sync_busy` 域码）并把失败写入 `state.json` 的 `lastError`；按 backend 把 Git 分派到 `git.rs`；`test_connection` 同时接受 Vault 路径供 Git 检查仓库状态 |
 | `git.rs` | Git 同步（见「Git 后端」）：系统 `git` 子进程、仓库/分支/origin 校验、`.git/info/exclude`、按 scope 写 `.gitignore` 并 `git rm --cached`、commit → fetch → merge → push、原生冲突 abort、差异计数与 catalog 刷新 |
 
-`src-tauri/src/integration/sync/`（desktop-only 壳层）：
+`src-tauri/src/integration/sync/`（原生壳层）：
 
 | 文件 | 职责 |
 |---|---|
 | `mod.rs` | 引擎 re-export + `SyncService` 与 `SyncRunLease`：手动、自动与退出同步共用按 Vault 的进程内占用，guard 释放覆盖正常返回、错误、超时和 task abort（跨进程占用由引擎内文件锁负责） |
-| `commands.rs` | `sync_get_status` / `sync_configure` / `sync_disconnect` / `sync_now` / `sync_scope_sizes`（本地各附件分类体积，供设置页展示）；广播 `sync:state` / `sync:progress` 事件 |
+| `commands.rs` | 状态、配置、解绑、同步、分类体积、下载策略、论文可用性/获取/清缓存/变更提示；移动命令校验应用私有 Vault；广播 `sync:state` / `sync:progress` 事件 |
+| `credentials.rs` | 共享系统凭据门面、目标绑定、旧配置迁移、双代引用提交与状态恢复；不向 JS 暴露通用秘密读取接口 |
 | `scheduler.rs` | 自动同步：每 Vault 一个后台任务——启动时同步一次、改动静置 30s 后同步、按 `intervalMinutes`（15/30/60）定时兜底；退出时尽力推送（每 Vault 限 5s） |
+
+## 平板、本机下载与凭据
+
+平板同步入口复用成熟的 S3/WebDAV 设置表单，固定操作应用私有 Vault，不进入桌面官方账号或 Git 工作流。新平板首次使用时初始化「按需下载」，已有明确下载策略保持不变；桌面与 CLI 未配置策略时仍为完整下载。移动新连接默认关闭 LaTeX 源码类别，版面缓存始终保留。同步完成后先重新扫描磁盘再读取 Catalog，避免只刷新 SQLite 而看不到新下载的论文。
+
+本机策略与可用性记录位于 `.agentero/sync/availability.json`，配套 guard 检测已管理记录丢失；结构损坏、未来版本或部分写入均报错，不退回空历史。元数据、笔记、标注、内嵌资源及 `source/layout.json` 始终同步。按需模式对尚未缓存的 PDF、源码和附件保留远端条目，缺少本地文件不构成删除。打开缺失 PDF 时去重获取该论文，再重新扫描并重试本地字节；「离线保存」更新固定集合并获取，取消固定保留本地文件。获取仍遵守已启用的类别。清缓存是显式操作，只允许移除与已确认清单相同的未编辑资源，先记录延后状态，再删除文件；没有自动清缓存。
+
+原生类型命令包含下载策略读取/设置、论文可用性列表、按论文获取、显式清缓存及本地变更提示。平板保存 Markdown 和删除文件会通知所属 Vault；移动调度仅在前台运行，启动/恢复时执行一次，保存静置 30 秒及间隔触发；后台暂停新 pass，已进入的 pass 继续安全完成。Android 前台服务与 iOS 有限后台另行接入，不把普通调度视作系统保活。
+
+平板密码由仅 Rust 可访问的系统凭据服务保存，公共配置只保留不含密码的参数和 `credentialRef`。保护记录按 Vault 隔离，凭据绑定结构化的后端、目标与账号摘要。原生写入成功后才发布公共引用；每次替换前先确认当前引用已持久化，再保留当前与候选两代，覆盖重命名已可见而目录刷盘失败的重试。旧明文配置迁移失败时保留原件；锁定/不可用不冒充未配置，丢失/无效时要求重新输入密码。密码掩码不能用于换目标或修复丢失。清除失败返回错误；若原生删除成功而公共删除失败，状态明确为缺失，显式重试解绑完成清理。桌面预览维持桌面存储行为，不宣称验证了设备系统密钥库。
+
+本地基线绑定远端配置与稳定云命名空间；更换目标先持久清空基线、重置可用性历史并保留策略，最后提交新绑定。未知来源的旧基线保守重建。空转判断同时比较版本、已确认清单键与基线版本；同版本不同清单的无 CAS 分叉按保守共同祖先合并，CAS 重试一起推进祖先版本和键。已建立同步历史后 HEAD 或基线消失会报错，不能当成普通远端删除。损坏状态不会被错误记录覆盖。
 
 ## Remote 布局与一次同步
 

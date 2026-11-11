@@ -29,6 +29,19 @@
 		"opening": "正在打开本地论文库…",
 		"retry": "重试"
 	},
+	"sync": {
+		"title": "云同步",
+		"close": "关闭同步设置",
+		"loading": "正在加载同步设置…",
+		"downloads": "文件下载",
+		"downloadFull": "下载所有同步文件",
+		"downloadOnDemand": "打开时按需下载",
+		"offline": "PDF 已可离线阅读",
+		"deferred": "打开时下载 PDF",
+		"pin": "保留《{{title}}》供离线阅读",
+		"unpin": "取消保留《{{title}}》供离线阅读",
+		"unsupportedBackend": "此设备支持 S3 和 WebDAV 同步。请先断开当前配置，再选择支持的存储服务。"
+	},
 	"library": {
 		"importPdf": "导入 PDF",
 		"refresh": "刷新论文库",

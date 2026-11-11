@@ -1,5 +1,5 @@
 import { ChevronRight, CloudUpload, LoaderCircle, Unplug } from "lucide-react";
-import type { ComponentType } from "react";
+import type { ComponentProps, ComponentType } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FaAws } from "react-icons/fa6";
@@ -44,7 +44,6 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { authClient } from "@/features/account/client";
 import { formatLocaleTimestamp } from "@/i18n";
 import { formatBytes } from "@/lib/core/background-tasks";
 import { events } from "@/lib/core/bindings";
@@ -59,6 +58,7 @@ import {
 	isSyncProgressPhase,
 	SYNC_INTERVAL_CHOICES,
 	type SyncBackendConfig,
+	type SyncCloudUsage,
 	type SyncProgressEvent,
 	type SyncScopeSizes,
 	type SyncStateEvent,
@@ -166,10 +166,12 @@ const BACKEND_OPTIONS = [
 ] as const;
 
 /** Local Vaults this pane can edit: the opener plus the shared MRU list. */
-function localVaultChoices(primary: string | null): string[] {
+function localVaultChoices(primary: string | null, mobile: boolean): string[] {
 	const out: string[] = [];
 	const seen = new Set<string>();
-	for (const candidate of [primary, ...getRecentVaults()]) {
+	for (const candidate of mobile
+		? [primary]
+		: [primary, ...getRecentVaults()]) {
 		if (!candidate || isRemoteVaultHandle(candidate)) continue;
 		const key = candidate.replace(/[\\/]+$/, "");
 		if (seen.has(key)) continue;
@@ -179,36 +181,55 @@ function localVaultChoices(primary: string | null): string[] {
 	return out;
 }
 
-export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
+export function SyncPane({
+	vaultPath,
+	mobile = false,
+	onSynced,
+}: {
+	vaultPath: string | null;
+	mobile?: boolean;
+	/** Refresh the caller's local catalog after a successful manual sync. */
+	onSynced?: () => void | Promise<void>;
+}) {
 	const { t } = useTranslation("settings");
-	const [vaults, setVaults] = useState(() => localVaultChoices(vaultPath));
+	const { t: tm } = useTranslation("mobile");
+	const newConfig = useCallback(() => {
+		const config = emptySyncConfig(mobile ? "s3" : "agentero");
+		if (mobile) config.scope.source = false;
+		return config;
+	}, [mobile]);
+	const [vaults, setVaults] = useState(() =>
+		localVaultChoices(vaultPath, mobile),
+	);
 	const [selectedVault, setSelectedVault] = useState<string | null>(
-		() => localVaultChoices(vaultPath)[0] ?? null,
+		() => localVaultChoices(vaultPath, mobile)[0] ?? null,
 	);
 
 	useEffect(() => {
-		const choices = localVaultChoices(vaultPath);
+		const choices = localVaultChoices(vaultPath, mobile);
 		setVaults(choices);
 		setSelectedVault((prev) => {
 			if (vaultPath && choices.includes(vaultPath)) return vaultPath;
 			if (prev && choices.includes(prev)) return prev;
 			return choices[0] ?? null;
 		});
-	}, [vaultPath]);
+	}, [vaultPath, mobile]);
 
 	useEffect(() => {
-		const onStorage = () => setVaults(localVaultChoices(vaultPath));
+		const onStorage = () => setVaults(localVaultChoices(vaultPath, mobile));
 		window.addEventListener("storage", onStorage);
 		return () => window.removeEventListener("storage", onStorage);
-	}, [vaultPath]);
+	}, [vaultPath, mobile]);
 
+	const candidateVault = mobile ? vaultPath : selectedVault;
 	const localVault =
-		isTauri() && selectedVault && !isRemoteVaultHandle(selectedVault)
-			? selectedVault
+		isTauri() && candidateVault && !isRemoteVaultHandle(candidateVault)
+			? candidateVault
 			: null;
 
 	const [status, setStatus] = useState<SyncStatus | null>(null);
-	const [form, setForm] = useState<SyncBackendConfig>(emptySyncConfig());
+	const [form, setForm] = useState<SyncBackendConfig>(newConfig);
+	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [syncing, setSyncing] = useState(false);
 	const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
@@ -218,29 +239,24 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 	const [activeOrgId, setActiveOrgId] = useState("");
 	const cloudSubject =
 		form.agenteroSubject === "organization" ? "organization" : "user";
-	const cloudUsage = useCloudUsage(
-		cloudSubject,
-		cloudSubject === "organization" ? activeOrgId || undefined : undefined,
-	);
-
-	useEffect(() => {
-		let cancelled = false;
-		void authClient.getSession().then((result) => {
-			const id = result.data?.session.activeOrganizationId ?? "";
-			if (!cancelled) setActiveOrgId(id);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
+	const [cloudUsage, setCloudUsage] = useState<SyncCloudUsage | null>(null);
 
 	const refresh = useCallback(async () => {
 		if (!localVault) return;
 		const next = await syncGetStatus(localVault);
 		setStatus(next);
 		setSyncing(next.running);
-		if (next.config) {
-			setForm(next.config);
+		if (
+			next.config &&
+			(!mobile ||
+				next.config.backend === "s3" ||
+				next.config.backend === "webdav")
+		) {
+			setForm(
+				next.credentialState === "missing" || next.credentialState === "invalid"
+					? { ...next.config, secretKey: "", webdavPassword: "" }
+					: next.config,
+			);
 			// Surface the advanced group when it holds non-default values.
 			if (
 				next.config.backend === "s3" &&
@@ -251,23 +267,37 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				setAdvancedOpen(true);
 			}
 		} else {
-			setForm(emptySyncConfig());
+			setForm(newConfig());
 			setAdvancedOpen(false);
 		}
-	}, [localVault]);
+	}, [localVault, mobile, newConfig]);
+
+	const loadStatus = useCallback(async () => {
+		setLoading(true);
+		try {
+			await refresh();
+			setSyncError(null);
+		} catch (error) {
+			const message = errorMessage(error);
+			setSyncError(message);
+			notifyError(message);
+		} finally {
+			setLoading(false);
+		}
+	}, [refresh]);
 
 	// `refresh` is recreated when the selected Vault changes. Reset first so a
 	// different Vault never inherits the previous one's form values: otherwise
 	// "connect" on an unconfigured Vault would save the old remote.
 	useEffect(() => {
 		setStatus(null);
-		setForm(emptySyncConfig());
+		setForm(newConfig());
 		setSyncError(null);
 		setProgress(null);
 		setScopeSizes(null);
 		setAdvancedOpen(false);
-		void refresh().catch((error) => notifyError(errorMessage(error)));
-	}, [refresh]);
+		void loadStatus();
+	}, [loadStatus, newConfig]);
 
 	useEffect(() => {
 		if (!localVault) return;
@@ -282,6 +312,10 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							? (payload.error ?? t("sync.statusError"))
 							: null,
 					);
+					if (payload.status === "error")
+						notifyError(payload.error ?? t("sync.statusError"), {
+							id: `sync:${localVault}`,
+						});
 					if (payload.status !== "syncing") {
 						setProgress(null);
 						void refresh().catch(() => undefined);
@@ -336,6 +370,26 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 	const isAgentero = form.backend === "agentero";
 	const isWebdav = form.backend === "webdav";
 	const isGit = form.backend === "git";
+	const credentialBlocked =
+		status?.credentialState === "locked" ||
+		status?.credentialState === "unavailable";
+	const credentialNeedsInput =
+		status?.credentialState === "missing" ||
+		status?.credentialState === "invalid";
+	const secret = (isWebdav ? form.webdavPassword : form.secretKey).trim();
+	const secretEntered = Boolean(secret) && secret !== "***";
+	const credentialNotice =
+		status?.credentialState === "locked"
+			? "sync.credentialLocked"
+			: status?.credentialState === "unavailable"
+				? "sync.credentialUnavailable"
+				: status?.credentialState === "missing"
+					? "sync.credentialMissing"
+					: status?.credentialState === "invalid"
+						? "sync.credentialInvalid"
+						: null;
+	const controlsDisabled =
+		loading || !status || saving || syncing || credentialBlocked;
 	const backendLocked = status?.configured === true;
 	const providerLinks = isAgentero
 		? []
@@ -351,6 +405,7 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 			(cloudSubject === "organization" && !activeOrgId));
 
 	const save = async () => {
+		if (credentialBlocked || (credentialNeedsInput && !secretEntered)) return;
 		setSaving(true);
 		try {
 			const next = await syncConfigure(localVault, form);
@@ -368,9 +423,11 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 	};
 
 	const runSync = async () => {
+		if (credentialBlocked || credentialNeedsInput) return;
 		setSyncing(true);
 		try {
 			const outcome = await syncNow(localVault);
+			await onSynced?.();
 			setSyncError(null);
 			notifySuccess(
 				t("sync.done", {
@@ -398,7 +455,7 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 		try {
 			await syncDisconnect(localVault);
 			setStatus(null);
-			setForm(emptySyncConfig());
+			setForm(newConfig());
 			setSyncError(null);
 			void refresh().catch(() => undefined);
 		} catch (error) {
@@ -408,13 +465,38 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 		}
 	};
 
+	const unsupportedBackend =
+		mobile &&
+		status?.configured &&
+		status.config?.backend !== "s3" &&
+		status.config?.backend !== "webdav";
+	if (unsupportedBackend)
+		return (
+			<section>
+				<PageTitle title={t("sync.title")} />
+				<p className="mb-4 text-muted-foreground text-sm">
+					{tm("sync.unsupportedBackend")}
+				</p>
+				<Button
+					type="button"
+					variant="outline"
+					className="min-h-11"
+					onClick={() => void disconnect()}
+					disabled={syncing}
+				>
+					{t("sync.disconnect")}
+				</Button>
+			</section>
+		);
+
 	const field = (
 		key: keyof SyncBackendConfig,
 		opts?: { type?: string; placeholder?: string },
 	) => (
 		<Input
 			id={`sync-${key}`}
-			className="w-64"
+			className={mobile ? "w-full min-w-0 sm:w-64" : "w-64"}
+			disabled={controlsDisabled}
 			type={opts?.type ?? "text"}
 			placeholder={opts?.placeholder}
 			value={String(form[key])}
@@ -437,56 +519,88 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				: status?.configured
 					? t("sync.neverSynced")
 					: null;
-	const syncStatusLabel = syncError
-		? t("sync.statusError")
-		: syncing
-			? t("sync.statusSyncing")
-			: status?.configured
-				? t("sync.statusConnected")
-				: t("sync.statusDisconnected");
-	const syncStatusDotClass = syncError
-		? "bg-destructive"
-		: syncing
-			? "bg-sky-500"
-			: status?.configured
-				? "bg-emerald-500"
-				: "bg-muted-foreground/35";
+	const syncStatusLabel =
+		syncError || credentialNotice
+			? t("sync.statusError")
+			: syncing
+				? t("sync.statusSyncing")
+				: status?.configured
+					? t("sync.statusConnected")
+					: t("sync.statusDisconnected");
+	const syncStatusDotClass =
+		syncError || credentialNotice
+			? "bg-destructive"
+			: syncing
+				? "bg-sky-500"
+				: status?.configured
+					? "bg-emerald-500"
+					: "bg-muted-foreground/35";
 	const configChanged = JSON.stringify(form) !== JSON.stringify(status?.config);
-	const primaryAction =
-		!status?.configured || configChanged ? (
-			<Button
-				type="button"
-				size="sm"
-				onClick={() => void save()}
-				disabled={saving || syncing || cloudBlocked}
-			>
-				{saving ? (
-					<LoaderCircle data-icon="inline-start" className="animate-spin" />
-				) : null}
-				{isAgentero && !status?.configured
-					? t("sync.useAccount")
-					: status?.configured
-						? t("sync.save")
-						: t("sync.connect")}
-			</Button>
-		) : (
-			<Button
-				type="button"
-				size="sm"
-				onClick={() => void runSync()}
-				disabled={syncing}
-			>
-				{syncing ? (
-					<LoaderCircle data-icon="inline-start" className="animate-spin" />
-				) : (
-					<CloudUpload data-icon="inline-start" />
-				)}
-				{t("sync.syncNow")}
-			</Button>
-		);
+	const primaryAction = !status ? (
+		<Button
+			type="button"
+			size="sm"
+			disabled={loading}
+			onClick={() => void loadStatus()}
+		>
+			{loading ? <LoaderCircle className="animate-spin" /> : null}
+			{loading ? tm("sync.loading") : tm("local.retry")}
+		</Button>
+	) : !status.configured || configChanged || credentialNeedsInput ? (
+		<Button
+			type="button"
+			size="sm"
+			onClick={() => void save()}
+			disabled={
+				loading ||
+				saving ||
+				syncing ||
+				cloudBlocked ||
+				credentialBlocked ||
+				(credentialNeedsInput && !secretEntered)
+			}
+		>
+			{saving ? (
+				<LoaderCircle data-icon="inline-start" className="animate-spin" />
+			) : null}
+			{isAgentero && !status?.configured
+				? t("sync.useAccount")
+				: status?.configured
+					? t("sync.save")
+					: t("sync.connect")}
+		</Button>
+	) : (
+		<Button
+			type="button"
+			size="sm"
+			onClick={() => void runSync()}
+			disabled={loading || syncing || credentialBlocked || credentialNeedsInput}
+		>
+			{syncing ? (
+				<LoaderCircle data-icon="inline-start" className="animate-spin" />
+			) : (
+				<CloudUpload data-icon="inline-start" />
+			)}
+			{t("sync.syncNow")}
+		</Button>
+	);
 
 	return (
-		<section>
+		<section
+			className={
+				mobile
+					? "[&_input]:min-h-11 [&_button:not([role=switch])]:min-h-11 [&_label]:min-h-11"
+					: undefined
+			}
+		>
+			{!mobile && isAgentero ? (
+				<DesktopCloudAccount
+					subject={cloudSubject}
+					orgId={activeOrgId}
+					onOrgId={setActiveOrgId}
+					onUsage={setCloudUsage}
+				/>
+			) : null}
 			<PageTitle
 				title={
 					<>
@@ -500,7 +614,11 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							/>
 						</span>
 						{statusText ? (
-							<span className="ml-2 font-normal text-muted-foreground text-xs">
+							<span
+								className="ml-2 font-normal text-muted-foreground text-xs"
+								role="status"
+								aria-live="polite"
+							>
 								{statusText}
 							</span>
 						) : null}
@@ -508,40 +626,76 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				}
 				actions={primaryAction}
 			/>
+			{syncing && progress ? (
+				<progress
+					className="mb-4 h-1.5 w-full accent-primary"
+					aria-label={statusText ?? t("sync.statusSyncing")}
+					max={Math.max(1, progress.total)}
+					value={
+						progress.total > 0
+							? Math.max(0, Math.min(progress.current, progress.total))
+							: undefined
+					}
+				/>
+			) : null}
 
-			<div className="mb-3 flex flex-wrap items-center gap-2">
-				<span id="sync-vault-label" className="text-muted-foreground text-xs">
-					{t("sync.vault")}
-				</span>
-				<Select
-					value={localVault ?? undefined}
-					onValueChange={(value) => setSelectedVault(value || null)}
-					disabled={vaults.length === 0}
-				>
-					<SelectTrigger
-						id="sync-vault"
-						size="sm"
-						className="w-44"
-						aria-labelledby="sync-vault-label"
+			{credentialNotice ? (
+				<div className="mb-5 space-y-3 rounded-xl border bg-muted/30 p-3.5">
+					<p className="text-sm">
+						{t(credentialNotice, {
+							field: t(isWebdav ? "sync.password" : "sync.secretKey"),
+						})}
+					</p>
+					{credentialBlocked ? (
+						<Button
+							type="button"
+							variant="outline"
+							disabled={loading}
+							onClick={() => void loadStatus()}
+						>
+							{t("sync.retryCredentials")}
+						</Button>
+					) : null}
+				</div>
+			) : null}
+
+			{!mobile ? (
+				<div className="mb-3 flex flex-wrap items-center gap-2">
+					<span id="sync-vault-label" className="text-muted-foreground text-xs">
+						{t("sync.vault")}
+					</span>
+					<Select
+						value={localVault ?? undefined}
+						onValueChange={(value) => setSelectedVault(value || null)}
+						disabled={vaults.length === 0 || controlsDisabled}
 					>
-						<SelectValue placeholder={t("sync.vaultPlaceholder")}>
-							{localVault ? vaultDisplayName(localVault) : undefined}
-						</SelectValue>
-					</SelectTrigger>
-					<SelectContent>
-						{vaults.map((path) => (
-							<SelectItem key={path} value={path}>
-								<span className="flex min-w-0 flex-col items-start">
-									<span className="truncate">{vaultDisplayName(path)}</span>
-									<span className="truncate text-muted-foreground text-xs">
-										{displayPath(path)}
+						<SelectTrigger
+							id="sync-vault"
+							size="sm"
+							className="w-44"
+							aria-labelledby="sync-vault-label"
+						>
+							<SelectValue placeholder={t("sync.vaultPlaceholder")}>
+								{localVault ? vaultDisplayName(localVault) : undefined}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent
+							className={mobile ? "[&_[role=option]]:min-h-11" : undefined}
+						>
+							{vaults.map((path) => (
+								<SelectItem key={path} value={path}>
+									<span className="flex min-w-0 flex-col items-start">
+										<span className="truncate">{vaultDisplayName(path)}</span>
+										<span className="truncate text-muted-foreground text-xs">
+											{displayPath(path)}
+										</span>
 									</span>
-								</span>
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+			) : null}
 
 			{status?.configured && !isGit && !form.conditionalWrites ? (
 				<p className="mb-3 text-muted-foreground text-xs">
@@ -565,10 +719,11 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 										value === "webdav" ||
 										value === "git"
 									) {
+										if (mobile && value !== "s3" && value !== "webdav") return;
 										patch({ backend: value });
 									}
 								}}
-								disabled={backendLocked}
+								disabled={backendLocked || controlsDisabled}
 							>
 								<SelectTrigger
 									id="sync-backend"
@@ -578,8 +733,15 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 								>
 									<SelectValue />
 								</SelectTrigger>
-								<SelectContent>
-									{BACKEND_OPTIONS.map((option) => (
+								<SelectContent
+									className={mobile ? "[&_[role=option]]:min-h-11" : undefined}
+								>
+									{BACKEND_OPTIONS.filter(
+										(option) =>
+											!mobile ||
+											option.value === "s3" ||
+											option.value === "webdav",
+									).map((option) => (
 										<SelectItem key={option.value} value={option.value}>
 											{t(option.labelKey)}
 										</SelectItem>
@@ -625,7 +787,11 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 
 			{isAgentero ? (
 				<SettingsGroup>
-					<SettingsRow label={t("sync.space")} htmlFor="sync-space">
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.space")}
+						htmlFor="sync-space"
+					>
 						<Select
 							value={form.agenteroSubject}
 							onValueChange={(value) => {
@@ -635,19 +801,21 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 									agenteroOrgId: value === "organization" ? activeOrgId : "",
 								});
 							}}
-							disabled={backendLocked}
+							disabled={backendLocked || controlsDisabled}
 						>
 							<SelectTrigger id="sync-space" size="sm" className="w-44">
 								<SelectValue />
 							</SelectTrigger>
-							<SelectContent>
+							<SelectContent
+								className={mobile ? "[&_[role=option]]:min-h-11" : undefined}
+							>
 								<SelectItem value="user">{t("sync.spacePersonal")}</SelectItem>
 								<SelectItem value="organization" disabled={!activeOrgId}>
 									{t("sync.spaceTeam")}
 								</SelectItem>
 							</SelectContent>
 						</Select>
-					</SettingsRow>
+					</SyncSettingsRow>
 					<div className="px-3 py-2">
 						<CloudUsageLine
 							subject={cloudSubject}
@@ -666,57 +834,104 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				</SettingsGroup>
 			) : isGit ? (
 				<SettingsGroup>
-					<SettingsRow label={t("sync.gitRemote")} htmlFor="sync-gitRemote">
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.gitRemote")}
+						htmlFor="sync-gitRemote"
+					>
 						{field("gitRemote", {
 							placeholder: "git@github.com:you/papers.git",
 						})}
-					</SettingsRow>
-					<SettingsRow label={t("sync.gitBranch")} htmlFor="sync-gitBranch">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.gitBranch")}
+						htmlFor="sync-gitBranch"
+					>
 						{field("gitBranch", { placeholder: "main" })}
-					</SettingsRow>
+					</SyncSettingsRow>
 				</SettingsGroup>
 			) : isWebdav ? (
 				<SettingsGroup>
-					<SettingsRow label={t("sync.serverUrl")} htmlFor="sync-webdavUrl">
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.serverUrl")}
+						htmlFor="sync-webdavUrl"
+					>
 						{field("webdavUrl", {
 							placeholder: "https://dav.jianguoyun.com/dav/agentero",
 						})}
-					</SettingsRow>
-					<SettingsRow label={t("sync.username")} htmlFor="sync-webdavUsername">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.username")}
+						htmlFor="sync-webdavUsername"
+					>
 						{field("webdavUsername")}
-					</SettingsRow>
-					<SettingsRow label={t("sync.password")} htmlFor="sync-webdavPassword">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.password")}
+						htmlFor="sync-webdavPassword"
+					>
 						{field("webdavPassword", { type: "password" })}
-					</SettingsRow>
+					</SyncSettingsRow>
 				</SettingsGroup>
 			) : (
 				<SettingsGroup>
-					<SettingsRow label={t("sync.endpoint")} htmlFor="sync-endpoint">
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.endpoint")}
+						htmlFor="sync-endpoint"
+					>
 						{field("endpoint", { placeholder: "https://…" })}
-					</SettingsRow>
-					<SettingsRow label={t("sync.bucket")} htmlFor="sync-bucket">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.bucket")}
+						htmlFor="sync-bucket"
+					>
 						{field("bucket")}
-					</SettingsRow>
-					<SettingsRow label={t("sync.accessKey")} htmlFor="sync-accessKey">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.accessKey")}
+						htmlFor="sync-accessKey"
+					>
 						{field("accessKey")}
-					</SettingsRow>
-					<SettingsRow label={t("sync.secretKey")} htmlFor="sync-secretKey">
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.secretKey")}
+						htmlFor="sync-secretKey"
+					>
 						{field("secretKey", { type: "password" })}
-					</SettingsRow>
+					</SyncSettingsRow>
 				</SettingsGroup>
 			)}
 
 			<SettingsGroup>
-				<SettingsRow label={t("sync.autoSync")} htmlFor="sync-autoSync">
+				<SyncSettingsRow
+					mobile={mobile}
+					label={t("sync.autoSync")}
+					htmlFor="sync-autoSync"
+				>
 					<Switch
+						disabled={controlsDisabled}
+						className={mobile ? "after:-inset-y-3.5" : undefined}
 						id="sync-autoSync"
 						checked={form.autoSync}
 						onCheckedChange={(checked) => patch({ autoSync: checked })}
 					/>
-				</SettingsRow>
+				</SyncSettingsRow>
 				{form.autoSync ? (
-					<SettingsRow label={t("sync.interval")} htmlFor="sync-interval">
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.interval")}
+						htmlFor="sync-interval"
+					>
 						<Select
+							disabled={controlsDisabled}
 							value={String(form.intervalMinutes)}
 							onValueChange={(value) =>
 								patch({ intervalMinutes: Number(value) })
@@ -725,7 +940,9 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							<SelectTrigger id="sync-interval" size="sm" className="w-32">
 								<SelectValue />
 							</SelectTrigger>
-							<SelectContent>
+							<SelectContent
+								className={mobile ? "[&_[role=option]]:min-h-11" : undefined}
+							>
 								{SYNC_INTERVAL_CHOICES.map((minutes) => (
 									<SelectItem key={minutes} value={String(minutes)}>
 										{t("sync.intervalMinutes", { count: minutes })}
@@ -733,7 +950,7 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 								))}
 							</SelectContent>
 						</Select>
-					</SettingsRow>
+					</SyncSettingsRow>
 				) : null}
 			</SettingsGroup>
 
@@ -744,7 +961,11 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				/>
 			</SettingsSectionLabel>
 			<SettingsGroup>
-				<SettingsRow label={t("sync.scopePdf")} htmlFor="sync-scope-pdf">
+				<SyncSettingsRow
+					mobile={mobile}
+					label={t("sync.scopePdf")}
+					htmlFor="sync-scope-pdf"
+				>
 					<span className="flex items-center gap-2">
 						{scopeSizes ? (
 							<span className="text-muted-foreground text-xs tabular-nums">
@@ -752,13 +973,19 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							</span>
 						) : null}
 						<Switch
+							disabled={controlsDisabled}
+							className={mobile ? "after:-inset-y-3.5" : undefined}
 							id="sync-scope-pdf"
 							checked={scope.pdf}
 							onCheckedChange={(checked) => patchScope("pdf", checked)}
 						/>
 					</span>
-				</SettingsRow>
-				<SettingsRow label={t("sync.scopeSource")} htmlFor="sync-scope-source">
+				</SyncSettingsRow>
+				<SyncSettingsRow
+					mobile={mobile}
+					label={t("sync.scopeSource")}
+					htmlFor="sync-scope-source"
+				>
 					<span className="flex items-center gap-2">
 						{scopeSizes ? (
 							<span className="text-muted-foreground text-xs tabular-nums">
@@ -766,13 +993,16 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							</span>
 						) : null}
 						<Switch
+							disabled={controlsDisabled}
+							className={mobile ? "after:-inset-y-3.5" : undefined}
 							id="sync-scope-source"
 							checked={scope.source}
 							onCheckedChange={(checked) => patchScope("source", checked)}
 						/>
 					</span>
-				</SettingsRow>
-				<SettingsRow
+				</SyncSettingsRow>
+				<SyncSettingsRow
+					mobile={mobile}
 					label={t("sync.scopeAttachments")}
 					htmlFor="sync-scope-attachments"
 				>
@@ -783,12 +1013,14 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 							</span>
 						) : null}
 						<Switch
+							disabled={controlsDisabled}
+							className={mobile ? "after:-inset-y-3.5" : undefined}
 							id="sync-scope-attachments"
 							checked={scope.attachments}
 							onCheckedChange={(checked) => patchScope("attachments", checked)}
 						/>
 					</span>
-				</SettingsRow>
+				</SyncSettingsRow>
 			</SettingsGroup>
 
 			{form.backend === "s3" ? (
@@ -810,10 +1042,15 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 					</CollapsibleTrigger>
 					<CollapsibleContent>
 						<SettingsGroup>
-							<SettingsRow label={t("sync.region")} htmlFor="sync-region">
+							<SyncSettingsRow
+								mobile={mobile}
+								label={t("sync.region")}
+								htmlFor="sync-region"
+							>
 								{field("region")}
-							</SettingsRow>
-							<SettingsRow
+							</SyncSettingsRow>
+							<SyncSettingsRow
+								mobile={mobile}
 								label={
 									<HelpLabel
 										label={t("sync.prefix")}
@@ -823,8 +1060,9 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 								htmlFor="sync-prefix"
 							>
 								{field("prefix")}
-							</SettingsRow>
-							<SettingsRow
+							</SyncSettingsRow>
+							<SyncSettingsRow
+								mobile={mobile}
 								label={
 									<HelpLabel
 										label={t("sync.pathStyle")}
@@ -834,18 +1072,19 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 								htmlFor="sync-pathStyle"
 							>
 								<Switch
+									disabled={controlsDisabled}
+									className={mobile ? "after:-inset-y-3.5" : undefined}
 									id="sync-pathStyle"
 									checked={form.forcePathStyle}
 									onCheckedChange={(checked) =>
 										patch({ forcePathStyle: checked })
 									}
 								/>
-							</SettingsRow>
+							</SyncSettingsRow>
 						</SettingsGroup>
 					</CollapsibleContent>
 				</Collapsible>
 			) : null}
-
 			<div className="flex items-center gap-2">
 				{status?.configured ? (
 					<Button
@@ -861,5 +1100,56 @@ export function SyncPane({ vaultPath }: { vaultPath: string | null }) {
 				) : null}
 			</div>
 		</section>
+	);
+}
+
+/** Desktop account hooks are never mounted by the tablet composition. */
+function DesktopCloudAccount({
+	subject,
+	orgId,
+	onOrgId,
+	onUsage,
+}: {
+	subject: "user" | "organization";
+	orgId: string;
+	onOrgId: (id: string) => void;
+	onUsage: (usage: SyncCloudUsage | null) => void;
+}) {
+	const usage = useCloudUsage(
+		subject,
+		subject === "organization" ? orgId || undefined : undefined,
+	);
+	useEffect(() => onUsage(usage), [usage, onUsage]);
+	useEffect(() => {
+		let active = true;
+		void import("@/features/account/client")
+			.then(({ authClient }) => authClient.getSession())
+			.then((result) => {
+				if (active) onOrgId(result.data?.session.activeOrganizationId ?? "");
+			})
+			.catch((error) => {
+				if (active) notifyError(errorMessage(error));
+			});
+		return () => {
+			active = false;
+		};
+	}, [onOrgId]);
+	return null;
+}
+
+function SyncSettingsRow({
+	mobile,
+	className,
+	...props
+}: ComponentProps<typeof SettingsRow> & { mobile: boolean }) {
+	return (
+		<SettingsRow
+			{...props}
+			className={cn(
+				mobile &&
+					"flex-col items-stretch gap-1 sm:flex-row sm:items-center sm:gap-4 [&>div:last-child]:min-w-0 [&>div:last-child]:w-full [&>div:last-child]:shrink [&>div:last-child]:justify-end sm:[&>div:last-child]:w-auto",
+				className,
+			)}
+		/>
 	);
 }

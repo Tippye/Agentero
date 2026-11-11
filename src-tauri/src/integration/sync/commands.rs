@@ -2,15 +2,16 @@
 //! `sync:progress` events so the settings pane (and later a status bar
 //! indicator) can follow along from any window.
 
-use super::config::{self, SyncBackendConfig};
+use super::config::SyncBackendConfig;
 use super::engine::{self, SyncOutcome};
 use super::local;
 use super::snapshot;
 use super::SyncService;
 use crate::core::error::{map_err, ApiResult, AppError};
+use agentero_core::features::sync::availability::{self, DownloadPolicy, PaperAvailability};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +30,7 @@ pub struct SyncConfigureArgs {
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatus {
     pub configured: bool,
+    pub credential_state: super::credentials::SyncCredentialState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<SyncBackendConfig>,
     pub running: bool,
@@ -93,39 +95,74 @@ async fn attach_agentero_session(app: &AppHandle, cfg: &mut SyncBackendConfig) {
     }
 }
 
-fn vault_dir(vault_path: &str) -> Result<PathBuf, AppError> {
+fn vault_dir(app: &AppHandle, vault_path: &str) -> Result<PathBuf, AppError> {
     let trimmed = vault_path.trim();
     if trimmed.is_empty() || trimmed.starts_with("remote:") {
         return Err(AppError::message("sync requires a local vault"));
     }
+    #[cfg(mobile)]
+    {
+        let expected = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| AppError::message("App private directory unavailable"))?
+            .join("Vault")
+            .canonicalize()?;
+        let requested = std::fs::canonicalize(trimmed)?;
+        if requested != expected {
+            return Err(AppError::domain(
+                "sync_private_vault_required",
+                "Tablet sync requires the app private Vault",
+            ));
+        }
+    }
+    #[cfg(desktop)]
+    let _ = app;
     crate::core::fs::resolve_vault(trimmed)
+}
+
+fn prepare_download_policy(dir: &std::path::Path) -> Result<(), AppError> {
+    #[cfg(mobile)]
+    availability::initialize_policy(
+        dir,
+        DownloadPolicy {
+            mode: availability::DownloadMode::OnDemand,
+            pinned_paper_ids: Vec::new(),
+        },
+    )?;
+    #[cfg(desktop)]
+    let _ = dir;
+    Ok(())
 }
 
 /// Current sync binding + last-pass info for the settings pane.
 #[tauri::command]
 #[specta::specta]
 pub async fn sync_get_status(
+    app: AppHandle,
     args: SyncVaultArgs,
     service: State<'_, SyncService>,
 ) -> Result<ApiResult<SyncStatus>, String> {
-    let running = service.is_running(args.vault_path.trim());
-    Ok(match vault_dir(&args.vault_path) {
-        Ok(dir) => {
-            let meta = local::read_meta(&dir);
-            let config = config::get(args.vault_path.trim());
-            ApiResult::ok(SyncStatus {
-                configured: config.is_some(),
-                config: config.map(|c| c.masked()),
-                running,
-                last_sync_at: meta.last_sync_at,
-                last_version: meta.last_version,
-            })
-        }
-        Err(e) => map_err(e),
+    let inner = async {
+        let dir = vault_dir(&app, &args.vault_path)?;
+        let status = super::credentials::status(&app, args.vault_path.trim()).await?;
+        let meta = local::read_meta(&dir);
+        Ok::<_, AppError>(SyncStatus {
+            configured: status.config.is_some(),
+            config: status.config,
+            credential_state: status.state,
+            running: service.is_running(args.vault_path.trim()),
+            last_sync_at: meta.last_sync_at,
+            last_version: meta.last_version,
+        })
+    };
+    Ok(match inner.await {
+        Ok(status) => ApiResult::ok(status),
+        Err(error) => map_err(error),
     })
 }
 
-/// Validate + connection-test + persist the S3 binding for a vault.
+/// Validate and probe before publishing a protected credential reference.
 #[tauri::command]
 #[specta::specta]
 pub async fn sync_configure(
@@ -135,19 +172,28 @@ pub async fn sync_configure(
 ) -> Result<ApiResult<SyncStatus>, String> {
     let key = args.vault_path.trim().to_string();
     let inner = async {
-        let dir = vault_dir(&args.vault_path)?;
+        let dir = vault_dir(&app, &key)?;
+        prepare_download_policy(&dir)?;
+        let _lease = service
+            .try_begin(&key)
+            .ok_or_else(|| AppError::message("sync already running"))?;
         let _lock = agentero_core::features::sync::lock::SyncLock::try_acquire(&dir)?
             .ok_or_else(|| AppError::message("another vault sync is running"))?;
-        let mut cfg = args.config.normalized();
-        cfg.merge_mask(config::get(&key).as_ref());
-        attach_agentero_session(&app, &mut cfg).await;
-        cfg.validate()?;
-        cfg.conditional_writes = engine::test_connection(&dir, &cfg).await?;
-        config::set(&key, cfg.clone())?;
+        let mut candidate = args.config.normalized();
+        attach_agentero_session(&app, &mut candidate).await;
+        let configured = super::credentials::configure(&app, &key, &dir, candidate).await?;
         let meta = local::read_meta(&dir);
         Ok::<_, AppError>(SyncStatus {
             configured: true,
-            config: Some(cfg.masked()),
+            config: Some(configured.config.masked()),
+            credential_state: if app
+                .state::<Option<crate::integration::credentials::CredentialStore>>()
+                .is_some()
+            {
+                super::credentials::SyncCredentialState::Ready
+            } else {
+                super::credentials::SyncCredentialState::Inline
+            },
             running: false,
             last_sync_at: meta.last_sync_at,
             last_version: meta.last_version,
@@ -159,30 +205,147 @@ pub async fn sync_configure(
     }
     Ok(match result {
         Ok(status) => ApiResult::ok(status),
-        Err(e) => map_err(e),
+        Err(error) => map_err(error),
     })
 }
 
-/// Remove the binding and local sync state (remote data stays untouched).
+/// Clear protected generations before reporting a disconnected binding.
 #[tauri::command]
 #[specta::specta]
 pub async fn sync_disconnect(
+    app: AppHandle,
     service: State<'_, SyncService>,
     args: SyncVaultArgs,
 ) -> Result<ApiResult<()>, String> {
     let key = args.vault_path.trim().to_string();
-    let inner = || {
-        let dir = vault_dir(&args.vault_path)?;
-        config::remove(&key)?;
+    let inner = async {
+        let dir = vault_dir(&app, &key)?;
+        let _lease = service
+            .try_begin(&key)
+            .ok_or_else(|| AppError::message("sync already running"))?;
+        let _lock = agentero_core::features::sync::lock::SyncLock::try_acquire(&dir)?
+            .ok_or_else(|| AppError::message("another vault sync is running"))?;
+        super::credentials::clear(&app, &key).await?;
         local::clear(&dir);
         Ok::<_, AppError>(())
     };
-    Ok(match inner() {
+    Ok(match inner.await {
         Ok(()) => {
             service.stop_scheduler(&key);
             ApiResult::ok(())
         }
-        Err(e) => map_err(e),
+        Err(error) => map_err(error),
+    })
+}
+
+#[derive(Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDownloadPolicyArgs {
+    pub vault_path: String,
+    pub policy: DownloadPolicy,
+}
+#[derive(Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPaperArgs {
+    pub vault_path: String,
+    pub paper_id: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_get_download_policy(
+    app: AppHandle,
+    args: SyncVaultArgs,
+) -> Result<ApiResult<DownloadPolicy>, String> {
+    Ok(
+        match vault_dir(&app, &args.vault_path).and_then(|dir| {
+            prepare_download_policy(&dir)?;
+            availability::read_policy(&dir)
+        }) {
+            Ok(value) => ApiResult::ok(value),
+            Err(error) => map_err(error),
+        },
+    )
+}
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_set_download_policy(
+    app: AppHandle,
+    service: State<'_, SyncService>,
+    args: SyncDownloadPolicyArgs,
+) -> Result<ApiResult<DownloadPolicy>, String> {
+    let result = vault_dir(&app, &args.vault_path)
+        .and_then(|dir| availability::set_policy(&dir, args.policy));
+    if result.is_ok() {
+        service.notify_path_changed(&app, std::path::Path::new(args.vault_path.trim()));
+    }
+    Ok(match result {
+        Ok(value) => ApiResult::ok(value),
+        Err(error) => map_err(error),
+    })
+}
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_list_paper_availability(
+    app: AppHandle,
+    args: SyncVaultArgs,
+) -> Result<ApiResult<Vec<PaperAvailability>>, String> {
+    Ok(
+        match vault_dir(&app, &args.vault_path).and_then(|dir| availability::list_papers(&dir)) {
+            Ok(value) => ApiResult::ok(value),
+            Err(error) => map_err(error),
+        },
+    )
+}
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_fetch_paper(
+    app: AppHandle,
+    service: State<'_, SyncService>,
+    args: SyncPaperArgs,
+) -> Result<ApiResult<SyncOutcome>, String> {
+    Ok(
+        match perform_sync_task(&app, &service, args.vault_path.trim(), Some(&args.paper_id)).await
+        {
+            Ok(value) => ApiResult::ok(value),
+            Err(error) => map_err(error),
+        },
+    )
+}
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_evict_paper(
+    app: AppHandle,
+    service: State<'_, SyncService>,
+    args: SyncPaperArgs,
+) -> Result<ApiResult<usize>, String> {
+    let key = args.vault_path.trim();
+    let result = (|| {
+        let dir = vault_dir(&app, key)?;
+        let _lease = service
+            .try_begin(key)
+            .ok_or_else(|| AppError::message("sync already running"))?;
+        availability::evict_paper(&dir, &args.paper_id)
+    })();
+    Ok(match result {
+        Ok(value) => ApiResult::ok(value),
+        Err(error) => map_err(error),
+    })
+}
+/// Explicit hints supplement native writes/imports; they never bypass auto-sync preferences.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_notify_change(
+    app: AppHandle,
+    service: State<'_, SyncService>,
+    args: SyncVaultArgs,
+) -> Result<ApiResult<()>, String> {
+    Ok(match vault_dir(&app, &args.vault_path) {
+        Ok(dir) => {
+            service.notify_path_changed(&app, &dir);
+            ApiResult::ok(())
+        }
+        Err(error) => map_err(error),
     })
 }
 
@@ -197,9 +360,12 @@ pub struct SyncScopeSizes {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn sync_scope_sizes(args: SyncVaultArgs) -> Result<ApiResult<SyncScopeSizes>, String> {
+pub async fn sync_scope_sizes(
+    app: AppHandle,
+    args: SyncVaultArgs,
+) -> Result<ApiResult<SyncScopeSizes>, String> {
     let inner = async {
-        let dir = vault_dir(&args.vault_path)?;
+        let dir = vault_dir(&app, &args.vault_path)?;
         tokio::task::spawn_blocking(move || {
             let mut sizes = SyncScopeSizes::default();
             let walker = walkdir::WalkDir::new(&dir)
@@ -247,13 +413,23 @@ pub async fn perform_sync(
     service: &SyncService,
     vault_key: &str,
 ) -> Result<SyncOutcome, AppError> {
-    let dir = vault_dir(vault_key)?;
-    let mut cfg =
-        config::get(vault_key).ok_or_else(|| AppError::message("sync is not configured"))?;
-    attach_agentero_session(app, &mut cfg).await;
+    perform_sync_task(app, service, vault_key, None).await
+}
+async fn perform_sync_task(
+    app: &AppHandle,
+    service: &SyncService,
+    vault_key: &str,
+    requested: Option<&str>,
+) -> Result<SyncOutcome, AppError> {
+    let dir = vault_dir(app, vault_key)?;
+    prepare_download_policy(&dir)?;
     let lease = service
         .try_begin(vault_key)
         .ok_or_else(|| AppError::message("sync already running"))?;
+    let mut cfg = super::credentials::load(app, vault_key)
+        .await?
+        .ok_or_else(|| AppError::message("sync is not configured"))?;
+    attach_agentero_session(app, &mut cfg).await;
     emit_state(app, vault_key, "syncing", None);
     let progress_app = app.clone();
     let progress_key = vault_key.to_string();
@@ -268,7 +444,11 @@ pub async fn perform_sync(
             },
         );
     };
-    let result = engine::sync_vault_locked(&dir, &cfg, &progress).await;
+    let result = if let Some(paper) = requested {
+        availability::fetch_paper(&dir, &cfg, paper, &progress).await
+    } else {
+        engine::sync_vault_locked(&dir, &cfg, &progress).await
+    };
     // Terminal event consumers immediately re-read status; release first.
     drop(lease);
     match result {

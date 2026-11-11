@@ -72,7 +72,7 @@ export function useMobilePapers({ vaultPath }: { vaultPath: string | null }) {
 					payload.vaultPath === vaultPath &&
 					payload.status === "idle"
 				)
-					void refresh();
+					void refresh(true);
 			})
 			.then((off) => {
 				if (active) dispose = off;
