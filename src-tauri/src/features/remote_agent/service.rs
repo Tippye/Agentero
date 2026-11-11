@@ -600,10 +600,7 @@ fn validate_outcome(
                 if let Some(mutation) = mutation {
                     match mutation {
                         Mutation::CreateSession { workspace, .. }
-                            if workspace == &session.workspace =>
-                        {
-                            ()
-                        }
+                            if workspace == &session.workspace => {}
                         _ => return Err(boundary()),
                     }
                 }
@@ -616,10 +613,7 @@ fn validate_outcome(
                 if let Some(mutation) = mutation {
                     match mutation {
                         Mutation::UploadAttachment { upload }
-                            if upload.session == attachment.session =>
-                        {
-                            ()
-                        }
+                            if upload.session == attachment.session => {}
                         _ => return Err(boundary()),
                     }
                 }
