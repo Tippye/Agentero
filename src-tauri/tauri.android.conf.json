@@ -4,6 +4,7 @@
 		"beforeBuildCommand": "pnpm build"
 	},
 	"bundle": {
+		"android": { "minSdkVersion": 33 },
 		"externalBin": [],
 		"resources": []
 	}
