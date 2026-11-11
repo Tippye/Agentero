@@ -16,8 +16,15 @@ const iosConfig = JSON.parse(
 	readFileSync("src-tauri/tauri.ios.conf.json", "utf8"),
 );
 const minimumVersion = iosConfig.bundle?.iOS?.minimumSystemVersion;
-if (!minimumVersion || Number(minimumVersion) < 15) {
-	console.error("iOS minimumSystemVersion must be 15.0 or newer");
+const versionParts = /^\d+(?:\.\d+){0,2}$/.test(minimumVersion ?? "")
+	? minimumVersion.split(".").map(Number)
+	: [];
+if (
+	!versionParts.length ||
+	versionParts[0] < 18 ||
+	(versionParts[0] === 18 && (versionParts[1] ?? 0) < 2)
+) {
+	console.error("iOS minimumSystemVersion must be 18.2 or newer");
 	process.exit(1);
 }
 
@@ -33,6 +40,11 @@ if (
 }
 
 const template = readFileSync("src-tauri/ios-project.yml", "utf8");
+const templateVersion = template.match(/^\s+iOS:\s*["']?(\d+(?:\.\d+){0,2})["']?\s*$/m)?.[1];
+if (templateVersion !== minimumVersion) {
+	console.error("iOS project template and Tauri minimumSystemVersion must match");
+	process.exit(1);
+}
 if (
 	!template.includes("NSCameraUsageDescription") ||
 	!template.includes("Assets.xcassets")

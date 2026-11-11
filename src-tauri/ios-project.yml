@@ -2,7 +2,7 @@ name: agentero
 options:
   bundleIdPrefix: com.poco-ai.agentero
   deploymentTarget:
-    iOS: 15.0
+    iOS: 18.2
 fileGroups: [../../src]
 configs:
   debug: debug

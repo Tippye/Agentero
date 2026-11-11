@@ -1,7 +1,8 @@
 # 平板端实施方案：iOS / iPadOS 篇
 
-> 状态：**设计稿，未实现，待评审**。基线 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2），行号对应该提交。
-> 两端共用部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`ios` 基于 `mobile`，这里只写 iOS / iPadOS 特有工作；文中 S0–S9 指共享篇工作项。本次仅修改方案，应用配置尚未实施。
+> 状态：**开发中，尚未完成真机验收**。现状分析与行号基于 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2）。
+> 两端共用部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`ios` 基于 `mobile`，这里只写 iOS / iPadOS 特有工作；文中 S0–S9 指共享篇工作项。
+> 已落地的首批平台配置：Tauri 与 XcodeGen 模板最低系统同步为 18.2，发布预检检查两处一致。仍不声明常驻后台；有限后台恢复、多场景、原生导入和手写输入仍待实现和设备验收。当前环境缺少完整 Xcode/iPhoneOS SDK。
 
 ## 1. 结论
 

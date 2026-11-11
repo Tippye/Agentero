@@ -8,7 +8,7 @@
 		"resources": [],
 		"iOS": {
 			"template": "src-tauri/ios-project.yml",
-			"minimumSystemVersion": "15.0",
+			"minimumSystemVersion": "18.2",
 			"infoPlist": "./Info.ios.plist"
 		}
 	}
