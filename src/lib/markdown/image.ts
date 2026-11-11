@@ -133,6 +133,8 @@ export function createManagedAssetGc(options?: {
 	debounceMs?: number;
 	/** Called after one or more files are actually removed. */
 	onDeleted?: (removed: number) => void;
+	/** Retain queued files until their owner's canonical save is confirmed. */
+	canDelete?: (mdFilePath: string, url: string) => boolean;
 	/** Injectable for tests. */
 	deleteAsset?: (mdFilePath: string, url: string) => Promise<boolean>;
 	now?: () => number;
@@ -143,17 +145,35 @@ export function createManagedAssetGc(options?: {
 	const deleteAsset = options?.deleteAsset ?? deleteManagedMarkdownAsset;
 	const setTimer = options?.setTimer ?? setTimeout;
 	const clearTimer = options?.clearTimer ?? clearTimeout;
-
-	const pending = new Map<
-		string,
-		{ mdFilePath: string; url: string; timer: ReturnType<typeof setTimeout> }
-	>();
+	const now = options?.now ?? Date.now;
+	type PendingAsset = {
+		mdFilePath: string;
+		url: string;
+		due: number;
+		timer?: ReturnType<typeof setTimeout>;
+	};
+	const pending = new Map<string, PendingAsset>();
+	const canDelete = (entry: PendingAsset) =>
+		options?.canDelete?.(entry.mdFilePath, entry.url) ?? true;
+	const arm = (key: string, entry: PendingAsset) => {
+		entry.timer = setTimer(
+			() => {
+				entry.timer = undefined;
+				if (pending.get(key) !== entry || !canDelete(entry)) return;
+				pending.delete(key);
+				void deleteAsset(entry.mdFilePath, entry.url).then((ok) => {
+					if (ok) options?.onDeleted?.(1);
+				});
+			},
+			Math.max(0, entry.due - now()),
+		);
+	};
 
 	const cancel = (mdFilePath: string, url: string) => {
 		const key = assetGcKey(mdFilePath, url);
 		const entry = pending.get(key);
 		if (!entry) return;
-		clearTimer(entry.timer);
+		if (entry.timer !== undefined) clearTimer(entry.timer);
 		pending.delete(key);
 	};
 
@@ -161,16 +181,10 @@ export function createManagedAssetGc(options?: {
 		if (!isManagedMarkdownAssetUrl(url)) return;
 		const key = assetGcKey(mdFilePath, url);
 		const existing = pending.get(key);
-		if (existing) {
-			clearTimer(existing.timer);
-		}
-		const timer = setTimer(() => {
-			pending.delete(key);
-			void deleteAsset(mdFilePath, url).then((ok) => {
-				if (ok) options?.onDeleted?.(1);
-			});
-		}, debounceMs);
-		pending.set(key, { mdFilePath, url, timer });
+		if (existing?.timer !== undefined) clearTimer(existing.timer);
+		const entry = { mdFilePath, url, due: now() + debounceMs };
+		pending.set(key, entry);
+		arm(key, entry);
 	};
 
 	return {
@@ -197,23 +211,33 @@ export function createManagedAssetGc(options?: {
 			return [...pending.values()].map((e) => e.url);
 		},
 
+		/** Resume held entries after confirmation, preserving their grace deadline. */
+		resume() {
+			for (const [key, entry] of pending) {
+				if (entry.timer === undefined && canDelete(entry)) arm(key, entry);
+			}
+		},
+
 		/** Cancel all timers without deleting (e.g. tests). */
 		cancelAll() {
-			for (const entry of pending.values()) clearTimer(entry.timer);
+			for (const entry of pending.values()) {
+				if (entry.timer !== undefined) clearTimer(entry.timer);
+			}
 			pending.clear();
 		},
 
-		/**
-		 * Run all pending deletes now (editor unmount: cut without paste still
-		 * should free disk eventually when leaving the file).
-		 */
+		/** Delete eligible entries now; unconfirmed owners retain their queue. */
 		async flush(): Promise<number> {
-			const entries = [...pending.values()];
-			pending.clear();
-			for (const e of entries) clearTimer(e.timer);
+			const entries = [...pending.entries()];
+			for (const [, entry] of entries) {
+				if (entry.timer !== undefined) clearTimer(entry.timer);
+				entry.timer = undefined;
+			}
 			let removed = 0;
-			for (const e of entries) {
-				if (await deleteAsset(e.mdFilePath, e.url)) removed += 1;
+			for (const [key, entry] of entries) {
+				if (pending.get(key) !== entry || !canDelete(entry)) continue;
+				pending.delete(key);
+				if (await deleteAsset(entry.mdFilePath, entry.url)) removed += 1;
 			}
 			if (removed > 0) options?.onDeleted?.(removed);
 			return removed;

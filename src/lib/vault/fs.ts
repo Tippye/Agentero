@@ -58,6 +58,15 @@ export async function readVaultBytes(path: string): Promise<Uint8Array> {
 /** A working copy's exact loaded/last saved bytes; null means the file was missing. */
 export type VaultTextWriteGuard = { expectedContent: string | null };
 
+/** Set by the host only after preserving the exact rejected proposal. */
+export function isPreservedVaultWriteConflict(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false;
+	return (
+		(error as { details?: { conflictPreserved?: boolean } }).details
+			?.conflictPreserved === true
+	);
+}
+
 /** Write text through the host mutation lane, creating allowed parent dirs. */
 export async function writeVaultFile(
 	path: string,

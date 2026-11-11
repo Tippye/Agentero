@@ -318,6 +318,69 @@ mod tests {
     }
 
     #[test]
+    fn staged_sync_then_markdown_editor_preserves_remote_and_exact_md_proposal() {
+        use std::sync::mpsc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("NOTES.md");
+        let staged = dir.path().join("remote.tmp");
+        let base = b"# Base\n";
+        let remote = b"---\r\ntitle: Remote\r\n---\r\n\r\n# Synced\r\n";
+        let proposal = "---\r\ntitle: Local  \r\n---\r\n\r\n*exact draft*\u{200b}  \n".as_bytes();
+        fs::write(&path, base).unwrap();
+        // This is the frontend's accepted early read, before the sync rename.
+        let accepted = fs::read(&path).unwrap();
+        let (staged_tx, staged_rx) = mpsc::channel();
+        let (publish_tx, publish_rx) = mpsc::channel();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        std::thread::scope(|threads| {
+            let sync_path = &path;
+            let staged_path = &staged;
+            let sync = threads.spawn(move || {
+                with_file_mutation(|| {
+                    assert_eq!(fs::read(sync_path)?, base);
+                    fs::write(staged_path, remote)?;
+                    staged_tx.send(()).unwrap();
+                    publish_rx.recv().unwrap();
+                    fs::rename(staged_path, sync_path)?;
+                    Ok(())
+                })
+                .unwrap();
+            });
+            staged_rx.recv().unwrap();
+            let editor_path = &path;
+            let editor = threads.spawn(move || {
+                attempt_tx.send(()).unwrap();
+                with_file_mutation(|| {
+                    write_text(
+                        editor_path,
+                        proposal,
+                        true,
+                        Some(&accepted),
+                        canonical_target,
+                    )
+                })
+            });
+            attempt_rx.recv().unwrap();
+            assert_eq!(fs::read(&path).unwrap(), base);
+            publish_tx.send(()).unwrap();
+            sync.join().unwrap();
+            assert_eq!(
+                editor.join().unwrap().unwrap_err().code(),
+                "file_write_conflict"
+            );
+        });
+        let conflict = path.with_file_name(format!(
+            "NOTES (conflict {}).md",
+            hex::encode(Sha256::digest(proposal))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), remote);
+        assert_eq!(fs::read(&conflict).unwrap(), proposal);
+        assert_eq!(conflict.extension().unwrap(), "md");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
     fn denied_conflict_target_leaves_canonical_and_directory_untouched() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("annotations.json");
