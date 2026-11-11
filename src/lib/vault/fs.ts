@@ -1,5 +1,7 @@
 import { readFile, readTextFile } from "@tauri-apps/plugin-fs";
 import i18n from "@/i18n";
+import { commands } from "@/lib/core/bindings";
+import { callApiResult } from "@/lib/core/ipc";
 import { isTauri } from "@/lib/core/tauri";
 import {
 	parseRemoteJoinedPath,
@@ -53,10 +55,14 @@ export async function readVaultBytes(path: string): Promise<Uint8Array> {
 	return readFile(path);
 }
 
-/** Write text file (creates parent dirs when possible). */
+/** A working copy's exact loaded/last saved bytes; null means the file was missing. */
+export type VaultTextWriteGuard = { expectedContent: string | null };
+
+/** Write text through the host mutation lane, creating allowed parent dirs. */
 export async function writeVaultFile(
 	path: string,
 	content: string,
+	guard?: VaultTextWriteGuard,
 ): Promise<void> {
 	if (!isTauri()) {
 		throw new Error(i18n.t("app:vault.writeDesktopOnly"));
@@ -69,16 +75,14 @@ export async function writeVaultFile(
 		return;
 	}
 
-	const { mkdir, writeTextFile } = await import("@tauri-apps/plugin-fs");
-	const parent = path.replace(/[\\/][^\\/]+$/, "");
-	if (parent && parent !== path) {
-		try {
-			await mkdir(parent, { recursive: true });
-		} catch {
-			// Parent may already exist
-		}
-	}
-	await writeTextFile(path, content);
+	await callApiResult(() =>
+		commands.vaultWriteTextFile(
+			path,
+			content,
+			guard !== undefined,
+			guard?.expectedContent ?? null,
+		),
+	);
 }
 
 /** Write binary file (creates parent dirs when possible). Used for Markdown `./assets/` images. */
@@ -173,6 +177,17 @@ export async function createVaultDirectory(path: string): Promise<void> {
 	await mkdir(path, { recursive: true });
 }
 
+/** Remove one local file through the sync mutation lane (never recursive). */
+export async function removeVaultFile(path: string): Promise<void> {
+	const remote = parseRemoteJoinedPath(path);
+	if (remote) {
+		if (!remote.rel) throw new Error("invalid remote path");
+		await remoteRemove(remote.sessionId, remote.rel, false);
+		return;
+	}
+	await callApiResult(() => commands.vaultRemoveFile(path));
+}
+
 /**
  * Remove a file or directory under the vault.
  * Directories are removed recursively (including non-empty).
@@ -190,6 +205,10 @@ export async function removeVaultPath(path: string): Promise<void> {
 	if (remote) {
 		if (!remote.rel) throw new Error("invalid remote path");
 		await remoteRemove(remote.sessionId, remote.rel, true);
+		return;
+	}
+	if (/[\\/]marks[\\/][^\\/]+\.json$/i.test(trimmed)) {
+		await removeVaultFile(trimmed);
 		return;
 	}
 	const { remove } = await import("@tauri-apps/plugin-fs");

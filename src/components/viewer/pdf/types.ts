@@ -46,6 +46,8 @@ export type SuggestedHighlight = {
 };
 
 export type PdfViewerProps = {
+	/** Host workflow capabilities; inferred from isMobileApp when omitted. */
+	runtime?: import("./capabilities").PdfViewerRuntime;
 	/**
 	 * PDF source: local `blob:` (bytes via fs) or remote https. Prefer local
 	 * vault PDF; remote URL is fallback when download fails.
@@ -162,6 +164,8 @@ export type PdfViewerInnerProps = PdfViewerProps & {
 	baseDocId: string;
 	/** Survives the inner EmbedPDF remount when the compiled buffer changes. */
 	reloadPositionRef?: RefObject<PdfReloadPosition | null>;
+	/** Reopen only this PDF after preserving a stale annotation working copy. */
+	onReloadAnnotations?: () => void;
 };
 
 /** Viewport-space point (client px) used by every floating overlay. */

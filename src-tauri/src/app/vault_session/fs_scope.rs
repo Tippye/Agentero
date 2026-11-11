@@ -27,6 +27,21 @@ pub fn vault_allow_fs_scope<R: Runtime>(app: AppHandle<R>, path: String) -> ApiR
             return map_err(err);
         }
     };
+    #[cfg(mobile)]
+    {
+        use tauri::Manager;
+        let private_path = (|| -> Result<bool, Box<dyn std::error::Error>> {
+            let path = p.canonicalize()?;
+            let root = app.path().app_data_dir()?.canonicalize()?;
+            Ok(path.starts_with(root))
+        })();
+        if !matches!(private_path, Ok(true)) {
+            let err =
+                AppError::message("Mobile Vault access must stay in application-private storage");
+            op.finish_err(&err);
+            return map_err(err);
+        }
+    }
     match app.fs_scope().allow_directory(&p, true) {
         Ok(()) => op.finish_result(Ok(())),
         Err(e) => {

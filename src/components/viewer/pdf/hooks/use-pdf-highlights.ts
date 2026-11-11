@@ -25,6 +25,7 @@ import type {
 	PdfLinkAnnoObject,
 } from "@embedpdf/models";
 import { PdfAnnotationSubtype } from "@embedpdf/models";
+import { type LockMode, LockModeType } from "@embedpdf/plugin-annotation";
 import type {
 	AnnotationEvent,
 	AnnotationTransferItem,
@@ -37,6 +38,7 @@ import {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -48,17 +50,23 @@ import { notifyError } from "@/lib/core/notify";
 import { planAnnotationItemImport } from "@/lib/pdf/highlight/annotation-items";
 import {
 	ANNOTATIONS_FILE,
+	type AnnotationFileBase,
 	type HighlightCustom,
 	hasAnnotationsFile,
 	highlightViewFromObject,
 	isHighlightObject,
 	isLiveAnnotation,
+	isPreservedAnnotationConflict,
 	loadAnnotationItems,
+	readAnnotationFileContent,
 	saveAnnotationItems,
+	saveAnnotationSnapshot,
 } from "@/lib/pdf/highlight/annotation-store";
 import {
+	advanceAnnotationPeerBaseline,
 	applyAnnotationMutation,
 	enqueueAnnotationSave,
+	invalidateAnnotationPeers,
 	publishAnnotationMutation,
 	subscribeAnnotationPeer,
 } from "@/lib/pdf/highlight/annotation-sync";
@@ -105,6 +113,8 @@ export type UsePdfHighlightsOptions = {
 	totalPages: number;
 	/** Prop-latest ref so publishing never re-fires on parent re-render. */
 	onHighlightsChangeRef: RefObject<PdfViewerProps["onHighlightsChange"]>;
+	/** Remount only this PDF after its exact pending export has been preserved. */
+	onReloadAnnotations?: () => void;
 };
 
 export type PdfHighlights = {
@@ -151,6 +161,7 @@ export function usePdfHighlights({
 	paperKey,
 	totalPages,
 	onHighlightsChangeRef,
+	onReloadAnnotations,
 }: UsePdfHighlightsOptions): PdfHighlights {
 	const [highlights, setHighlights] = useState<PdfHighlight[]>([]);
 	/** Normalized annotation rects for pin placement, keyed by annotation id. */
@@ -162,22 +173,51 @@ export function usePdfHighlights({
 	>(new Map());
 	const highlightsRef = useRef(highlights);
 	highlightsRef.current = highlights;
+	// Each mounted viewer owns its base. Watcher/annotation-ref reads must not
+	// silently rebase this working copy over sync updates or remote deletions.
+	const annotationBase = useMemo<AnnotationFileBase>(
+		() => ({
+			path: paperAbsPath
+				? joinVaultPath(marksDir(paperAbsPath), ANNOTATIONS_FILE)
+				: undefined,
+		}),
+		[paperAbsPath],
+	);
 	const importedRef = useRef(false);
 	const importingRef = useRef(false);
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const deleteQueueRef = useRef<ReturnType<
 		typeof createAnnotationDeleteQueue
 	> | null>(null);
+	const reloadRequiredRef = useRef(false);
+	const reloadPendingRef = useRef(false);
+	const saveEpochRef = useRef(0);
+	const pendingSaveCountRef = useRef(0);
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
 	const initialImportDoneRef = useRef(false);
-	const pendingPeerEventsRef = useRef<
-		Exclude<AnnotationEvent, { type: "loaded" }>[]
-	>([]);
+	const initialLockRef = useRef<LockMode>({ type: LockModeType.None });
+	const initialLockCapturedRef = useRef(false);
+	useLayoutEffect(() => {
+		const scope = annotationCap?.forDocument(docId);
+		if (!scope || initialImportDoneRef.current) return;
+		if (!initialLockCapturedRef.current) {
+			initialLockCapturedRef.current = true;
+			initialLockRef.current = scope.getState().locked ?? {
+				type: LockModeType.None,
+			};
+		}
+		scope.setLocked({ type: LockModeType.All });
+	}, [annotationCap, docId]);
 	const applyPeerEvent = useCallback(
 		(event: Exclude<AnnotationEvent, { type: "loaded" }>) => {
-			if (!initialImportDoneRef.current) {
-				pendingPeerEventsRef.current.push(event);
-				return;
-			}
+			if (reloadRequiredRef.current) return;
+			if (!initialImportDoneRef.current) return;
 			const scope = annotationCap?.forDocument(docId);
 			if (!scope) return;
 			const wasImporting = importingRef.current;
@@ -196,10 +236,14 @@ export function usePdfHighlights({
 		},
 		[annotationCap, docId],
 	);
-	useEffect(() => {
-		if (!paperAbsPath || !annotationCap) return;
-		return subscribeAnnotationPeer(paperAbsPath, docId, applyPeerEvent);
-	}, [paperAbsPath, docId, annotationCap, applyPeerEvent]);
+	const peerSubscriptionRef = useRef<(() => void) | null>(null);
+	useEffect(
+		() => () => {
+			peerSubscriptionRef.current?.();
+			peerSubscriptionRef.current = null;
+		},
+		[],
+	);
 
 	const rebuildHighlights = useCallback(() => {
 		if (!annotationCap) return;
@@ -288,22 +332,154 @@ export function usePdfHighlights({
 		});
 	}, [rebuildHighlights]);
 
-	const persistAnnotations = useCallback(() => {
-		if (!paperAbsPath || !annotationCap) return;
-		// Capture while this document still exists, including an unmount flush.
-		const snapshot = annotationCap
-			.forDocument(docId)
-			.exportAnnotations()
-			.toPromise();
-		void enqueueAnnotationSave(paperAbsPath, async () => {
-			await saveAnnotationItems(paperAbsPath, await snapshot);
-		}).catch((error) => notifyError(errorText(error)));
-	}, [paperAbsPath, annotationCap, docId]);
+	const freezeForReload = useCallback(() => {
+		if (!reloadRequiredRef.current) {
+			reloadRequiredRef.current = true;
+			saveEpochRef.current += 1;
+		}
+		if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+		saveTimerRef.current = null;
+		const scope = annotationCap?.forDocument(docId);
+		scope?.setActiveTool(null);
+		scope?.setLocked({ type: LockModeType.All });
+	}, [annotationCap, docId]);
+
+	const offerReload = useCallback(
+		(error: unknown) => {
+			if (!mountedRef.current) return;
+			freezeForReload();
+			const show = (failure: unknown) => {
+				notifyError(errorText(failure), {
+					id: `annotation-reload:${docId}`,
+					action:
+						onReloadAnnotations && paperAbsPath && annotationCap
+							? {
+									label: i18n.t("app:diskConflict.reload"),
+									onClick: () => {
+										if (!mountedRef.current || reloadPendingRef.current) return;
+										reloadPendingRef.current = true;
+										// Old queued exports are retired by freezeForReload's epoch.
+										// Capture again here to preserve the latest state before remount.
+										void enqueueAnnotationSave(paperAbsPath, async () => {
+											if (!mountedRef.current) return;
+											if (annotationBase.content !== undefined) {
+												try {
+													await saveAnnotationSnapshot(
+														paperAbsPath,
+														() =>
+															annotationCap
+																.forDocument(docId)
+																.exportAnnotations()
+																.toPromise(),
+														{ ...annotationBase },
+													);
+												} catch (saveError) {
+													if (!isPreservedAnnotationConflict(saveError))
+														throw saveError;
+												}
+											}
+											const raw = await readAnnotationFileContent(paperAbsPath);
+											invalidateAnnotationPeers(paperAbsPath, raw);
+											if (mountedRef.current) onReloadAnnotations();
+										})
+											.catch(show)
+											.finally(() => {
+												reloadPendingRef.current = false;
+											});
+									},
+								}
+							: undefined,
+				});
+			};
+			show(error);
+		},
+		[
+			annotationBase,
+			annotationCap,
+			docId,
+			freezeForReload,
+			onReloadAnnotations,
+			paperAbsPath,
+		],
+	);
+
+	const persistAnnotations = useCallback(
+		(beforeUnmount = false) => {
+			if (
+				!paperAbsPath ||
+				!annotationCap ||
+				(reloadRequiredRef.current && !beforeUnmount)
+			)
+				return;
+			if (beforeUnmount && annotationBase.content === undefined) return;
+			const epoch = saveEpochRef.current;
+			// Normal exports are captured inside the queue. An unmount must capture
+			// while its engine still exists; freeze its old base alongside the export
+			// so that an older queued snapshot can never borrow a newer expected base.
+			const base = beforeUnmount ? { ...annotationBase } : annotationBase;
+			const finalSnapshot = beforeUnmount
+				? annotationCap.forDocument(docId).exportAnnotations().toPromise()
+				: null;
+			// Observe a rejected teardown export immediately while its queue slot waits.
+			if (finalSnapshot) void finalSnapshot.catch(() => {});
+			pendingSaveCountRef.current += 1;
+			void enqueueAnnotationSave(paperAbsPath, async () => {
+				const previous = base.content;
+				await saveAnnotationSnapshot(
+					paperAbsPath,
+					() =>
+						finalSnapshot ??
+						annotationCap.forDocument(docId).exportAnnotations().toPromise(),
+					base,
+					() => epoch === saveEpochRef.current,
+				);
+				if (epoch === saveEpochRef.current)
+					advanceAnnotationPeerBaseline(
+						paperAbsPath,
+						docId,
+						previous,
+						base.content,
+					);
+			})
+				.catch((error) => {
+					if (!beforeUnmount) {
+						offerReload(error);
+						return;
+					}
+					// The viewer may already be gone. Surface the final failure
+					// globally and retain its immutable export/base in the retry action.
+					const reportFinal = (failure: unknown) =>
+						notifyError(errorText(failure), {
+							id: `annotation-final:${docId}`,
+							action:
+								finalSnapshot && !isPreservedAnnotationConflict(failure)
+									? {
+											label: i18n.t("viewer:pdf.bookmarks.retry"),
+											onClick: () => {
+												void enqueueAnnotationSave(paperAbsPath, () =>
+													saveAnnotationSnapshot(
+														paperAbsPath,
+														() => finalSnapshot,
+														{ ...base },
+													),
+												).catch(reportFinal);
+											},
+										}
+									: undefined,
+						});
+					reportFinal(error);
+				})
+				.finally(() => {
+					pendingSaveCountRef.current -= 1;
+				});
+		},
+		[paperAbsPath, annotationCap, docId, annotationBase, offerReload],
+	);
 
 	/** Deletions bypass the normal debounce. */
 	const scheduleSave = useCallback(
 		(immediate = false) => {
-			if (!paperAbsPath || !annotationCap) return;
+			if (!paperAbsPath || !annotationCap || reloadRequiredRef.current) return;
 			if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			saveTimerRef.current = setTimeout(
 				() => {
@@ -317,10 +493,18 @@ export function usePdfHighlights({
 	);
 	useLayoutEffect(
 		() => () => {
-			if (!saveTimerRef.current) return;
-			clearTimeout(saveTimerRef.current);
+			if (
+				!saveTimerRef.current &&
+				pendingSaveCountRef.current === 0 &&
+				!reloadRequiredRef.current
+			)
+				return;
+			if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			saveTimerRef.current = null;
-			persistAnnotations();
+			// Retire normal exports still queued behind another viewer's save,
+			// then capture the final state before this document is destroyed.
+			saveEpochRef.current += 1;
+			persistAnnotations(true);
 		},
 		[persistAnnotations],
 	);
@@ -332,6 +516,8 @@ export function usePdfHighlights({
 			scheduleRebuild();
 			if (
 				event.type !== "loaded" &&
+				!reloadRequiredRef.current &&
+				initialImportDoneRef.current &&
 				!event.committed &&
 				!importingRef.current
 			) {
@@ -354,11 +540,15 @@ export function usePdfHighlights({
 		if (importedRef.current || !annotationCap || !docCap || totalPages <= 0)
 			return;
 		importedRef.current = true;
+		let cancelled = false;
 		void (async () => {
 			const scope = annotationCap.forDocument(docId);
+			const loadingBase: AnnotationFileBase = {};
 			let items: AnnotationTransferItem[] = paperAbsPath
-				? await loadAnnotationItems(paperAbsPath)
+				? await loadAnnotationItems(paperAbsPath, loadingBase)
 				: [];
+			if (cancelled) return;
+			Object.assign(annotationBase, loadingBase);
 			if (
 				paperAbsPath &&
 				!items.length &&
@@ -371,9 +561,10 @@ export function usePdfHighlights({
 				);
 				if (migrated.length) {
 					items = migrated;
-					await saveAnnotationItems(paperAbsPath, migrated);
+					await saveAnnotationItems(paperAbsPath, migrated, annotationBase);
 				}
 			}
+			if (cancelled) return;
 			if (items.length) {
 				importingRef.current = true;
 				const plan = planAnnotationItemImport(
@@ -389,15 +580,34 @@ export function usePdfHighlights({
 				}
 			}
 			setTimeout(() => {
+				if (cancelled) return;
 				importingRef.current = false;
 				initialImportDoneRef.current = true;
-				for (const event of pendingPeerEventsRef.current.splice(0))
-					applyPeerEvent(event);
+				if (!reloadRequiredRef.current) scope.setLocked(initialLockRef.current);
+				// Subscribe only after loading this exact canonical base. A new
+				// authoritative version invalidates replay from older open panes.
+				if (paperAbsPath && annotationBase.content !== undefined) {
+					peerSubscriptionRef.current?.();
+					peerSubscriptionRef.current = subscribeAnnotationPeer(
+						paperAbsPath,
+						docId,
+						applyPeerEvent,
+						annotationBase.content,
+					);
+				}
 				rebuildHighlights();
 			}, 0);
-		})();
+		})().catch((error) => {
+			if (!cancelled) offerReload(error);
+		});
+		return () => {
+			cancelled = true;
+			if (!initialImportDoneRef.current) importedRef.current = false;
+		};
 	}, [
 		annotationCap,
+		annotationBase,
+		offerReload,
 		docCap,
 		docId,
 		totalPages,
@@ -406,10 +616,10 @@ export function usePdfHighlights({
 		applyPeerEvent,
 	]);
 
-	// The CLI/Agent appends highlights straight into `marks/annotations.json`
-	// (`agentero mark add --kind highlight`). The import above runs once per
-	// mount, so without this an open viewer would neither show those highlights
-	// nor keep them: its next debounced export would overwrite the file.
+	// Disk changes require reopening this PDF from its original bytes. An
+	// additive import cannot apply remote deletions; clearing the plugin scope
+	// would also delete native PDF annotations absent from the sidecar. Preserve
+	// this working copy and offer an explicit per-viewer reload instead.
 	useEffect(() => {
 		if (!paperAbsPath || !annotationCap || totalPages <= 0) return;
 		const target = normalizePathKey(
@@ -422,35 +632,38 @@ export function usePdfHighlights({
 			if (burstTimer !== null) return;
 			burstTimer = window.setTimeout(() => {
 				burstTimer = null;
-				void reimport();
+				void checkDisk().catch(offerReload);
 			}, ANNOTATIONS_REIMPORT_BURST_MS);
 		};
 
-		const reimport = async () => {
-			// The mount-time import is still filling the scope; comparing against
-			// it now would re-import the same ids. Wait one burst and retry.
-			if (importingRef.current) {
+		const checkDisk = async () => {
+			if (cancelled || reloadRequiredRef.current) return;
+			if (!initialImportDoneRef.current || importingRef.current) {
 				schedule();
 				return;
 			}
-			const scope = annotationCap.forDocument(docId);
-			const existing = scope
-				.getAnnotations()
-				.filter(isLiveAnnotation)
-				.map((a) => a.object);
-			const items = await loadAnnotationItems(paperAbsPath);
-			if (cancelled) return;
-			const plan = planAnnotationItemImport(items, existing);
-			if (!plan.imports.length && !plan.highlightOverrides.length) return;
-			importingRef.current = true;
-			if (plan.imports.length) scope.importAnnotations(plan.imports);
-			if (plan.highlightOverrides.length) {
-				scope.updateAnnotations(plan.highlightOverrides);
-			}
-			setTimeout(() => {
-				importingRef.current = false;
-				rebuildHighlights();
-			}, 0);
+			await enqueueAnnotationSave(paperAbsPath, async () => {
+				if (cancelled || reloadRequiredRef.current) return;
+				const raw = await readAnnotationFileContent(paperAbsPath);
+				if (cancelled || raw === annotationBase.content) return;
+				invalidateAnnotationPeers(paperAbsPath, raw);
+				freezeForReload();
+				// Never recursively enqueue while holding this queue slot. The
+				// frozen scope is preserved before its reload action is offered.
+				await saveAnnotationSnapshot(
+					paperAbsPath,
+					() =>
+						annotationCap.forDocument(docId).exportAnnotations().toPromise(),
+					{ ...annotationBase },
+					() => !cancelled,
+				);
+				if (!cancelled)
+					offerReload(
+						new Error(
+							i18n.t("app:diskConflict.title", { name: ANNOTATIONS_FILE }),
+						),
+					);
+			});
 		};
 
 		const unsub = listenVaultFileChangedGated((payload) => {
@@ -468,7 +681,15 @@ export function usePdfHighlights({
 			if (burstTimer !== null) window.clearTimeout(burstTimer);
 			unsub();
 		};
-	}, [annotationCap, docId, paperAbsPath, totalPages, rebuildHighlights]);
+	}, [
+		annotationCap,
+		annotationBase,
+		docId,
+		paperAbsPath,
+		totalPages,
+		freezeForReload,
+		offerReload,
+	]);
 
 	const createHighlights = useCallback(
 		(
@@ -478,7 +699,8 @@ export function usePdfHighlights({
 			translatedPages?: readonly VisibleSelectionPage[],
 		) => {
 			const scope = annotationCap?.forDocument(docId);
-			if (!scope) return [] as { pageIndex: number; id: string }[];
+			if (!scope || reloadRequiredRef.current || !initialImportDoneRef.current)
+				return [] as { pageIndex: number; id: string }[];
 			const created: { pageIndex: number; id: string }[] = [];
 			for (const page of pages) {
 				const id = crypto.randomUUID();
@@ -513,7 +735,8 @@ export function usePdfHighlights({
 	const updateHighlightComment = useCallback(
 		(pageIndex: number, id: string, comment: string) => {
 			const scope = annotationCap?.forDocument(docId);
-			if (!scope) return;
+			if (!scope || reloadRequiredRef.current || !initialImportDoneRef.current)
+				return;
 			const tracked = scope.getAnnotationById(id);
 			if (!tracked || !isLiveAnnotation(tracked)) return;
 			scope.updateAnnotation(pageIndex, id, {
@@ -526,7 +749,8 @@ export function usePdfHighlights({
 	const updateHighlightColor = useCallback(
 		(pageIndex: number, id: string, color: HighlightColor) => {
 			const scope = annotationCap?.forDocument(docId);
-			if (!scope) return;
+			if (!scope || reloadRequiredRef.current || !initialImportDoneRef.current)
+				return;
 			const tracked = scope.getAnnotationById(id);
 			if (
 				!tracked ||
@@ -563,6 +787,7 @@ export function usePdfHighlights({
 
 	const deleteHighlightAnnotation = useCallback(
 		(pageIndex: number, id: string) => {
+			if (reloadRequiredRef.current || !initialImportDoneRef.current) return;
 			deleteQueueRef.current?.delete(pageIndex, id);
 		},
 		[],

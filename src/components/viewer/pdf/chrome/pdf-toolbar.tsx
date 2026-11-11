@@ -59,7 +59,7 @@ type PdfToolbarProps = {
 	layoutTranslateProgress?: number | null;
 	/** Pages done ÷ pages in the current stage, when the stage has a count. */
 	layoutTranslatePageCounts?: { done: number; total: number } | null;
-	onToggleLayoutTranslate: () => void;
+	onToggleLayoutTranslate?: () => void;
 	/** True while jEV smart highlights are being generated. */
 	smartHighlightBusy?: boolean;
 	/** Trigger jEV smart highlighting for the current paper. */
@@ -126,7 +126,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 				longPressTriggeredRef.current = true;
 				suppressNextClickRef.current = true;
 				setLongPressing(true);
-				onToggleLayoutTranslate();
+				onToggleLayoutTranslate?.();
 			}, LONG_PRESS_MS);
 		},
 		[
@@ -145,7 +145,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 			if (!longPressTriggeredRef.current) return;
 			longPressTriggeredRef.current = false;
 			if (layoutTranslateActive || layoutTranslateRunning) {
-				onToggleLayoutTranslate();
+				onToggleLayoutTranslate?.();
 			}
 		},
 		[
@@ -163,7 +163,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 		longPressTriggeredRef.current = false;
 		suppressNextClickRef.current = true;
 		if (layoutTranslateActive || layoutTranslateRunning) {
-			onToggleLayoutTranslate();
+			onToggleLayoutTranslate?.();
 		}
 	}, [
 		clearLongPressTimer,
@@ -179,7 +179,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 				suppressNextClickRef.current = false;
 				return;
 			}
-			onToggleLayoutTranslate();
+			onToggleLayoutTranslate?.();
 		},
 		[onToggleLayoutTranslate],
 	);
@@ -241,7 +241,9 @@ export const PdfToolbar = memo(function PdfToolbar({
 				>
 					{/* Partial-translation warning sits first: it is a document-level
 					    state, so it stays put when the translate button expands. */}
-					{!isRemotePaper && layoutTranslatePartial?.visible ? (
+					{!isRemotePaper &&
+					onToggleLayoutTranslate &&
+					layoutTranslatePartial?.visible ? (
 						<div className="shrink-0">
 							<PdfTranslatePartialButton partial={layoutTranslatePartial} />
 						</div>
@@ -336,7 +338,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 							</div>
 						</div>
 					) : null}
-					{!isRemotePaper ? (
+					{!isRemotePaper && onToggleLayoutTranslate ? (
 						<div
 							data-full-text-translate
 							className={cn(

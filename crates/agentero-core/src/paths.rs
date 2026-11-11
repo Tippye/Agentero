@@ -14,6 +14,39 @@
 //! itself is not writable, so `~/.config` would fail with EPERM).
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Native app-private roots, installed before any mobile settings or identity
+/// store is opened. This avoids relying on Android's nonexistent Unix HOME.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AppDirectories {
+    pub config: PathBuf,
+    pub cache: PathBuf,
+    pub data: PathBuf,
+}
+
+static APP_DIRECTORIES: OnceLock<AppDirectories> = OnceLock::new();
+
+pub fn initialize_app_directories(dirs: AppDirectories) -> std::io::Result<()> {
+    for path in [&dirs.config, &dirs.cache, &dirs.data] {
+        if !path.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "application directories must be absolute",
+            ));
+        }
+        std::fs::create_dir_all(path)?;
+    }
+    if let Err(dirs) = APP_DIRECTORIES.set(dirs) {
+        if APP_DIRECTORIES.get() != Some(&dirs) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "application directories were already initialized differently",
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Resolve XDG config home (`$XDG_CONFIG_HOME` or platform default).
 pub fn xdg_config_home() -> PathBuf {
@@ -47,7 +80,10 @@ pub fn xdg_cache_home() -> PathBuf {
 
 /// `$XDG_CONFIG_HOME/agentero` (created on demand by callers).
 pub fn agentero_config_dir() -> PathBuf {
-    xdg_config_home().join("agentero")
+    APP_DIRECTORIES
+        .get()
+        .map(|d| d.config.clone())
+        .unwrap_or_else(|| xdg_config_home().join("agentero"))
 }
 
 /// Resolve XDG data home (`$XDG_DATA_HOME` or platform default).
@@ -67,12 +103,18 @@ pub fn xdg_data_home() -> PathBuf {
 
 /// `$XDG_CACHE_HOME/agentero` (created on demand by callers).
 pub fn agentero_cache_dir() -> PathBuf {
-    xdg_cache_home().join("agentero")
+    APP_DIRECTORIES
+        .get()
+        .map(|d| d.cache.clone())
+        .unwrap_or_else(|| xdg_cache_home().join("agentero"))
 }
 
 /// `$XDG_DATA_HOME/agentero` (created on demand by callers).
 pub fn agentero_data_dir() -> PathBuf {
-    xdg_data_home().join("agentero")
+    APP_DIRECTORIES
+        .get()
+        .map(|d| d.data.clone())
+        .unwrap_or_else(|| xdg_data_home().join("agentero"))
 }
 
 /// Device-local activity log: `…/agentero/usage.sqlite`.

@@ -124,6 +124,17 @@ export function MobilePairing({
 
 	return (
 		<div className="mobile-shell flex h-dvh min-h-0 w-full select-none flex-col overflow-hidden bg-background px-5 pt-[max(2rem,env(safe-area-inset-top))] pb-8 sm:px-8 md:mx-auto md:max-w-md">
+			<div className="flex justify-end">
+				<Button
+					type="button"
+					variant="ghost"
+					className="min-h-12"
+					disabled={connecting}
+					onClick={onDone}
+				>
+					{t("connect.cancel")}
+				</Button>
+			</div>
 			<div className="flex flex-1 flex-col items-center justify-center">
 				<img src={agenteroLogo} alt="Agentero" className="size-28" />
 				<h1 className="mt-6 font-semibold text-2xl">{t("connect.title")}</h1>
@@ -171,7 +182,7 @@ export function MobilePairing({
 					<p className="mt-4 w-full select-text text-destructive text-sm">
 						{error ??
 							describeBridgeError(
-								status.lastError,
+								status.lastError ?? undefined,
 								t("errors.networkPermission"),
 							)}
 					</p>

@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 const FRAME_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeClientStatus {
     pub connected: bool,

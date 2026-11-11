@@ -23,12 +23,15 @@ import { notifyError } from "@/lib/core/notify";
 import { runLocalActivity } from "@/lib/core/tasks";
 import { isTauri } from "@/lib/core/tauri";
 import {
+	buildLayoutDocumentResult,
 	enqueuePaperLayoutAnalysis,
 	getLayoutDocumentResult,
 	layoutAnalysisStore,
 	layoutDocumentKey,
+	mergeCaptionsIntoHosts,
 	readLayoutSidecar,
 	runDocumentLayoutAnalysis,
+	setLayoutDocumentResult,
 	setLayoutOverlayVisible,
 } from "@/lib/pdf/layout";
 import {
@@ -72,6 +75,8 @@ type DocumentManagerCapability = ReturnType<
 >["provides"];
 
 export type UsePdfLayoutRunOptions = {
+	/** False keeps sidecar display, but never enqueues or runs an analysis. */
+	canAnalyze?: boolean;
 	docId: string;
 	/** Paper folder holding the `layout.json` sidecar (null for loose PDFs). */
 	paperAbsPath: string | null;
@@ -112,6 +117,7 @@ export type PdfLayoutRun = {
 };
 
 export function usePdfLayoutRun({
+	canAnalyze = true,
 	docId,
 	paperAbsPath,
 	paperRelPath,
@@ -153,7 +159,7 @@ export function usePdfLayoutRun({
 	 */
 	const startLayoutAnalysis = useCallback(
 		(opts?: StartLayoutAnalysisOptions) => {
-			if (isRemotePaper || plainViewer) return;
+			if (!canAnalyze || isRemotePaper || plainViewer) return;
 			const docs = docCapRef.current ?? docCap;
 			if (!docs?.isDocumentOpen(docId)) {
 				if (opts?.notifyOnError !== false) {
@@ -330,6 +336,7 @@ export function usePdfLayoutRun({
 			docCapRef,
 			isRemotePaper,
 			plainViewer,
+			canAnalyze,
 		],
 	);
 	const startLayoutAnalysisRef = useRef(startLayoutAnalysis);
@@ -340,9 +347,10 @@ export function usePdfLayoutRun({
 	// the Paddle API backend is uncapped at JobCenter. Translation companions
 	// inherit layout from the source pane / store copy — do not re-queue.
 	useEffect(() => {
-		if (translationPane || isRemotePaper || !paperAbsPath) return;
+		if (!canAnalyze || translationPane || isRemotePaper || !paperAbsPath)
+			return;
 		enqueuePaperLayoutAnalysis({ paperAbsPath });
-	}, [translationPane, isRemotePaper, paperAbsPath]);
+	}, [canAnalyze, translationPane, isRemotePaper, paperAbsPath]);
 
 	// Active viewer: pull layout into the tab store once sidecar exists, and
 	// again whenever that file's parse is replaced. A force re-run writes the
@@ -353,9 +361,9 @@ export function usePdfLayoutRun({
 	useEffect(() => {
 		if (translationPane || isRemotePaper || plainViewer) return;
 		if (!isActive) return;
-		if (!layoutCap || totalPages <= 0) return;
+		if (totalPages <= 0) return;
 		if (!docCap?.isDocumentOpen(docId)) return;
-		if (!layoutCap.forDocument(docId)) return;
+		if (canAnalyze && !layoutCap?.forDocument(docId)) return;
 
 		let cancelled = false;
 		let unlisten: (() => void) | null = null;
@@ -397,6 +405,18 @@ export function usePdfLayoutRun({
 				return;
 			}
 			appliedLayoutSidecarAt.set(appliedKey, sidecar.source.generatedAt);
+			if (!canAnalyze) {
+				// Synced layout is display data. Loading it must never fall through
+				// to ONNX, text enrichment, or an analysis job on a tablet.
+				setLayoutDocumentResult(
+					buildLayoutDocumentResult(
+						docId,
+						mergeCaptionsIntoHosts(sidecar.regions),
+						sidecar.regions,
+					),
+				);
+				return;
+			}
 			startLayoutAnalysis({
 				force: false,
 				openFigures: false,
@@ -416,7 +436,7 @@ export function usePdfLayoutRun({
 					await pullSidecar();
 					return;
 				}
-				if (getLayoutDocumentResult(docId)) return;
+				if (!canAnalyze || getLayoutDocumentResult(docId)) return;
 
 				// No paper folder (loose PDF): only the active tab can run in-viewer.
 				if (layoutAutoStartedForDocRef.current === docId) return;
@@ -452,6 +472,7 @@ export function usePdfLayoutRun({
 			}
 		};
 	}, [
+		canAnalyze,
 		translationPane,
 		isRemotePaper,
 		plainViewer,

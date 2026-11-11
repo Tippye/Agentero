@@ -6,6 +6,7 @@
  */
 import { commands } from "@/lib/core/bindings";
 import { callApi, callApiResult } from "@/lib/core/ipc";
+import { isMobileApp } from "@/lib/core/tauri";
 
 export type CitationMeta = {
 	title?: string;
@@ -81,7 +82,7 @@ export async function loadPaperRefsReadOnly(
 	path: string,
 ): Promise<CiteSidecar | null> {
 	const sidecar = await paperRefsList(vaultPath, path).catch(() => null);
-	if (!sidecar) {
+	if (!sidecar && !isMobileApp()) {
 		void callApiResult(
 			() => commands.jobParseRefsEnqueue({ vaultPath, path, force: false }),
 			{ fallback: "refs parse enqueue failed" },

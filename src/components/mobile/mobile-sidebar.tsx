@@ -8,12 +8,20 @@ import {
 	QrCode,
 	X,
 } from "lucide-react";
-import { type TouchEvent, useEffect, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type TouchEvent,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { Button } from "@/components/ui/button";
 import type { BridgeClientStatus } from "@/lib/bridge/client";
 import { bridgeDisconnect } from "@/lib/bridge/client";
+import { errorText } from "@/lib/core/error";
+import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 
 export function MobileSidebar({
@@ -22,12 +30,14 @@ export function MobileSidebar({
 	onClose,
 	onStatus,
 	onPairAnother,
+	navigation,
 }: {
 	open: boolean;
 	status: BridgeClientStatus;
 	onClose: () => void;
 	onStatus: (status: BridgeClientStatus) => void;
 	onPairAnother: () => void;
+	navigation?: ReactNode;
 }) {
 	const { t } = useTranslation("mobile");
 	const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -43,9 +53,13 @@ export function MobileSidebar({
 	}, [onClose, open]);
 
 	const disconnect = async () => {
-		await bridgeDisconnect();
-		onStatus({ connected: false, paired: false });
-		onClose();
+		try {
+			await bridgeDisconnect();
+			onStatus({ connected: false, paired: false });
+			onClose();
+		} catch (error) {
+			notifyError(errorText(error));
+		}
 	};
 
 	const handleTouchStart = (event: TouchEvent<HTMLElement>) => {
@@ -111,80 +125,85 @@ export function MobileSidebar({
 					</Button>
 				</header>
 
-				<div className="flex-1 overflow-y-auto px-4 py-5">
-					<section className="rounded-xl border bg-background shadow-raised">
-						<button
-							type="button"
-							aria-expanded={expandedDevice}
-							className={cn(
-								"flex min-h-20 w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
-								expandedDevice && "rounded-b-none",
-							)}
-							onClick={() => setExpandedDevice((expanded) => !expanded)}
-						>
-							<div className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-								<Laptop className="size-5" />
-							</div>
-							<div className="min-w-0 flex-1">
-								<p className="truncate font-semibold text-base">
-									{status.hostName ?? "-"}
-								</p>
-								<span
-									className={cn(
-										"mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium text-xs",
-										status.connected
-											? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-											: "bg-muted text-muted-foreground",
-									)}
-								>
-									<Circle
-										className={cn(
-											"size-2 fill-current",
-											status.connected
-												? "text-emerald-500"
-												: "text-muted-foreground",
-										)}
-									/>
-									{status.connected
-										? t("settings.connected")
-										: t("settings.offline")}
-								</span>
-							</div>
-							<ChevronDown
+				<div className="flex-1 space-y-4 overflow-y-auto px-4 py-5">
+					{navigation}
+					<div className="flex min-h-16 items-center gap-3 rounded-xl border px-3">
+						<Folder className="size-5 text-muted-foreground" />
+						<span className="flex-1 font-medium">
+							{t("settings.localVault")}
+						</span>
+						<Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+					</div>
+					{status.paired ? (
+						<section className="rounded-xl border bg-background shadow-raised">
+							<button
+								type="button"
+								aria-expanded={expandedDevice}
 								className={cn(
-									"size-5 shrink-0 text-muted-foreground transition-transform",
-									expandedDevice && "rotate-180",
+									"flex min-h-20 w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+									expandedDevice && "rounded-b-none",
 								)}
-							/>
-						</button>
-						{expandedDevice ? (
-							<div className="border-t px-3 pt-1.5 pb-2">
-								<div className="ml-[21px] border-border/70 border-l pt-1 pl-3">
-									<button
-										type="button"
-										className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-										aria-pressed="true"
-									>
-										<Folder className="size-4 shrink-0 text-muted-foreground" />
-										<span className="min-w-0 flex-1 truncate font-medium text-sm">
-											{status.vaultName ?? "-"}
-										</span>
-										<Check className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-									</button>
-									<button
-										type="button"
-										className="mt-0.5 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
-										onClick={() => void disconnect()}
-									>
-										<LogOut className="size-4 shrink-0" />
-										<span className="min-w-0 flex-1 truncate font-medium text-sm">
-											{t("settings.disconnect")}
-										</span>
-									</button>
+								onClick={() => setExpandedDevice((expanded) => !expanded)}
+							>
+								<div className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+									<Laptop className="size-5" />
 								</div>
-							</div>
-						) : null}
-					</section>
+								<div className="min-w-0 flex-1">
+									<p className="truncate font-semibold text-base">
+										{status.hostName ?? "-"}
+									</p>
+									<span
+										className={cn(
+											"mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium text-xs",
+											status.connected
+												? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+												: "bg-muted text-muted-foreground",
+										)}
+									>
+										<Circle
+											className={cn(
+												"size-2 fill-current",
+												status.connected
+													? "text-emerald-500"
+													: "text-muted-foreground",
+											)}
+										/>
+										{status.connected
+											? t("settings.connected")
+											: t("settings.offline")}
+									</span>
+								</div>
+								<ChevronDown
+									className={cn(
+										"size-5 shrink-0 text-muted-foreground transition-transform",
+										expandedDevice && "rotate-180",
+									)}
+								/>
+							</button>
+							{expandedDevice ? (
+								<div className="border-t px-3 pt-1.5 pb-2">
+									<div className="ml-[21px] border-border/70 border-l pt-1 pl-3">
+										<div className="flex min-h-11 w-full items-center gap-2.5 px-2 text-left">
+											<Folder className="size-4 shrink-0 text-muted-foreground" />
+											<span className="min-w-0 flex-1 truncate font-medium text-sm">
+												{status.vaultName ?? "-"}
+											</span>
+										</div>
+										<button
+											type="button"
+											className="mt-0.5 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
+											onClick={() => void disconnect()}
+										>
+											<LogOut className="size-4 shrink-0" />
+											<span className="min-w-0 flex-1 truncate font-medium text-sm">
+												{t("settings.disconnect")}
+											</span>
+										</button>
+									</div>
+								</div>
+							) : null}
+						</section>
+					) : null}
 				</div>
 
 				<footer className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">

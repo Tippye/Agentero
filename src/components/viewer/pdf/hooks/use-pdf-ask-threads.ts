@@ -60,6 +60,8 @@ import type { PdfAskAnchor, PdfAskThread } from "@/lib/pdf/ask/types";
 import type { ActiveSelectionCard } from "@/lib/pdf/selection";
 
 export type UsePdfAskThreadsOptions = {
+	/** Local Agent execution is unavailable in the tablet host. */
+	enabled?: boolean;
 	/** Sidecar root for `marks/<id>.json` (null for loose PDFs — nothing persists). */
 	paperAbsPath: string | null;
 	/** Vault-relative provenance stamped into new threads. */
@@ -109,6 +111,7 @@ export type PdfAskThreads = {
 };
 
 export function usePdfAskThreads({
+	enabled = true,
 	paperAbsPath,
 	paperRelPath,
 	vaultPath,
@@ -122,6 +125,8 @@ export function usePdfAskThreads({
 	activeSessionRef,
 }: UsePdfAskThreadsOptions): PdfAskThreads {
 	const { t } = useTranslation("viewer");
+	const enabledRef = useRef(enabled);
+	enabledRef.current = enabled;
 	const [streaming, setStreaming] = useState(false);
 	const [askError, setAskError] = useState<string | null>(null);
 	/** Per-run IPC unlisteners of the in-flight ask turn (null when idle). */
@@ -196,7 +201,9 @@ export function usePdfAskThreads({
 	}, []);
 
 	const openThread = useCallback(
-		(thread: PdfAskThread) => openCard({ kind: "ask", id: thread.id }),
+		(thread: PdfAskThread) => {
+			if (enabledRef.current) openCard({ kind: "ask", id: thread.id });
+		},
 		[openCard],
 	);
 
@@ -219,6 +226,7 @@ export function usePdfAskThreads({
 
 	const startFromAnchor = useCallback(
 		(anchor: PdfAskAnchor, translation?: string) => {
+			if (!enabledRef.current) return;
 			const thread = createThreadFromAnchor(anchor);
 			if (translation?.trim()) {
 				rememberPairedAskTranslation(thread.id, translation);
@@ -262,7 +270,10 @@ export function usePdfAskThreads({
 	);
 
 	const resolvePdfAskAgent = useCallback(
-		async () => resolveAskAgent(() => t("pdfAsk.noAgent"), setAskError),
+		async () =>
+			enabledRef.current
+				? resolveAskAgent(() => t("pdfAsk.noAgent"), setAskError)
+				: null,
 		[t],
 	);
 
@@ -279,6 +290,7 @@ export function usePdfAskThreads({
 
 	const sendAskQuestion = useCallback(
 		(question: string) => {
+			if (!enabledRef.current) return;
 			const card = activeCardRef.current;
 			const threadId = card?.kind === "ask" ? card.id : null;
 			if (!threadId) return;
@@ -299,6 +311,7 @@ export function usePdfAskThreads({
 	/** Edit last (or any) user turn: drop that message and everything after, then re-send. */
 	const resendAskQuestion = useCallback(
 		(messageId: string, question: string) => {
+			if (!enabledRef.current) return;
 			const card = activeCardRef.current;
 			const threadId = card?.kind === "ask" ? card.id : null;
 			if (!threadId) return;

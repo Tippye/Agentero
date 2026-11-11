@@ -61,9 +61,8 @@ pub fn handle_ui_request<R: Runtime>(
     let payload = validate_ui_request(req)?;
 
     if payload.action == UI_ACTION_OPEN_WINDOW {
-        // `app::window` is compiled out on iOS; named window targets only
-        // exist on desktop/Android builds.
-        #[cfg(not(target_os = "ios"))]
+        // Named desktop window targets are not part of the mobile shell.
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
             let window = payload.window.as_deref().unwrap_or("");
             if !crate::app::window::commands::is_known_window(window) {

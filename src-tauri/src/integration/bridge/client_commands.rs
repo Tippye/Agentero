@@ -1,10 +1,10 @@
 use super::{BridgeClientController, BridgeClientStatus};
 use crate::core::error::{map_err, ApiResult, AppError};
+use crate::core::json::JsonValue;
 use serde::Deserialize;
-use serde_json::Value;
 use tauri::{AppHandle, State};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeConnectArgs {
     pub offer_url: String,
@@ -12,7 +12,8 @@ pub struct BridgeConnectArgs {
 }
 
 #[tauri::command]
-pub fn bridge_connect(
+#[specta::specta]
+pub fn bridge_client_connect(
     app: AppHandle,
     controller: State<'_, BridgeClientController>,
     args: BridgeConnectArgs,
@@ -24,8 +25,8 @@ pub fn bridge_connect(
 }
 
 #[tauri::command]
-#[cfg(target_os = "ios")]
-pub fn bridge_resume(
+#[specta::specta]
+pub fn bridge_client_resume(
     app: AppHandle,
     controller: State<'_, BridgeClientController>,
 ) -> ApiResult<BridgeClientStatus> {
@@ -36,16 +37,17 @@ pub fn bridge_resume(
 }
 
 #[tauri::command]
-pub fn bridge_disconnect(controller: State<'_, BridgeClientController>) -> ApiResult<()> {
+#[specta::specta]
+pub fn bridge_client_disconnect(controller: State<'_, BridgeClientController>) -> ApiResult<()> {
     match controller.disconnect() {
         Ok(()) => ApiResult::ok(()),
         Err(error) => map_err(error),
     }
 }
 
-#[cfg(target_os = "ios")]
 #[tauri::command]
-pub fn bridge_status(
+#[specta::specta]
+pub fn bridge_client_status(
     controller: State<'_, BridgeClientController>,
 ) -> ApiResult<BridgeClientStatus> {
     match controller.status() {
@@ -55,16 +57,17 @@ pub fn bridge_status(
 }
 
 #[tauri::command]
-pub async fn bridge_rpc(
+#[specta::specta]
+pub async fn bridge_client_rpc(
     controller: State<'_, BridgeClientController>,
     method: String,
-    params: Value,
-) -> Result<ApiResult<Value>, String> {
+    params: JsonValue,
+) -> Result<ApiResult<JsonValue>, String> {
     if method.trim().is_empty() {
         return Ok(map_err(AppError::message("Bridge RPC method is required")));
     }
-    match controller.rpc(method, params).await {
-        Ok(data) => Ok(ApiResult::ok(data)),
+    match controller.rpc(method, params.0).await {
+        Ok(data) => Ok(ApiResult::ok(JsonValue(data))),
         Err(error) => Ok(map_err(error)),
     }
 }

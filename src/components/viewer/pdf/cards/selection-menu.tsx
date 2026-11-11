@@ -22,8 +22,8 @@ import {
 type SelectionMenuProps = {
 	screen: ScreenPoint;
 	onHighlight: (color: HighlightColor) => void;
-	onAsk: () => void;
-	onAddToChat: () => void;
+	onAsk?: () => void;
+	onAddToChat?: () => void;
 	onTranslate: () => void;
 	onCopy?: () => Promise<boolean>;
 	onBookmark?: () => void;
