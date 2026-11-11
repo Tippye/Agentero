@@ -27,12 +27,18 @@ export function mobilePaperPaths(vaultPath: string, paper: PaperMetadata) {
 export async function loadMobilePaperPdf(
 	vaultPath: string,
 	paper: PaperMetadata,
+	fetchMissing?: () => Promise<boolean>,
 ) {
 	const { paperAbsPath } = mobilePaperPaths(vaultPath, paper);
-	const pdfPath = await findLocalPdfPath(paperAbsPath);
-	if (pdfPath) {
-		const bytes = await localFileToArrayBuffer(pdfPath);
-		if (bytes) return { bytes, source: null };
+	const readLocal = async () => {
+		const path = await findLocalPdfPath(paperAbsPath);
+		return path ? localFileToArrayBuffer(path) : null;
+	};
+	const local = await readLocal();
+	if (local) return { bytes: local, source: null };
+	if (fetchMissing && (await fetchMissing())) {
+		const downloaded = await readLocal();
+		if (downloaded) return { bytes: downloaded, source: null };
 	}
 	return { bytes: null, source: paperRemoteAssetsFromMetadata(paper).pdfUrl };
 }

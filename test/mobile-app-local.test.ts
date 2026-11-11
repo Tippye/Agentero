@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
 	remoteMounts: 0,
 	dirty: null as ((dirty: boolean) => void) | null,
 	error: vi.fn(),
+	refresh: vi.fn(async (_rescan?: boolean) => {}),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
@@ -31,7 +32,15 @@ vi.mock("@/components/mobile/hooks/use-mobile-papers", () => ({
 	useMobilePapers: () => ({
 		papers: [state.paper],
 		loading: false,
-		refresh: vi.fn(async () => {}),
+		refresh: state.refresh,
+	}),
+}));
+vi.mock("@/components/mobile/hooks/use-mobile-paper-sync", () => ({
+	useMobilePaperSync: () => ({
+		states: {},
+		setPinned: vi.fn(),
+		fetchMissing: vi.fn(async () => false),
+		progressText: null,
 	}),
 }));
 vi.mock("@/components/mobile/hooks/use-mobile-agents", () => ({
@@ -143,10 +152,12 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 	MobileSidebar: ({
 		open,
 		onPairAnother,
+		onSync,
 		navigation,
 	}: {
 		open: boolean;
 		onPairAnother: () => void;
+		onSync: () => void;
 		navigation: ReactNode;
 	}) =>
 		open
@@ -156,8 +167,42 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 					navigation,
 					createElement(
 						"button",
+						{ type: "button", onClick: onSync },
+						"open-sync",
+					),
+					createElement(
+						"button",
 						{ type: "button", onClick: onPairAnother },
 						"pair-desktop",
+					),
+				)
+			: null,
+}));
+vi.mock("@/components/mobile/mobile-sync-panel", () => ({
+	MobileSyncPanel: ({
+		open,
+		vaultPath,
+		onOpenChange,
+		onSynced,
+	}: {
+		open: boolean;
+		vaultPath: string;
+		onOpenChange: (open: boolean) => void;
+		onSynced: () => Promise<void>;
+	}) =>
+		open
+			? createElement(
+					"div",
+					{ "data-sync-vault": vaultPath },
+					createElement(
+						"button",
+						{ type: "button", onClick: () => void onSynced() },
+						"sync-completed",
+					),
+					createElement(
+						"button",
+						{ type: "button", onClick: () => onOpenChange(false) },
+						"close-sync",
 					),
 				)
 			: null,
@@ -211,6 +256,7 @@ beforeEach(async () => {
 	state.remoteMounts = 0;
 	state.dirty = null;
 	state.error.mockClear();
+	state.refresh.mockClear();
 	host = document.createElement("div");
 	root = createRoot(host);
 	await act(async () => {
@@ -260,6 +306,21 @@ describe("mobile local-first shell", () => {
 		await click("library-tab");
 		expect(state.mounts).toBe(1);
 		expect(host.textContent).toContain("Offline paper");
+	});
+
+	it("opens sync for the local Vault and rescans completed sync without losing the mounted reader", async () => {
+		await click("open-local-paper");
+		await act(() => state.dirty?.(true));
+		await click("menu");
+		await click("open-sync");
+		expect(
+			host.querySelector("[data-sync-vault]")?.getAttribute("data-sync-vault"),
+		).toBe("/private/Vault");
+		await click("sync-completed");
+		expect(state.refresh).toHaveBeenCalledExactlyOnceWith(true);
+		await click("close-sync");
+		expect(state.mounts).toBe(1);
+		expect(host.querySelector("[data-reader]")).not.toBeNull();
 	});
 
 	it("does not discard a failed or pending notes save when going back", async () => {

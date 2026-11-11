@@ -218,6 +218,8 @@ pub async fn vault_write_text_file(
         Err(error) => return Ok(ApiResult::err(error)),
     };
     let mkdir_scope = FileScope::resolve(&webview, "mkdir");
+    #[cfg(mobile)]
+    let app = webview.app_handle().clone();
     Ok(run_blocking(move || {
         let result = with_file_mutation(|| {
             let path = write_scope.target(Path::new(&path))?;
@@ -239,6 +241,15 @@ pub async fn vault_write_text_file(
                 |conflict| write_scope.target(conflict),
             )
         });
+        #[cfg(mobile)]
+        if result.is_ok()
+            || result
+                .as_ref()
+                .is_err_and(|error| error.code() == "file_write_conflict")
+        {
+            app.state::<crate::integration::sync::SyncService>()
+                .notify_path_changed(&app, Path::new(&path));
+        }
         match result {
             Ok(()) => ApiResult::ok(()),
             Err(error) if error.code() == "file_write_conflict" => {
@@ -275,11 +286,18 @@ pub async fn vault_remove_file(webview: Webview, path: String) -> Result<ApiResu
         Ok(scope) => scope,
         Err(error) => return Ok(ApiResult::err(error)),
     };
+    #[cfg(mobile)]
+    let app = webview.app_handle().clone();
     Ok(run_blocking(move || {
         match with_file_mutation(|| {
             remove_scoped_file(Path::new(&path), |path| scope.target(path).map(|_| ()))
         }) {
-            Ok(()) => ApiResult::ok(()),
+            Ok(()) => {
+                #[cfg(mobile)]
+                app.state::<crate::integration::sync::SyncService>()
+                    .notify_path_changed(&app, Path::new(&path));
+                ApiResult::ok(())
+            }
             Err(error) => ApiResult::err(error),
         }
     })

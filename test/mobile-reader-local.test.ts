@@ -12,9 +12,11 @@ const state = vi.hoisted(() => ({
 	notesMounts: 0,
 	notesPath: "",
 	notesVault: "",
+	error: vi.fn(),
 	load: vi.fn(async () => ({ source: null, bytes: new ArrayBuffer(4) })),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
 vi.mock("@/lib/mobile/paper-files", () => ({
 	loadMobilePaperPdf: state.load,
 	mobilePaperPaths: () => ({
@@ -81,6 +83,10 @@ beforeEach(() => {
 		() => ({ width }) as DOMRect,
 	);
 	width = 500;
+	state.error.mockClear();
+	state.load
+		.mockReset()
+		.mockResolvedValue({ source: null, bytes: new ArrayBuffer(4) });
 	state.pdfMounts = 0;
 	state.notesMounts = 0;
 	state.viewer = null;
@@ -118,6 +124,26 @@ describe("mobile local reader", () => {
 		expect(host.querySelectorAll("[data-pdf]")).toHaveLength(1);
 		expect(host.querySelectorAll("[data-notes]")).toHaveLength(1);
 		expect(state.pdfMounts).toBe(1);
+		expect(state.notesMounts).toBe(1);
+	});
+
+	it("reports failed PDF materialization and retries without remounting local notes", async () => {
+		state.load.mockRejectedValueOnce(new Error("Storage server is offline"));
+		await render("pdf");
+		expect(state.error).toHaveBeenCalledWith("Storage server is offline");
+		expect(state.notesMounts).toBe(1);
+		const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "local.retry",
+		);
+		expect(retry).toBeDefined();
+		await act(async () => {
+			retry?.click();
+		});
+		await vi.waitFor(async () => {
+			await act(async () => {});
+			expect(state.viewer).not.toBeNull();
+		});
+		expect(state.load).toHaveBeenCalledTimes(2);
 		expect(state.notesMounts).toBe(1);
 	});
 });

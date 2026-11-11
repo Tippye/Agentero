@@ -79,6 +79,10 @@ pub struct SyncBackendConfig {
     #[serde(skip)]
     #[specta(skip)]
     pub agentero_token: String,
+    /// Opaque host-owned credential version. Referenced secrets are resolved by
+    /// the native host; they must not fall back to inline or anonymous access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<String>,
     /// Automatic background sync: once on scheduler start (vault open), after
     /// 30s of vault quiet, and every `interval_minutes`.
     #[serde(default = "default_true")]
@@ -269,24 +273,32 @@ impl SyncBackendConfig {
     /// survive being repointed at a different one. Carries no secret: the value
     /// is only ever compared, and callers hash it before it reaches the vault.
     pub fn remote_identity(&self) -> String {
-        match self.backend {
-            SyncBackendKind::S3 => format!(
-                "s3|{}|{}|{}|{}",
-                self.endpoint, self.bucket, self.prefix, self.access_key
-            ),
-            SyncBackendKind::Webdav => format!(
-                "webdav|{}|{}",
+        let target = match self.backend {
+            SyncBackendKind::S3 => serde_json::json!([
+                "s3",
+                self.endpoint,
+                self.region,
+                self.bucket,
+                self.prefix,
+                self.access_key,
+                self.force_path_style
+            ]),
+            SyncBackendKind::Webdav => serde_json::json!([
+                "webdav",
                 normalize_webdav_url(&self.webdav_url),
                 self.webdav_username
-            ),
+            ]),
             SyncBackendKind::Git => {
-                format!("git|{}|{}", self.git_remote.trim(), self.git_branch.trim())
+                serde_json::json!(["git", self.git_remote.trim(), self.git_branch.trim()])
             }
-            SyncBackendKind::Agentero => format!(
-                "agentero|{}|{}|{}",
-                self.agentero_api, self.agentero_subject, self.agentero_org_id
-            ),
-        }
+            SyncBackendKind::Agentero => serde_json::json!([
+                "agentero",
+                self.agentero_api,
+                self.agentero_subject,
+                self.agentero_org_id
+            ]),
+        };
+        target.to_string()
     }
 }
 
@@ -319,6 +331,15 @@ pub(crate) fn normalize_webdav_url(raw: &str) -> String {
 fn require_https(label: &str, raw: &str) -> Result<(), AppError> {
     let url = url::Url::parse(raw.trim())
         .map_err(|_| AppError::message(format!("{label} is not a valid URL")))?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(AppError::message(format!(
+            "{label} must not embed credentials, query or fragment"
+        )));
+    }
     if url.scheme() != "https"
         && !(url.scheme() == "http" && is_loopback_host(url.host_str().unwrap_or_default()))
     {
@@ -448,6 +469,7 @@ fn validate_branch(raw: &str) -> Result<(), AppError> {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SyncConfigFile {
     #[serde(default)]
     vaults: HashMap<String, SyncBackendConfig>,
@@ -457,59 +479,150 @@ fn config_path() -> PathBuf {
     paths::agentero_config_dir().join("sync.json")
 }
 
-fn read_all() -> HashMap<String, SyncBackendConfig> {
-    let path = config_path();
-    let Ok(raw) = fs::read_to_string(&path) else {
-        return HashMap::new();
+fn read_all_at(path: &Path) -> Result<HashMap<String, SyncBackendConfig>, AppError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(error) => return Err(error.into()),
     };
-    match serde_json::from_str::<SyncConfigFile>(&raw) {
-        Ok(file) => file.vaults,
-        Err(e) => {
-            log::warn!(target: "agentero::sync", "invalid sync.json: {e}");
-            HashMap::new()
-        }
-    }
+    serde_json::from_str::<SyncConfigFile>(&raw)
+        .map(|file| file.vaults)
+        .map_err(|_| {
+            AppError::domain(
+                "sync_config_invalid",
+                "Sync configuration is invalid; the existing file was retained",
+            )
+        })
 }
 
-/// All configured vaults (used at app start / exit to drive auto sync).
+/// Strict readers distinguish missing configuration from unavailable/corrupt data.
+pub fn try_list_all() -> Result<HashMap<String, SyncBackendConfig>, AppError> {
+    read_all_at(&config_path())
+}
+
+pub fn try_get(vault_path: &str) -> Result<Option<SyncBackendConfig>, AppError> {
+    Ok(try_list_all()?.remove(vault_path))
+}
+
+/// All configured vaults for best-effort startup scheduling. Mutations use the
+/// strict reader instead: a read failure must never replace other vaults.
 pub fn list_all() -> HashMap<String, SyncBackendConfig> {
-    read_all()
+    try_list_all().unwrap_or_else(|_| {
+        log::warn!(target: "agentero::sync", "Sync configuration unavailable; automatic scheduling deferred");
+        HashMap::new()
+    })
 }
 
-fn write_all(vaults: HashMap<String, SyncBackendConfig>) -> Result<(), AppError> {
-    let path = config_path();
+fn write_all_at(path: &Path, vaults: HashMap<String, SyncBackendConfig>) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Owner-only (0o600 on Unix): this file holds S3 credentials.
-    crate::fs::json_store_with(
-        &path,
-        &SyncConfigFile { vaults },
-        &crate::fs::AtomicOpts::OWNER_ONLY,
-    )
+    #[cfg(unix)]
+    let credential_refs = vaults.values().any(|cfg| cfg.credential_ref.is_some());
+    let options = crate::fs::AtomicOpts {
+        sync_file: true,
+        ..crate::fs::AtomicOpts::OWNER_ONLY
+    };
+    crate::fs::json_store_with(path, &SyncConfigFile { vaults }, &options)?;
+    // A confirmed native credential reference must survive a process/device
+    // restart before an obsolete credential generation can be discarded.
+    #[cfg(unix)]
+    if credential_refs {
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+    }
+    Ok(())
+}
+
+fn update_at(
+    path: &Path,
+    update: impl FnOnce(&mut HashMap<String, SyncBackendConfig>) -> bool,
+) -> Result<(), AppError> {
+    crate::fs::with_file_mutation(|| {
+        let mut all = read_all_at(path)?;
+        if update(&mut all) {
+            write_all_at(path, all)?;
+        }
+        Ok(())
+    })
 }
 
 pub fn get(vault_path: &str) -> Option<SyncBackendConfig> {
-    read_all().remove(vault_path)
+    list_all().remove(vault_path)
 }
 
 pub fn set(vault_path: &str, config: SyncBackendConfig) -> Result<(), AppError> {
-    let mut all = read_all();
-    all.insert(vault_path.to_string(), config);
-    write_all(all)
+    update_at(&config_path(), |all| {
+        all.insert(vault_path.to_string(), config);
+        true
+    })
 }
 
 pub fn remove(vault_path: &str) -> Result<(), AppError> {
-    let mut all = read_all();
-    if all.remove(vault_path).is_some() {
-        write_all(all)?;
-    }
-    Ok(())
+    update_at(&config_path(), |all| all.remove(vault_path).is_some())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_or_future_configuration_is_retained_by_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.json");
+        for raw in ["invalid-json", "{\"futureVaults\":{}}"] {
+            fs::write(&path, raw).unwrap();
+            assert!(update_at(&path, |all| {
+                all.clear();
+                true
+            })
+            .is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), raw);
+        }
+        fs::write(&path, "{\"vaults\":{}}").unwrap();
+        assert!(read_all_at(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn simultaneous_configuration_updates_keep_both_vaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(temp.path().join("sync.json"));
+        let tasks: Vec<_> = ["vault-a", "vault-b"]
+            .into_iter()
+            .map(|key| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    update_at(&path, |all| {
+                        all.insert(
+                            key.into(),
+                            SyncBackendConfig {
+                                credential_ref: Some(key.into()),
+                                ..SyncBackendConfig::default()
+                            },
+                        );
+                        true
+                    })
+                    .unwrap()
+                })
+            })
+            .collect();
+        for task in tasks {
+            task.join().unwrap();
+        }
+        assert_eq!(read_all_at(&path).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn public_sync_urls_cannot_carry_passwords_or_query_tokens() {
+        for url in [
+            "https://user:password@example.com/dav",
+            "https://example.com/dav?token=secret",
+            "https://example.com/dav#secret",
+        ] {
+            assert!(require_https("endpoint", url).is_err());
+        }
+    }
 
     #[test]
     fn legacy_config_without_auto_sync_fields_gets_defaults() {
@@ -710,7 +823,7 @@ mod tests {
         assert!(cfg.scope.is_all());
         assert_eq!(
             cfg.remote_identity(),
-            "git|https://github.com/u/papers.git|main"
+            r#"["git","https://github.com/u/papers.git","main"]"#
         );
     }
 
@@ -732,7 +845,7 @@ mod tests {
         assert!(signed_out.validate().is_err());
         assert_eq!(
             cfg.remote_identity(),
-            "agentero|https://api.agentero.app|user|"
+            r#"["agentero","https://api.agentero.app","user",""]"#
         );
     }
 

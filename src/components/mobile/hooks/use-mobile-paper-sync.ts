@@ -1,0 +1,173 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { events } from "@/lib/core/bindings";
+import { errorText } from "@/lib/core/error";
+import { notifyError } from "@/lib/core/notify";
+import { toSafeDisposer } from "@/lib/core/tauri-events";
+import {
+	fetchMobilePaperIfDeferred,
+	mobileSyncPaperId,
+	setMobilePaperPinned,
+} from "@/lib/mobile/paper-sync";
+import type { PaperMetadata } from "@/lib/paper/types";
+import {
+	isSyncProgressPhase,
+	type PaperAvailability,
+	type SyncProgressEvent,
+	syncGetStatus,
+	syncListPaperAvailability,
+} from "@/lib/sync/api";
+
+export type MobilePaperSyncState = {
+	pinned: boolean;
+	offline: boolean;
+	busy: boolean;
+};
+
+/** Inventory is local and advisory; the Host rechecks credentials and hashes on actions. */
+export function useMobilePaperSync({
+	vaultPath,
+	papers,
+	active,
+	onChanged,
+}: {
+	vaultPath: string | null;
+	papers: PaperMetadata[];
+	active: boolean;
+	onChanged: () => Promise<void>;
+}) {
+	const { t } = useTranslation("settings");
+	const [inventory, setInventory] = useState<PaperAvailability[]>([]);
+	const [enabled, setEnabled] = useState(false);
+	const [busy, setBusy] = useState(new Set<string>());
+	const busyRef = useRef(new Set<string>());
+	const generation = useRef(0);
+	const requestId = useRef(0);
+	const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
+	const refresh = useCallback(async () => {
+		if (!vaultPath) return;
+		const request = generation.current;
+		const ticket = ++requestId.current;
+		const status = await syncGetStatus(vaultPath);
+		const supported =
+			status.configured &&
+			(status.config?.backend === "s3" || status.config?.backend === "webdav");
+		const next = supported ? await syncListPaperAvailability(vaultPath) : [];
+		if (request !== generation.current || ticket !== requestId.current) return;
+		setEnabled(
+			Boolean(
+				supported &&
+					!["locked", "unavailable", "missing", "invalid"].includes(
+						status.credentialState ?? "",
+					),
+			),
+		);
+		setInventory(next);
+	}, [vaultPath]);
+	useEffect(() => {
+		void vaultPath; // Clear inventory and invalidate old requests when the Vault changes.
+		generation.current += 1;
+		setInventory([]);
+		setEnabled(false);
+		setProgress(null);
+		return () => {
+			generation.current += 1;
+		};
+	}, [vaultPath]);
+	useEffect(() => {
+		if (active) void refresh().catch((error) => notifyError(errorText(error)));
+	}, [active, refresh]);
+	useEffect(() => {
+		if (!vaultPath) return;
+		const visible = () => {
+			if (document.visibilityState === "visible")
+				void refresh().catch((error) => notifyError(errorText(error)));
+		};
+		window.addEventListener("focus", visible);
+		const offs = [
+			toSafeDisposer(
+				events.syncState.listen(({ payload }) => {
+					if (payload.vaultPath !== vaultPath) return;
+					if (payload.status !== "syncing") {
+						setProgress(null);
+						void refresh().catch((error) => notifyError(errorText(error)));
+					}
+				}),
+			),
+			toSafeDisposer(
+				events.syncProgress.listen(({ payload }) => {
+					if (
+						payload.vaultPath === vaultPath &&
+						isSyncProgressPhase(payload.phase)
+					)
+						setProgress({ ...payload, phase: payload.phase });
+				}),
+			),
+		];
+		return () => {
+			window.removeEventListener("focus", visible);
+			for (const off of offs) off();
+		};
+	}, [vaultPath, refresh]);
+	const setPinned = useCallback(
+		async (paper: PaperMetadata, pinned: boolean) => {
+			if (!vaultPath || busyRef.current.has(paper.id)) return;
+			busyRef.current.add(paper.id);
+			setBusy(new Set(busyRef.current));
+			try {
+				await setMobilePaperPinned(vaultPath, paper, pinned);
+			} catch (error) {
+				notifyError(errorText(error));
+			} finally {
+				busyRef.current.delete(paper.id);
+				setBusy(new Set(busyRef.current));
+				await refresh().catch((error) => notifyError(errorText(error)));
+				await onChanged();
+			}
+		},
+		[vaultPath, refresh, onChanged],
+	);
+	const fetchMissing = useCallback(
+		async (paper: PaperMetadata) => {
+			if (!vaultPath) return false;
+			const fetched = await fetchMobilePaperIfDeferred(vaultPath, paper);
+			if (fetched) {
+				await onChanged();
+				await refresh();
+			}
+			return fetched;
+		},
+		[vaultPath, onChanged, refresh],
+	);
+	const states = useMemo(() => {
+		const result: Record<string, MobilePaperSyncState> = {};
+		if (!vaultPath || !enabled) return result;
+		const byId = new Map(inventory.map((entry) => [entry.paperId, entry]));
+		for (const paper of papers) {
+			try {
+				const entry = byId.get(mobileSyncPaperId(vaultPath, paper));
+				if (!entry) continue;
+				const pdfs = entry.assets.filter((asset) => asset.kind === "pdf");
+				result[paper.id] = {
+					pinned: entry.pinned,
+					offline: pdfs.length > 0 && pdfs.every((asset) => asset.materialized),
+					busy: busy.has(paper.id),
+				};
+			} catch {
+				/* Invalid catalog paths never receive native file actions. */
+			}
+		}
+		return result;
+	}, [vaultPath, enabled, inventory, papers, busy]);
+	return {
+		states,
+		setPinned,
+		fetchMissing,
+		progressText: progress
+			? t(`sync.phase.${progress.phase}`, {
+					current: progress.current,
+					total: progress.total,
+				})
+			: null,
+	};
+}

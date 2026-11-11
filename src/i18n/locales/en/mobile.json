@@ -29,6 +29,19 @@
 		"opening": "Opening local library…",
 		"retry": "Try again"
 	},
+	"sync": {
+		"title": "Cloud sync",
+		"close": "Close sync settings",
+		"loading": "Loading sync settings…",
+		"downloads": "Downloads",
+		"downloadFull": "Download all synced files",
+		"downloadOnDemand": "Download when opened",
+		"offline": "PDF available offline",
+		"deferred": "PDF downloads when opened",
+		"pin": "Keep {{title}} offline",
+		"unpin": "Stop keeping {{title}} offline",
+		"unsupportedBackend": "This device supports S3 and WebDAV sync. Disconnect this configuration to choose a supported storage service."
+	},
 	"library": {
 		"importPdf": "Import PDF",
 		"refresh": "Refresh library",

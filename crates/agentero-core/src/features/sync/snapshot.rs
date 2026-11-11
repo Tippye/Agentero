@@ -90,6 +90,10 @@ impl SyncScope {
 pub fn scope_category(rel: &str) -> Option<&'static str> {
     let rest = rel.strip_prefix("papers/")?;
     let (_, tail) = rest.split_once('/')?;
+    // Reading layout is shared metadata, not a re-downloadable TeX asset.
+    if tail == "source/layout.json" {
+        return None;
+    }
     if tail == "source" || tail.starts_with("source/") {
         return Some("source");
     }
@@ -265,6 +269,7 @@ mod tests {
         fs::write(vault.join("papers/x/NOTES.md"), b"# x\n").unwrap();
         fs::write(vault.join("papers/x/x.pdf"), b"%PDF").unwrap();
         fs::write(vault.join("papers/x/source/main.tex"), b"tex").unwrap();
+        fs::write(vault.join("papers/x/source/layout.json"), b"{}").unwrap();
         fs::write(vault.join("papers/x/attachments/supp.pdf"), b"%PDF").unwrap();
         fs::write(vault.join("loose.pdf"), b"%PDF").unwrap(); // outside papers/
 
@@ -280,7 +285,8 @@ mod tests {
             vec![
                 "loose.pdf",
                 "papers/x/NOTES.md",
-                "papers/x/attachments/supp.pdf"
+                "papers/x/attachments/supp.pdf",
+                "papers/x/source/layout.json"
             ]
         );
 
@@ -292,6 +298,7 @@ mod tests {
         assert_eq!(scope_category("papers/x/x.pdf"), Some("pdf"));
         assert_eq!(scope_category("papers/x/X.PDF"), Some("pdf"));
         assert_eq!(scope_category("papers/x/source/main.tex"), Some("source"));
+        assert_eq!(scope_category("papers/x/source/layout.json"), None);
         assert_eq!(scope_category("papers/x/source"), Some("source"));
         assert_eq!(
             scope_category("papers/x/attachments/supp.pdf"),

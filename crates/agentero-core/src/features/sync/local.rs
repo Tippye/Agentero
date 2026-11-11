@@ -5,9 +5,15 @@
 //! - `.agentero/sync/base.json` — manifest of the last successful sync
 //! - `.agentero/sync/state.json` — last sync time / version for status UI
 //! - `.agentero/sync/pushed.jsonl` — blobs uploaded but not yet published
+//! - `.agentero/sync/availability.json` — versioned local policy and physical/deferred history
+//! - `.agentero/sync/availability.guard` — distinguishes missing managed state from legacy defaults
 
 use crate::error::AppError;
-use crate::features::sync::snapshot::Manifest;
+use crate::features::sync::{
+    availability,
+    config::SyncBackendConfig,
+    snapshot::{self, Manifest},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
@@ -39,9 +45,17 @@ pub struct SyncMeta {
 /// last_version from the last success). Best-effort: a broken state.json
 /// must not mask the sync error itself.
 pub fn record_error(vault: &Path, error: &str) {
-    let mut meta = read_meta(vault);
-    meta.last_error = Some(error.to_string());
-    let _ = write_meta(vault, &meta);
+    // Never turn corrupt binding metadata into a fresh, unbound legacy record.
+    if let Ok(stored) = read_stored_meta(vault) {
+        let mut meta = stored.meta;
+        meta.last_error = Some(error.to_string());
+        let _ = write_bound_meta(
+            vault,
+            &meta,
+            stored.store_identity.as_deref(),
+            stored.manifest_key.as_deref(),
+        );
+    }
 }
 
 fn identity_path(vault: &Path) -> PathBuf {
@@ -95,15 +109,224 @@ pub fn read_base(vault: &Path) -> Manifest {
 }
 
 pub fn write_base(vault: &Path, manifest: &Manifest) -> Result<(), AppError> {
-    write_json(&sync_dir(vault).join("base.json"), manifest)
+    write_sync_json(vault, "base.json", manifest)
+}
+
+pub(super) fn read_base_strict(vault: &Path) -> Result<Manifest, AppError> {
+    match fs::read(sync_dir(vault).join("base.json")) {
+        Ok(raw) => serde_json::from_slice(&raw)
+            .map_err(|error| AppError::message(format!("invalid sync base: {error}"))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let meta = read_meta_strict(vault)?;
+            if meta.last_sync_at.is_some() || meta.last_version > 0 {
+                Err(AppError::message(
+                    "sync base is missing for established store history",
+                ))
+            } else {
+                Ok(Manifest::default())
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[derive(Default)]
+struct StoredMeta {
+    meta: SyncMeta,
+    store_identity: Option<String>,
+    manifest_key: Option<String>,
+}
+
+fn read_stored_meta(vault: &Path) -> Result<StoredMeta, AppError> {
+    let raw = match fs::read(sync_dir(vault).join("state.json")) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StoredMeta::default())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&raw)
+        .map_err(|error| AppError::message(format!("invalid sync metadata: {error}")))?;
+    // Every historical writer emitted lastVersion. Partial JSON is not evidence
+    // that a previously bound base has become an unbound legacy vault.
+    if !value.is_object() || value.get("lastVersion").is_none() {
+        return Err(AppError::message("incomplete sync metadata"));
+    }
+    let store_identity = match value.get("storeIdentity") {
+        None => None,
+        Some(serde_json::Value::String(id))
+            if id.len() == 64 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) =>
+        {
+            Some(id.clone())
+        }
+        Some(_) => return Err(AppError::message("invalid sync store identity")),
+    };
+    let manifest_key = match value.get("manifestKey") {
+        None => None,
+        Some(serde_json::Value::String(key))
+            if key.starts_with("manifests/")
+                && !key.contains('\\')
+                && !key
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == "..") =>
+        {
+            Some(key.clone())
+        }
+        Some(_) => return Err(AppError::message("invalid agreed sync manifest key")),
+    };
+    let meta = serde_json::from_value(value)
+        .map_err(|error| AppError::message(format!("invalid sync metadata: {error}")))?;
+    Ok(StoredMeta {
+        meta,
+        store_identity,
+        manifest_key,
+    })
 }
 
 pub fn read_meta(vault: &Path) -> SyncMeta {
-    read_json(&sync_dir(vault).join("state.json")).unwrap_or_default()
+    // Status callers retain their historical infallible interface. Mutation and
+    // engine paths use the strict reader and never write this fallback back.
+    read_meta_strict(vault).unwrap_or_default()
+}
+
+pub(super) fn read_meta_strict(vault: &Path) -> Result<SyncMeta, AppError> {
+    Ok(read_stored_meta(vault)?.meta)
+}
+
+fn write_bound_meta(
+    vault: &Path,
+    meta: &SyncMeta,
+    identity: Option<&str>,
+    manifest_key: Option<&str>,
+) -> Result<(), AppError> {
+    let mut value = serde_json::to_value(meta)?;
+    if let Some(identity) = identity {
+        value["storeIdentity"] = serde_json::Value::String(identity.to_owned());
+    }
+    if let Some(key) = manifest_key {
+        value["manifestKey"] = serde_json::Value::String(key.to_owned());
+    }
+    write_sync_json(vault, "state.json", &value)
+}
+
+pub(super) fn read_agreed_meta(vault: &Path) -> Result<(SyncMeta, Option<String>), AppError> {
+    let stored = read_stored_meta(vault)?;
+    Ok((stored.meta, stored.manifest_key))
 }
 
 pub fn write_meta(vault: &Path, meta: &SyncMeta) -> Result<(), AppError> {
-    write_json(&sync_dir(vault).join("state.json"), meta)
+    let stored = read_stored_meta(vault)?;
+    write_bound_meta(
+        vault,
+        meta,
+        stored.store_identity.as_deref(),
+        stored.manifest_key.as_deref(),
+    )
+}
+
+pub(super) fn write_agreed_meta(
+    vault: &Path,
+    meta: &SyncMeta,
+    manifest_key: &str,
+) -> Result<(), AppError> {
+    let stored = read_stored_meta(vault)?;
+    write_bound_meta(
+        vault,
+        meta,
+        stored.store_identity.as_deref(),
+        Some(manifest_key),
+    )
+}
+
+pub(super) fn store_identity(config: &SyncBackendConfig) -> String {
+    let mut config = config.clone().normalized();
+    super::config::hydrate_agentero(&mut config);
+    snapshot::hash_bytes(config.remote_identity().as_bytes())
+}
+
+/// Bind an existing legacy base to its OLD configured destination before a new
+/// configuration is published. Caller holds the vault SyncLock. Existing bindings
+/// are authoritative and are never overwritten from the current configuration.
+pub fn bind_configured_store(vault: &Path, old: &SyncBackendConfig) -> Result<(), AppError> {
+    let stored = read_stored_meta(vault)?;
+    if stored.store_identity.is_none() {
+        // Without even a historical metadata record the base's origin is unknown;
+        // let the engine conservatively rebase it instead of guessing an owner.
+        if !sync_dir(vault).join("state.json").try_exists()? {
+            return Ok(());
+        }
+        write_bound_meta(
+            vault,
+            &stored.meta,
+            Some(&store_identity(old)),
+            stored.manifest_key.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+/// Establish a base/store boundary before scanning or trusting an idle HEAD.
+/// The old binding remains until BOTH preceding reset records are durable.
+/// Interruption at either cut retries the reset; vault content is never removed.
+pub(super) fn namespaced_store_identity(
+    config: &SyncBackendConfig,
+    namespace: Option<&str>,
+) -> Result<String, AppError> {
+    let identity = store_identity(config);
+    match namespace {
+        None => Ok(identity),
+        Some(namespace) => Ok(snapshot::hash_bytes(&serde_json::to_vec(&(
+            "agentero-sync-namespace-v1",
+            identity,
+            namespace,
+        ))?)),
+    }
+}
+
+pub(super) fn prepare_store(
+    vault: &Path,
+    config: &SyncBackendConfig,
+    namespace: Option<&str>,
+) -> Result<String, AppError> {
+    let identity = namespaced_store_identity(config, namespace)?;
+    let stored = read_stored_meta(vault)?;
+    if stored.store_identity.as_deref() != Some(identity.as_str()) {
+        let state = availability::read_state(vault)?;
+        write_base(vault, &Manifest::default())?;
+        availability::reset_history(vault, state.policy)?;
+        write_bound_meta(vault, &SyncMeta::default(), Some(&identity), None)?;
+    }
+    Ok(identity)
+}
+
+/// Critical sync-state publication: sync staged bytes before rename and the
+/// containing Unix directories afterward, including newly created ancestors.
+pub(super) fn write_sync_bytes(vault: &Path, name: &str, raw: &[u8]) -> Result<(), AppError> {
+    let dir = sync_dir(vault);
+    fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    for ancestor in [vault.to_path_buf(), vault.join(".agentero"), dir.clone()] {
+        fs::File::open(ancestor)?.sync_all()?;
+    }
+    crate::fs::atomic_write_with(
+        &dir.join(name),
+        raw,
+        &crate::fs::AtomicOpts {
+            sync_file: true,
+            ..Default::default()
+        },
+    )?;
+    #[cfg(unix)]
+    fs::File::open(&dir)?.sync_all()?;
+    Ok(())
+}
+
+pub(super) fn write_sync_json<T: Serialize>(
+    vault: &Path,
+    name: &str,
+    value: &T,
+) -> Result<(), AppError> {
+    write_sync_bytes(vault, name, &serde_json::to_vec_pretty(value)?)
 }
 
 /// Forget local sync state (disconnect). Keeps the vault identity.

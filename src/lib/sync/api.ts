@@ -5,7 +5,11 @@
 
 import {
 	commands,
+	type DownloadPolicy as DownloadPolicyWire,
+	type PaperAssetAvailability as PaperAssetAvailabilityWire,
+	type PaperAvailability as PaperAvailabilityWire,
 	type SyncBackendConfig as SyncBackendConfigWire,
+	type SyncCredentialState as SyncCredentialStateWire,
 	type SyncStateEvent_Deserialize,
 	type SyncStatus_Serialize,
 } from "@/lib/core/bindings";
@@ -27,6 +31,8 @@ export type SyncBackendKind = "s3" | "webdav" | "git" | "agentero";
 
 export type SyncBackendConfig = {
 	backend: SyncBackendKind;
+	/** Opaque native reference; callers cannot use it to read a secret. */
+	credentialRef?: string | null;
 	endpoint: string;
 	region: string;
 	bucket: string;
@@ -59,8 +65,14 @@ export type SyncBackendConfig = {
 	scope: SyncScope;
 };
 
+export type SyncCredentialState = SyncCredentialStateWire;
+export type DownloadPolicy = DownloadPolicyWire;
+export type PaperAssetAvailability = PaperAssetAvailabilityWire;
+export type PaperAvailability = PaperAvailabilityWire;
+
 export type SyncStatus = {
 	configured: boolean;
+	credentialState?: SyncCredentialState;
 	config?: SyncBackendConfig;
 	running: boolean;
 	lastSyncAt?: string;
@@ -141,6 +153,7 @@ function statusFromWire(status: SyncStatus_Serialize): SyncStatus {
 	const config = status.config;
 	return {
 		configured: status.configured,
+		credentialState: status.credentialState,
 		config: config ? configFromWire(config) : undefined,
 		running: status.running,
 		lastSyncAt: status.lastSyncAt ?? undefined,
@@ -151,6 +164,7 @@ function statusFromWire(status: SyncStatus_Serialize): SyncStatus {
 function configFromWire(config: SyncBackendConfigWire): SyncBackendConfig {
 	return {
 		backend: (config.backend as SyncBackendKind | undefined) ?? "s3",
+		credentialRef: config.credentialRef ?? null,
 		endpoint: config.endpoint ?? "",
 		region: config.region ?? "us-east-1",
 		bucket: config.bucket ?? "",
@@ -203,6 +217,40 @@ export async function syncDisconnect(vaultPath: string): Promise<void> {
 
 export function syncNow(vaultPath: string): Promise<SyncOutcome> {
 	return callApiResult(() => commands.syncNow({ vaultPath }));
+}
+
+export function syncGetDownloadPolicy(
+	vaultPath: string,
+): Promise<DownloadPolicy> {
+	return callApiResult(() => commands.syncGetDownloadPolicy({ vaultPath }));
+}
+export function syncSetDownloadPolicy(
+	vaultPath: string,
+	policy: DownloadPolicy,
+): Promise<DownloadPolicy> {
+	return callApiResult(() =>
+		commands.syncSetDownloadPolicy({ vaultPath, policy }),
+	);
+}
+export function syncListPaperAvailability(
+	vaultPath: string,
+): Promise<PaperAvailability[]> {
+	return callApiResult(() => commands.syncListPaperAvailability({ vaultPath }));
+}
+export function syncFetchPaper(
+	vaultPath: string,
+	paperId: string,
+): Promise<SyncOutcome> {
+	return callApiResult(() => commands.syncFetchPaper({ vaultPath, paperId }));
+}
+export function syncEvictPaper(
+	vaultPath: string,
+	paperId: string,
+): Promise<number> {
+	return callApiResult(() => commands.syncEvictPaper({ vaultPath, paperId }));
+}
+export async function syncNotifyChange(vaultPath: string): Promise<void> {
+	await callApiResult(() => commands.syncNotifyChange({ vaultPath }));
 }
 
 export type SyncCloudUsage = {

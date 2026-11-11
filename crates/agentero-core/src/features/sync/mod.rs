@@ -12,6 +12,7 @@
 //! merge, conflict and failure-recovery semantics.
 
 mod agentero;
+pub mod availability;
 pub mod config;
 pub mod engine;
 pub mod git;
