@@ -1073,6 +1073,13 @@ async fn resolve_marks<S: RemoteStore>(
                 if !plan.merged.contains_key(&copy) {
                     plan.merged.insert(copy.clone(), entry.clone());
                     plan.writes.insert(copy.clone(), raw.clone());
+                } else if durable_ink_path(&copy)
+                    && !plan.downloads.iter().any(|(path, _)| path == &copy)
+                {
+                    // A previous post-rename failure may have left this exact
+                    // copy visible but not durable. Confirm it again before a
+                    // canonical replacement can discard its sole source.
+                    plan.writes.insert(copy.clone(), raw.clone());
                 }
                 plan.delete_local.retain(|path| path != &copy);
                 plan.mark_conflicts.push(copy);
@@ -1244,7 +1251,7 @@ async fn apply_local<S: RemoteStore>(
             .ok_or_else(|| AppError::message(format!("blob missing for {rel}")))?;
         crate::fs::with_file_mutation(|| {
             ensure_current(vault, rel, scanned.get(rel))?;
-            write_atomic(&vault.join(rel), &raw)
+            write_atomic(vault, rel, &raw)
         })?;
         outcome.downloaded += 1;
     }
@@ -1252,7 +1259,7 @@ async fn apply_local<S: RemoteStore>(
         progress("download", i + 1, plan.writes.len());
         crate::fs::with_file_mutation(|| {
             ensure_current(vault, rel, scanned.get(rel))?;
-            write_atomic(&vault.join(rel), raw)
+            write_atomic(vault, rel, raw)
         })?;
         outcome.downloaded += 1;
     }
@@ -1310,13 +1317,94 @@ fn conflict_name(path: &str) -> String {
     }
 }
 
-fn write_atomic(target: &Path, bytes: &[u8]) -> Result<(), AppError> {
+fn write_atomic(vault: &Path, rel: &str, bytes: &[u8]) -> Result<(), AppError> {
+    #[cfg(test)]
+    {
+        tests::write_atomic_for_test(vault, rel, bytes)
+    }
+    #[cfg(not(test))]
+    {
+        publish_sync_file(vault, rel, bytes, crate::fs::atomic_write_with, |path| {
+            flush_ink_directories(path, |dir| fs::File::open(dir)?.sync_all())
+        })
+    }
+}
+
+fn durable_ink_path(rel: &str) -> bool {
+    if matches!(mark_kind(rel), Some(MarkKind::Ink(_))) {
+        return true;
+    }
+    let Some(mut stem) = rel.strip_suffix(".json") else {
+        return false;
+    };
+    loop {
+        // A losing acknowledged stroke may survive only in a generated raw
+        // conflict sibling. Also retain durability if such a sibling conflicts.
+        let Some((original, suffix)) = stem.rsplit_once(" (conflict ") else {
+            return false;
+        };
+        let Some(hash) = suffix.strip_suffix(')') else {
+            return false;
+        };
+        if hash.len() != 64 || !hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+            return false;
+        }
+        if matches!(
+            mark_kind(&format!("{original}.json")),
+            Some(MarkKind::Ink(_))
+        ) {
+            return true;
+        }
+        stem = original;
+    }
+}
+
+fn flush_ink_directories(
+    path: &Path,
+    mut flush: impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    // Bound publication to ink/, marks/, and the existing paper directory,
+    // matching native ink saves. Never walk through arbitrary vault ancestors.
+    for directory in path
+        .ancestors()
+        .skip(1)
+        .take(if cfg!(unix) { 3 } else { 0 })
+    {
+        flush(directory)?;
+    }
+    Ok(())
+}
+
+fn publish_sync_file(
+    vault: &Path,
+    rel: &str,
+    bytes: &[u8],
+    publish: impl FnOnce(&Path, &[u8], &crate::fs::AtomicOpts) -> std::io::Result<()>,
+    flush_directories: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<(), AppError> {
+    let target = vault.join(rel);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Shared unique sibling temp: snapshot scans skip `*.tmp`, so the
-    // half-written download is never synced.
-    crate::fs::atomic_write(target, bytes)?;
+    let ink = durable_ink_path(rel);
+    // Keep unique sibling *.tmp staging and all caller mutation-lane checks.
+    // Ink must reach stable storage BEFORE replacing the acknowledged version.
+    publish(
+        &target,
+        bytes,
+        &crate::fs::AtomicOpts {
+            sync_file: ink,
+            ..Default::default()
+        },
+    )?;
+    if ink {
+        // Rename already succeeded. The new bytes may be visible; do not roll
+        // back or continue to uploads/HEAD publication after a failed flush.
+        flush_directories(&target).map_err(|_| AppError::domain(
+            "sync_ink_durability_uncertain",
+            "Ink sync replacement may already be visible; reload the page to reconcile before retrying",
+        ))?;
+    }
     Ok(())
 }
 
@@ -1594,6 +1682,7 @@ mod tests {
     include!("engine_marks_tests.rs");
     include!("engine_availability_tests.rs");
     include!("engine_retarget_tests.rs");
+    include!("ink_durability_tests.rs");
 
     #[test]
     fn merge_one_sided_changes() {

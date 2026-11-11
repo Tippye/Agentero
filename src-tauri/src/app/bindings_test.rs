@@ -268,6 +268,8 @@ pub(crate) fn export_typescript_bindings() {
             crate::integration::sync::commands::sync_fetch_paper,
             crate::integration::sync::commands::sync_evict_paper,
             crate::integration::sync::commands::sync_notify_change,
+            crate::features::pdf::ink::pdf_read_ink,
+            crate::features::pdf::ink::pdf_apply_ink,
             crate::integration::sync::commands::sync_cloud_usage,
             crate::features::vault::watcher::commands::fs_watch_start,
             crate::features::vault::watcher::commands::fs_watch_stop,
