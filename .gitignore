@@ -37,6 +37,9 @@ site/
 .qoder/
 **/.qoder/
 
+# Workspace-local SDK/tool caches are not source or Tailwind scan inputs.
+/.development-tools/
+
 # Rust workspace (root target/ for agentero-cli + src-tauri)
 /target/
 src-tauri/target/

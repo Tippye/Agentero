@@ -171,6 +171,13 @@ async fn run_sync<S: RemoteStore>(
 
     let mut outcome = SyncOutcome::default();
     for attempt in 0..MAX_CAS_RETRIES {
+        if attempt > 0 {
+            // The previous attempt applied files before losing HEAD. Do not
+            // reuse that snapshot if an editor changed any of those bytes.
+            for (path, entry) in &local_files {
+                ensure_current(vault, path, Some(entry))?;
+            }
+        }
         progress("pull", 0, 0);
         let head = client.get(HEAD_KEY).await?;
         let (head_ptr, head_etag) = match &head {
@@ -236,14 +243,29 @@ async fn run_sync<S: RemoteStore>(
             None => BTreeMap::new(),
         };
 
-        let plan = merge(
+        let paper_presence = PaperPresence {
+            local: local_paper_directories(vault)?,
+            remote: remote_manifest
+                .as_ref()
+                .map(|manifest| {
+                    manifest
+                        .files
+                        .keys()
+                        .filter_map(|path| paper_id(path).map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+        let mut plan = merge_with_paper_presence(
             &base_files,
             &local_files,
             &remote_files,
             &cfg.scope,
             &remote_scope,
+            &paper_presence,
         );
-        apply_local(vault, client, &plan, &mut outcome, progress).await?;
+        resolve_marks(vault, client, &mut plan).await?;
+        apply_local(vault, client, &plan, &local_files, &mut outcome, progress).await?;
         let merged = plan.merged;
 
         // Nothing to publish: the merged manifest carries the same content as
@@ -472,17 +494,85 @@ struct MergePlan {
     /// `(original rel, conflict-copy rel)` — copy the local file aside before
     /// the remote version overwrites it.
     preserve_local: Vec<(String, String)>,
+    marks: Vec<MarkMerge>,
+    /// Resolved semantic content and exact source conflict copies.
+    writes: BTreeMap<String, Vec<u8>>,
+    mark_conflicts: Vec<String>,
 }
 
-/// Three-way merge per path. Only-one-side changes win outright; both-changed
-/// Markdown keeps the newer version and saves the loser as a conflict copy;
-/// everything else (sidecars, marks, binaries) is last-writer-wins by mtime.
-/// Delete-vs-modify keeps the modification.
+struct MarkMerge {
+    path: String,
+    base: Option<FileEntry>,
+    local: Option<FileEntry>,
+    remote: Option<FileEntry>,
+}
+
+fn paper_id(path: &str) -> Option<&str> {
+    path.strip_prefix("papers/")?
+        .split_once('/')
+        .map(|(id, _)| id)
+}
+
+struct PaperPresence {
+    local: HashSet<String>,
+    remote: HashSet<String>,
+}
+
+fn local_paper_directories(vault: &Path) -> Result<HashSet<String>, AppError> {
+    let entries = match fs::read_dir(vault.join("papers")) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut papers = HashSet::new();
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            if let Some(name) = entry.file_name().to_str() {
+                papers.insert(name.to_owned());
+            }
+        }
+    }
+    Ok(papers)
+}
+
+#[derive(Clone, Copy)]
+enum MarkKind {
+    Annotations,
+    Ink(u32),
+    Other,
+}
+
+fn mark_kind(path: &str) -> Option<MarkKind> {
+    let (_, tail) = path.strip_prefix("papers/")?.split_once('/')?;
+    if tail == "annotations.json" || tail == "marks/annotations.json" {
+        return Some(MarkKind::Annotations);
+    }
+    if let Some(page) = tail
+        .strip_prefix("marks/ink/p")
+        .and_then(|s| s.strip_suffix(".json"))
+    {
+        if !page.is_empty() && page.bytes().all(|c| c.is_ascii_digit()) {
+            if let Ok(page) = page.parse::<u32>() {
+                if page > 0 {
+                    return Some(MarkKind::Ink(page));
+                }
+            }
+        }
+    }
+    tail.starts_with("marks/").then_some(MarkKind::Other)
+}
+
+/// Three-way merge per path. Structured PDF marks are resolved from immutable
+/// blobs before applying; ambiguous marks always retain exact conflict copies.
+/// Markdown/table conflicts keep both files. Other binaries use mtime.
+/// Delete-vs-modify keeps the modification at the file level.
 ///
 /// Sync scope makes paths *inert* instead of absent: a path the local scope
 /// filters never changes (it is not in the scan), and a path the remote
 /// publisher filtered is never read as a remote deletion — the best known
 /// entry is carried forward so devices without the filter keep seeing it.
+#[cfg(test)]
 fn merge(
     base: &BTreeMap<String, FileEntry>,
     local: &BTreeMap<String, FileEntry>,
@@ -490,11 +580,35 @@ fn merge(
     local_scope: &snapshot::SyncScope,
     remote_scope: &snapshot::SyncScope,
 ) -> MergePlan {
+    let presence = PaperPresence {
+        local: local
+            .keys()
+            .filter_map(|path| paper_id(path).map(str::to_owned))
+            .collect(),
+        remote: remote
+            .keys()
+            .filter_map(|path| paper_id(path).map(str::to_owned))
+            .collect(),
+    };
+    merge_with_paper_presence(base, local, remote, local_scope, remote_scope, &presence)
+}
+
+fn merge_with_paper_presence(
+    base: &BTreeMap<String, FileEntry>,
+    local: &BTreeMap<String, FileEntry>,
+    remote: &BTreeMap<String, FileEntry>,
+    local_scope: &snapshot::SyncScope,
+    remote_scope: &snapshot::SyncScope,
+    paper_presence: &PaperPresence,
+) -> MergePlan {
     let mut plan = MergePlan {
         merged: BTreeMap::new(),
         downloads: Vec::new(),
         delete_local: Vec::new(),
         preserve_local: Vec::new(),
+        marks: Vec::new(),
+        writes: BTreeMap::new(),
+        mark_conflicts: Vec::new(),
     };
     let mut paths: Vec<&String> = base
         .keys()
@@ -532,7 +646,44 @@ fn merge(
             _ => false,
         };
 
-        if same(l, r) {
+        // Ink omission never deletes records, including an entire missing
+        // sidecar or equal peers that both omitted old tombstones. Only a
+        // whole-paper removal may delete unchanged ink. Local directory and
+        // unfiltered remote evidence must survive bulky-asset scope filtering.
+        let kind = mark_kind(path);
+        let structured = if matches!(kind, Some(MarkKind::Ink(_))) {
+            let paper = paper_id(path).expect("ink belongs to a paper");
+            let local_paper_deleted =
+                b.is_some() && !paper_presence.local.contains(paper) && (r.is_none() || same(r, b));
+            // A scoped publisher may hide the only surviving PDF/source. Its
+            // absence cannot prove paper removal without an explicit marker.
+            let remote_paper_deleted = b.is_some()
+                && remote_scope.is_all()
+                && !paper_presence.remote.contains(paper)
+                && (l.is_none() || same(l, b));
+            !local_paper_deleted
+                && !remote_paper_deleted
+                && (!same(l, b) || !same(r, b))
+                && (b.is_some() || (l.is_some() && r.is_some() && !same(l, r)))
+        } else {
+            kind.is_some()
+                && !same(l, r)
+                && l.is_some()
+                && r.is_some()
+                && !same(l, b)
+                && !same(r, b)
+        };
+        if structured {
+            plan.marks.push(MarkMerge {
+                path: path.clone(),
+                base: b.cloned(),
+                local: l.cloned(),
+                remote: r.cloned(),
+            });
+            if let Some(entry) = l.or(r).or(b) {
+                plan.merged.insert(path.clone(), entry.clone());
+            }
+        } else if same(l, r) {
             if let Some(entry) = l {
                 plan.merged.insert(path.clone(), entry.clone());
             }
@@ -598,36 +749,315 @@ fn same_content(a: &BTreeMap<String, FileEntry>, b: &BTreeMap<String, FileEntry>
             .all(|(path, entry)| b.get(path).is_some_and(|o| o.hash == entry.hash))
 }
 
+/// Resolve structured candidates without mutating local files. A missing base
+/// blob is not an empty base: fall back to preserving both exact versions.
+async fn resolve_marks<S: RemoteStore>(
+    vault: &Path,
+    client: &S,
+    plan: &mut MergePlan,
+) -> Result<(), AppError> {
+    for candidate in std::mem::take(&mut plan.marks) {
+        let MarkMerge {
+            path,
+            base,
+            local,
+            remote,
+        } = candidate;
+        let local_bytes = match &local {
+            Some(entry) => {
+                let bytes = fs::read(vault.join(&path))?;
+                if snapshot::hash_bytes(&bytes) != entry.hash {
+                    return Err(changed_during_sync(&path));
+                }
+                Some(bytes)
+            }
+            None => None,
+        };
+        let remote_bytes = match &remote {
+            Some(entry) => Some(
+                fetch_blob(client, &path, entry)
+                    .await?
+                    .ok_or_else(|| AppError::message(format!("blob missing for {path}")))?,
+            ),
+            None => None,
+        };
+        let base_bytes = match &base {
+            Some(entry) if local.as_ref().is_some_and(|l| l.hash == entry.hash) => {
+                local_bytes.clone()
+            }
+            Some(entry) if remote.as_ref().is_some_and(|r| r.hash == entry.hash) => {
+                remote_bytes.clone()
+            }
+            Some(entry) => fetch_blob(client, &path, entry).await?,
+            None => None,
+        };
+        let mut versions: Vec<_> = local
+            .iter()
+            .zip(local_bytes.iter())
+            .chain(remote.iter().zip(remote_bytes.iter()))
+            .collect();
+        if versions.is_empty() {
+            versions.extend(base.iter().zip(base_bytes.iter()));
+        }
+        let result = if base.is_some() && base_bytes.is_none() {
+            Err("base blob missing".into())
+        } else {
+            match mark_kind(&path) {
+                Some(MarkKind::Annotations) => match (&local_bytes, &remote_bytes) {
+                    (Some(l), Some(r)) => {
+                        crate::features::pdf::annotation_merge::merge(base_bytes.as_deref(), l, r)
+                            .map(|merged| (merged.bytes, merged.conflicted))
+                    }
+                    _ => Err("annotation source missing".into()),
+                },
+                Some(MarkKind::Ink(page)) => merge_ink(
+                    page,
+                    base_bytes.as_deref(),
+                    local_bytes.as_deref(),
+                    remote_bytes.as_deref(),
+                ),
+                _ => Err("unrecognized marks format".into()),
+            }
+        };
+        let (bytes, conflicted) = match result {
+            Ok(result) => result,
+            Err(reason) => {
+                log::warn!(target: "agentero::sync", "preserving marks conflict {path}: {reason}");
+                // Stable winner independent of clocks and sync direction;
+                // both sources are retained below, byte for byte.
+                let (_, winner) = versions
+                    .iter()
+                    .max_by(|(a, _), (b, _)| a.hash.cmp(&b.hash))
+                    .ok_or_else(|| {
+                        AppError::message(format!("retained ink blob missing for {path}"))
+                    })?;
+                ((*winner).clone(), true)
+            }
+        };
+        if conflicted {
+            for &(entry, raw) in &versions {
+                let copy = mark_conflict_name(&path, &entry.hash);
+                if plan
+                    .merged
+                    .get(&copy)
+                    .is_some_and(|old| old.hash != entry.hash)
+                {
+                    return Err(AppError::message(format!(
+                        "marks conflict copy already differs: {copy}"
+                    )));
+                }
+                match fs::read(vault.join(&copy)) {
+                    Ok(existing) if snapshot::hash_bytes(&existing) != entry.hash => {
+                        return Err(AppError::message(format!(
+                            "marks conflict copy already differs: {copy}"
+                        )));
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+                if !plan.merged.contains_key(&copy) {
+                    plan.merged.insert(copy.clone(), entry.clone());
+                    plan.writes.insert(copy.clone(), raw.clone());
+                }
+                plan.delete_local.retain(|path| path != &copy);
+                plan.mark_conflicts.push(copy);
+            }
+        }
+        let hash = snapshot::hash_bytes(&bytes);
+        let entry = FileEntry {
+            mtime_ms: versions
+                .iter()
+                .find(|(entry, _)| entry.hash == hash)
+                .map(|(entry, _)| entry.mtime_ms)
+                .unwrap_or_else(|| {
+                    versions
+                        .iter()
+                        .map(|(entry, _)| entry.mtime_ms)
+                        .max()
+                        .unwrap_or(0)
+                }),
+            size: bytes.len() as u64,
+            hash,
+        };
+        if local.as_ref().is_none_or(|local| entry.hash != local.hash) {
+            plan.writes.insert(path.clone(), bytes);
+        }
+        plan.merged.insert(path, entry);
+    }
+    Ok(())
+}
+
+fn merge_ink(
+    page: u32,
+    base: Option<&[u8]>,
+    local: Option<&[u8]>,
+    remote: Option<&[u8]>,
+) -> Result<(Vec<u8>, bool), String> {
+    use crate::features::pdf::annotation_merge::parse_json;
+    use crate::features::pdf::ink::InkPage;
+    // Strict object-key parsing plus the model's deny_unknown_fields avoids
+    // silently normalizing unfamiliar/ambiguous data into a smaller document.
+    let parse =
+        |bytes: Option<&[u8]>| -> Result<(InkPage, BTreeMap<uuid::Uuid, serde_json::Value>, bool), String> {
+            let Some(bytes) = bytes else {
+                return Ok((InkPage::new(page).map_err(|e| e.to_string())?, BTreeMap::new(), false));
+            };
+            let value = parse_json(bytes).map_err(|e| e.to_string())?;
+            let raw: InkPage = serde_json::from_value(value).map_err(|e| e.to_string())?;
+            raw.validate().map_err(|e| e.to_string())?;
+            if raw.page != page {
+                return Err("ink page does not match filename".into());
+            }
+            let mut records = BTreeMap::new();
+            let mut ambiguous = false;
+            for (id, value) in raw
+                .strokes
+                .iter()
+                .map(|s| (s.id, serde_json::to_value(s)))
+                .chain(
+                    raw.tombstones
+                        .iter()
+                        .map(|s| (s.id, serde_json::to_value(s))),
+                )
+            {
+                let value = value.map_err(|e| e.to_string())?;
+                if let Some(previous) = records.insert(id, value.clone()) {
+                    ambiguous |= previous != value;
+                }
+            }
+            let normalized = raw.merge(&raw).map_err(|e| e.to_string())?;
+            Ok((normalized, records, ambiguous))
+        };
+    let (l, lr, la) = parse(local)?;
+    let (r, rr, ra) = parse(remote)?;
+    let (b, br, ba) = parse(base)?;
+    let mut conflicted = la
+        || ra
+        || ba
+        || lr.iter().any(|(id, l)| {
+            rr.get(id)
+                .is_some_and(|r| l != r && br.get(id) != Some(l) && br.get(id) != Some(r))
+        });
+    // Include the base because omission is never a stroke/tombstone deletion.
+    let merged = b
+        .merge(&l)
+        .and_then(|m| m.merge(&r))
+        .map_err(|e| e.to_string())?;
+    let winners: BTreeMap<_, _> = merged
+        .strokes
+        .iter()
+        .map(|s| (s.id, serde_json::to_value(s)))
+        .chain(
+            merged
+                .tombstones
+                .iter()
+                .map(|s| (s.id, serde_json::to_value(s))),
+        )
+        .map(|(id, value)| value.map(|value| (id, value)))
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    // A writer may reuse or decrease a revision on a one-sided edit. If the
+    // model rejects that changed payload in favor of the base, retain it too.
+    conflicted |= lr
+        .iter()
+        .chain(rr.iter())
+        .any(|(id, value)| br.get(id) != Some(value) && winners.get(id) != Some(value));
+    Ok((
+        merged.to_json().map_err(|e| e.to_string())?.into_bytes(),
+        conflicted,
+    ))
+}
+
+async fn fetch_blob<S: RemoteStore>(
+    client: &S,
+    path: &str,
+    entry: &FileEntry,
+) -> Result<Option<Vec<u8>>, AppError> {
+    let Some((bytes, _)) = client.get(&blob_key(&entry.hash)).await? else {
+        return Ok(None);
+    };
+    let raw = gunzip_limited(&bytes, entry.size.saturating_add(1 << 20))?;
+    if snapshot::hash_bytes(&raw) != entry.hash {
+        return Err(AppError::message(format!("blob corrupt for {path}")));
+    }
+    Ok(Some(raw))
+}
+
+fn mark_conflict_name(path: &str, hash: &str) -> String {
+    match path.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem} (conflict {hash}).{ext}"),
+        None => format!("{path} (conflict {hash})"),
+    }
+}
+
+fn changed_during_sync(path: &str) -> AppError {
+    AppError::message(format!("{path} changed during sync; run sync again"))
+}
+
+/// Check immediately before overwrite, after any awaited blob requests and
+/// progress callbacks. The vault sync lock does not lock an active editor.
+fn ensure_current(vault: &Path, path: &str, expected: Option<&FileEntry>) -> Result<(), AppError> {
+    match (snapshot::hash_file(&vault.join(path)), expected) {
+        (Ok(hash), Some(entry)) if hash == entry.hash => Ok(()),
+        (Err(_), None) if !vault.join(path).try_exists()? => Ok(()),
+        _ => Err(changed_during_sync(path)),
+    }
+}
+
 async fn apply_local<S: RemoteStore>(
     vault: &Path,
     client: &S,
     plan: &MergePlan,
+    scanned: &BTreeMap<String, FileEntry>,
     outcome: &mut SyncOutcome,
     progress: Progress<'_>,
 ) -> Result<(), AppError> {
     for (from, to) in &plan.preserve_local {
-        fs::copy(vault.join(from), vault.join(to))?;
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, from, scanned.get(from))?;
+            ensure_current(vault, to, scanned.get(to))?;
+            fs::copy(vault.join(from), vault.join(to))?;
+            Ok(())
+        })?;
         outcome.conflict_copies.push(to.clone());
     }
     let total = plan.downloads.len();
     for (i, (rel, entry)) in plan.downloads.iter().enumerate() {
         progress("download", i + 1, total);
-        let (bytes, _) = client
-            .get(&blob_key(&entry.hash))
+        let raw = fetch_blob(client, rel, entry)
             .await?
             .ok_or_else(|| AppError::message(format!("blob missing for {rel}")))?;
-        let raw = gunzip_limited(&bytes, entry.size.saturating_add(1 << 20))?;
-        if snapshot::hash_bytes(&raw) != entry.hash {
-            return Err(AppError::message(format!("blob corrupt for {rel}")));
-        }
-        write_atomic(&vault.join(rel), &raw)?;
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            write_atomic(&vault.join(rel), &raw)
+        })?;
         outcome.downloaded += 1;
     }
+    for (i, (rel, raw)) in plan.writes.iter().enumerate() {
+        progress("download", i + 1, plan.writes.len());
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            write_atomic(&vault.join(rel), raw)
+        })?;
+        outcome.downloaded += 1;
+    }
+    for copy in &plan.mark_conflicts {
+        if !outcome.conflict_copies.contains(copy) {
+            outcome.conflict_copies.push(copy.clone());
+        }
+    }
     for rel in &plan.delete_local {
-        match fs::remove_file(vault.join(rel)) {
-            Ok(()) => outcome.deleted_local += 1,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(AppError::message(format!("delete {rel}: {e}"))),
+        let removed = crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            match fs::remove_file(vault.join(rel)) {
+                Ok(()) => Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(e) => Err(AppError::message(format!("delete {rel}: {e}"))),
+            }
+        })?;
+        if removed {
+            outcome.deleted_local += 1;
         }
     }
     Ok(())
@@ -945,6 +1375,9 @@ mod tests {
 
         let _ = fs::remove_dir_all(&vault);
     }
+
+    // Actual engine round trips, including divergent mark files and races.
+    include!("engine_marks_tests.rs");
 
     #[test]
     fn merge_one_sided_changes() {

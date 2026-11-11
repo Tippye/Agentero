@@ -20,6 +20,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfCitationPreview } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
@@ -131,6 +132,7 @@ const PAGE_MODE: PdfPageModeSlice = {
 };
 
 export function PdfTranslationViewerInner({
+	runtime,
 	docId,
 	paperAbsPath = null,
 	paperRelPath = null,
@@ -142,6 +144,7 @@ export function PdfTranslationViewerInner({
 	isActive = true,
 	onHandle,
 }: PdfViewerInnerProps) {
+	const capabilities = pdfViewerCapabilities(runtime);
 	usePdfScrollSync(docId);
 	usePdfReadingMode(docId);
 	const { provides: scroll } = useScroll(docId);
@@ -180,6 +183,7 @@ export function PdfTranslationViewerInner({
 		toggleLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutTranslate({
+		enabled: capabilities.layoutTranslation,
 		reflowContext: () => {
 			const engine = engineRef.current,
 				document = docCapRef.current?.getDocument(docId);
@@ -218,6 +222,7 @@ export function PdfTranslationViewerInner({
 	layoutTranslateRunningRef.current = layoutTranslateRunning;
 
 	useEffect(() => {
+		if (!capabilities.layoutTranslation) return;
 		const hasRegions = (layoutRawRegions?.length ?? 0) > 0;
 		if (hasRegions) {
 			hadLayoutRegionsRef.current = true;
@@ -254,6 +259,7 @@ export function PdfTranslationViewerInner({
 		}, 250);
 		return () => window.clearTimeout(timer);
 	}, [
+		capabilities.layoutTranslation,
 		layoutRawRegions,
 		layoutTranslateActive,
 		layoutTranslateRunning,
@@ -463,13 +469,16 @@ export function PdfTranslationViewerInner({
 	const pageHandlers = useMemo<PdfPageHandlers>(
 		() => ({
 			...EMPTY_HANDLERS,
-			onTogglePageLayoutTranslate: togglePageLayoutTranslate,
+			onTogglePageLayoutTranslate: capabilities.layoutTranslation
+				? togglePageLayoutTranslate
+				: undefined,
 			onCitationActivate: activateCitation,
 			onTextLinkActivate: openExternalUrl,
 			onCitationHover: handleLinkHover,
 			onLinkUrlHover: handleLinkUrlHover,
 		}),
 		[
+			capabilities.layoutTranslation,
 			togglePageLayoutTranslate,
 			activateCitation,
 			handleLinkHover,

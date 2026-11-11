@@ -42,3 +42,28 @@ it("notifies sibling viewers after saved visual notes and deletions, without rep
 		off();
 	}
 });
+
+it("announces a local mark only after the guarded host save finishes", async () => {
+	let release = () => {};
+	mocks.write.mockImplementationOnce(
+		() =>
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+	);
+	const listener = vi.fn();
+	const off = subscribeLocalMarkWrites(listener);
+	try {
+		const saving = writeMarkFile("/vault/papers/pending", "note", {
+			kind: "visual",
+		});
+		expect(listener).not.toHaveBeenCalled();
+		release();
+		await saving;
+		expect(listener).toHaveBeenCalledExactlyOnceWith(
+			"/vault/papers/pending/marks/note.json",
+		);
+	} finally {
+		off();
+	}
+});

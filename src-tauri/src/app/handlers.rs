@@ -1,12 +1,11 @@
-//! Command registration shared between desktop and iOS.
-//!
-//! Desktop-only commands are listed once via `$($desktop:path),*` so the iOS
-//! branch does not duplicate the common list.
+//! Platform command registration. Mobile uses an explicit allowlist and does
+//! not inherit the desktop Agent, process, TeX or local-server surface.
 
-/// Commands available on every platform (including iOS).
+/// Commands available in the desktop application.
 /// Desktop-only extras are appended by the caller; `$extra` stays a raw token
 /// stream so individual entries can carry `#[cfg(...)]` (e.g. features that
 /// need the desktop PDFium stack and are absent on mobile targets).
+#[cfg(desktop)]
 macro_rules! common_commands {
     ($($extra:tt)*) => {
         ::tauri::generate_handler![
@@ -170,9 +169,28 @@ macro_rules! common_commands {
 
 /// Attach the platform-appropriate invoke handler to the builder.
 pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     {
         builder.invoke_handler(common_commands![
+            crate::features::vault::files::vault_write_text_file,
+            crate::features::vault::files::vault_remove_file,
+            crate::app::remote_agent::remote_agent_catalog,
+            crate::app::remote_agent::remote_agent_login,
+            crate::app::remote_agent::remote_agent_logout,
+            crate::app::remote_agent::remote_agent_hosts,
+            crate::app::remote_agent::remote_agent_host_identity,
+            crate::app::remote_agent::remote_agent_trust_host,
+            crate::app::remote_agent::remote_agent_workspaces,
+            crate::app::remote_agent::remote_agent_sessions,
+            crate::app::remote_agent::remote_agent_read_session,
+            crate::app::remote_agent::remote_agent_execute,
+            crate::app::remote_agent::remote_agent_receipt,
+            crate::app::remote_agent::remote_agent_upload,
+            crate::integration::bridge::client_commands::bridge_client_connect,
+            crate::integration::bridge::client_commands::bridge_client_resume,
+            crate::integration::bridge::client_commands::bridge_client_disconnect,
+            crate::integration::bridge::client_commands::bridge_client_status,
+            crate::integration::bridge::client_commands::bridge_client_rpc,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             crate::integration::plugins::plugin_editor_state,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -330,14 +348,78 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::features::jev::commands::jev_probe_health,
         ])
     }
-    #[cfg(target_os = "ios")]
+    #[cfg(mobile)]
     {
-        builder.invoke_handler(common_commands![
-            crate::integration::bridge::client_commands::bridge_connect,
-            crate::integration::bridge::client_commands::bridge_resume,
-            crate::integration::bridge::client_commands::bridge_disconnect,
-            crate::integration::bridge::client_commands::bridge_status,
-            crate::integration::bridge::client_commands::bridge_rpc,
+        // Deliberate allowlist: never inherit local Agent, terminal, TeX,
+        // desktop server or plugin commands through `common_commands!`.
+        builder.invoke_handler(tauri::generate_handler![
+            crate::features::vault::files::vault_write_text_file,
+            crate::features::vault::files::vault_remove_file,
+            crate::app::remote_agent::remote_agent_catalog,
+            crate::app::remote_agent::remote_agent_login,
+            crate::app::remote_agent::remote_agent_logout,
+            crate::app::remote_agent::remote_agent_hosts,
+            crate::app::remote_agent::remote_agent_host_identity,
+            crate::app::remote_agent::remote_agent_trust_host,
+            crate::app::remote_agent::remote_agent_workspaces,
+            crate::app::remote_agent::remote_agent_sessions,
+            crate::app::remote_agent::remote_agent_read_session,
+            crate::app::remote_agent::remote_agent_execute,
+            crate::app::remote_agent::remote_agent_receipt,
+            crate::app::remote_agent::remote_agent_upload,
+            crate::features::system::settings::commands::settings_get,
+            crate::features::system::settings::commands::settings_set,
+            crate::features::system::builtin::builtin_provider_status,
+            crate::features::vault::commands::vault_create,
+            crate::features::vault::commands::vault_ensure,
+            crate::app::vault_session::fs_scope::vault_allow_fs_scope,
+            crate::app::vault_session::lifecycle::vault_hold,
+            crate::app::vault_session::lifecycle::vault_release,
+            crate::features::vault::commands::vault_tree_build,
+            crate::features::vault::commands::vault_tree_children,
+            crate::features::markdown::wiki::commands::graph_get_backlinks,
+            crate::features::markdown::wiki::commands::wiki_resolve,
+            crate::features::markdown::wiki::commands::wiki_embed_read,
+            crate::features::markdown::wiki::commands::wiki_search,
+            crate::features::markdown::wiki::commands::wiki_rename_heading,
+            crate::features::markdown::wiki::commands::graph_rebuild,
+            crate::features::markdown::wiki::commands::graph_apply_paths,
+            crate::features::markdown::search::commands::vault_search,
+            crate::features::markdown::tables::commands::research_table_list,
+            crate::features::markdown::tables::commands::research_table_backlinks,
+            crate::features::paper::catalog::commands::catalog_list_properties,
+            crate::features::paper::catalog::commands::catalog_create_property,
+            crate::features::paper::catalog::commands::catalog_update_property,
+            crate::features::paper::catalog::commands::catalog_delete_property,
+            crate::features::paper::catalog::commands::catalog_set_paper_property,
+            crate::features::paper::catalog::commands::catalog_create_option_and_set,
+            crate::features::paper::catalog::commands::catalog_delete_property_option,
+            crate::features::paper::catalog::commands::paper_open_bundle,
+            crate::features::paper::catalog::commands::paper_get,
+            crate::features::paper::catalog::commands::paper_list,
+            crate::features::paper::catalog::commands::paper_set_is_read,
+            crate::features::paper::catalog::commands::paper_update_meta,
+            crate::features::paper::catalog::commands::paper_set_tags,
+            crate::features::paper::catalog::commands::paper_rescan,
+            crate::features::paper::catalog::commands::paper_ensure_rows,
+            crate::features::paper::catalog::commands::paper_page_counts,
+            crate::features::paper::catalog::commands::paper_set_page_counts,
+            crate::features::paper::catalog::commands::paper_reading_activity_batch,
+            crate::features::paper::import::commands::paper_import_local_pdf,
+            crate::features::paper::import::commands::paper_stage_import_file,
+            crate::features::paper::analyze::refs::commands::paper_refs_list,
+            crate::features::paper::import::commands::paper_resolve_identifier,
+            crate::features::pdf::bookmarks::pdf_save_bookmarks,
+            crate::features::translate::commands::translate_text,
+            crate::features::translate::layout_cache::layout_translate_cache_write,
+            crate::core::usage::commands::activity_record_events,
+            crate::core::usage::commands::usage_clear,
+            crate::app::logging::logs_clear,
+            crate::integration::bridge::client_commands::bridge_client_connect,
+            crate::integration::bridge::client_commands::bridge_client_resume,
+            crate::integration::bridge::client_commands::bridge_client_disconnect,
+            crate::integration::bridge::client_commands::bridge_client_status,
+            crate::integration::bridge::client_commands::bridge_client_rpc,
         ])
     }
 }

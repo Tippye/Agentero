@@ -17,6 +17,10 @@ import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { addSelectionToChat } from "@/components/selection/add-selection-to-chat";
 import { useSelectionQuickChat } from "@/components/selection/use-selection-quick-chat";
+import {
+	type PdfViewerCapabilities,
+	pdfViewerCapabilities,
+} from "@/components/viewer/pdf/capabilities";
 import type { SelectionMenuState } from "@/components/viewer/pdf/types";
 import { copyTextToClipboard } from "@/lib/core/clipboard";
 import type { PdfAskAnchor } from "@/lib/pdf/ask/types";
@@ -27,6 +31,7 @@ import {
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 
 export type UsePdfSelectionActionsOptions = {
+	capabilities?: PdfViewerCapabilities;
 	/** Placed menu; every action no-ops when null. */
 	selectionMenu: SelectionMenuState | null;
 	closeSelectionMenu: () => void;
@@ -74,6 +79,7 @@ export type PdfSelectionActions = {
 };
 
 export function usePdfSelectionActions({
+	capabilities = pdfViewerCapabilities(),
 	selectionMenu,
 	closeSelectionMenu,
 	createHighlights,
@@ -132,6 +138,7 @@ export function usePdfSelectionActions({
 	);
 
 	const handleMenuAsk = useCallback(() => {
+		if (!capabilities.ask) return;
 		const menu = selectionMenuRef.current;
 		if (!menu) return;
 		const translatedRects = menu.visiblePages?.find(
@@ -144,12 +151,16 @@ export function usePdfSelectionActions({
 		const translation = menu.pairedTranslation;
 		closeSelectionMenu();
 		startFromAnchor(anchor, translation);
-	}, [startFromAnchor, closeSelectionMenu]);
+	}, [capabilities.ask, startFromAnchor, closeSelectionMenu]);
 
 	// ⌘K Quick chat — only while this viewer's selection toolbar is armed.
-	useSelectionQuickChat(() => selectionMenuRef.current != null, handleMenuAsk);
+	useSelectionQuickChat(
+		() => capabilities.ask && selectionMenuRef.current != null,
+		handleMenuAsk,
+	);
 
 	const handleMenuAddToChat = useCallback(() => {
+		if (!capabilities.addToChat) return;
 		const menu = selectionMenuRef.current;
 		if (!menu) return;
 		const anchor = menu.anchor;
@@ -181,7 +192,13 @@ export function usePdfSelectionActions({
 			rects: anchor.rects,
 			paperAbsPath: paperAbsPath ?? undefined,
 		});
-	}, [closeSelectionMenu, docId, paperRelPath, paperAbsPath]);
+	}, [
+		capabilities.addToChat,
+		closeSelectionMenu,
+		docId,
+		paperRelPath,
+		paperAbsPath,
+	]);
 
 	const handleMenuTranslate = useCallback(() => {
 		const menu = selectionMenuRef.current;

@@ -453,7 +453,7 @@ export type PdfPageHandlers = {
 	onRegionSelect: (page: number, region: PdfAskNormalizedRect) => void;
 	/** Click a figure / table / algorithm / formula hit target → crop + draft card. */
 	onLayoutRegionClick: (region: PdfLayoutRegion) => void;
-	onTogglePageLayoutTranslate: (pageIndex: number) => void;
+	onTogglePageLayoutTranslate?: (pageIndex: number) => void;
 	/** Delete a highlight annotation directly from its on-page selection menu. */
 	onDeleteHighlightAnnotation: (pageIndex: number, id: string) => void;
 	/** Open the note editor for a highlight from its on-page selection menu. */
@@ -477,7 +477,7 @@ export type PdfPageHandlers = {
 	/** Copy the comment card's `![[target@id]]` embed. */
 	onCopyCommentEmbed: (comment: PageAnnotationComment) => void;
 	/** Add a visual comment's crop to the Agent sidebar composer (#396). */
-	onAddCommentToChat: (comment: PageAnnotationComment) => void;
+	onAddCommentToChat?: (comment: PageAnnotationComment) => void;
 	/** Hover enters a comment-rail card. */
 	onHoverComment: (comment: PageAnnotationComment) => void;
 	/** Hover leaves a comment-rail card. */
@@ -1368,7 +1368,9 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						</div>
 					) : null}
 				</UnrotatedPageFrame>
-				{!mode.plainViewer && pageHovered ? (
+				{!mode.plainViewer &&
+				pageHovered &&
+				handlers.onTogglePageLayoutTranslate ? (
 					<PageTranslateTab
 						pageIndex={pageIndex}
 						active={pageTranslateState.active}

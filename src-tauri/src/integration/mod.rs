@@ -10,6 +10,8 @@ pub mod context_mcp;
 #[cfg(feature = "desktop")]
 pub mod delegate_mcp;
 #[cfg(feature = "desktop")]
+pub mod dsh_remote;
+#[cfg(feature = "desktop")]
 pub mod mcp;
 #[cfg(feature = "desktop")]
 pub mod remote;

@@ -117,6 +117,7 @@ urlencoding = "2"
 url = "2"
 os_info = "3"
 crypto_box = "0.9"
+snow = "0.9"
 ed25519-dalek = "2"
 # Used by lookup batch import (all platforms); also needed by Unix remote vault.
 futures-util = { version = "0.3.33", features = ["sink"] }

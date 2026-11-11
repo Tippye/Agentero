@@ -99,7 +99,7 @@ type CommentCardsLayerProps = {
 	onCopyLink: (comment: PageAnnotationComment) => void;
 	onCopyEmbed: (comment: PageAnnotationComment) => void;
 	/** Add this visual mark's crop to the Agent sidebar composer (#396). */
-	onAddToChat: (comment: PageAnnotationComment) => void;
+	onAddToChat?: (comment: PageAnnotationComment) => void;
 	onHover: (comment: PageAnnotationComment) => void;
 	onLeave: () => void;
 };
@@ -255,7 +255,7 @@ type CommentCardProps = {
 	onDelete: (comment: PageAnnotationComment) => void;
 	onCopyLink: (comment: PageAnnotationComment) => void;
 	onCopyEmbed: (comment: PageAnnotationComment) => void;
-	onAddToChat: (comment: PageAnnotationComment) => void;
+	onAddToChat?: (comment: PageAnnotationComment) => void;
 	onHover: (comment: PageAnnotationComment) => void;
 	onLeave: () => void;
 };
@@ -570,20 +570,24 @@ const CommentCard = memo(function CommentCard({
 							</Tooltip>
 						</>
 					) : null}
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<QuietIconButton
-								aria-label={t("pdfExplain.addToSidebarChat")}
-								onClick={(e) => {
-									e.stopPropagation();
-									onAddToChat(item);
-								}}
-							>
-								<MessageSquarePlus className="size-3.5" />
-							</QuietIconButton>
-						</TooltipTrigger>
-						<TooltipContent>{t("pdfExplain.addToSidebarChat")}</TooltipContent>
-					</Tooltip>
+					{onAddToChat && (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<QuietIconButton
+									aria-label={t("pdfExplain.addToSidebarChat")}
+									onClick={(e) => {
+										e.stopPropagation();
+										onAddToChat(item);
+									}}
+								>
+									<MessageSquarePlus className="size-3.5" />
+								</QuietIconButton>
+							</TooltipTrigger>
+							<TooltipContent>
+								{t("pdfExplain.addToSidebarChat")}
+							</TooltipContent>
+						</Tooltip>
+					)}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<QuietIconButton

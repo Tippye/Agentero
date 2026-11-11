@@ -1,6 +1,7 @@
 {
 	"$schema": "../gen/schemas/desktop-schema.json",
 	"identifier": "default",
+	"platforms": ["macOS", "windows", "linux"],
 	"description": "Capability for Agentero windows (main + ⌘N + settings + feature/doc popouts)",
 	"windows": ["main", "agentero-*", "settings", "feature-*", "doc-*"],
 	"permissions": [

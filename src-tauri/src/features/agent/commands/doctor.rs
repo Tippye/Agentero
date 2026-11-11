@@ -1,7 +1,7 @@
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::app::terminal::{open_terminal_agent_cli, open_terminal_confirm_login};
 use crate::core::error::{map_err, ApiResult};
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::features::agent::acp::client::{
     effective_local_agent_env, local_login_shell_env, resolve_command_in_agent_env,
 };
@@ -9,11 +9,12 @@ use crate::features::agent::doctor::{
     diagnose_host, install_node, HostDoctorReport, NodeInstallResult,
 };
 use crate::features::agent::doctor_agents::{diagnose_agents, AgentAcpDiagnostic};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::features::agent::registry::{interactive_cli, template_info};
 use crate::features::agent::{AgentRegistry, AgentWarmGate};
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::collections::HashMap;
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::path::Path;
 use tauri::{AppHandle, State};
 
@@ -68,7 +69,7 @@ pub async fn doctor_check_agents(
 }
 
 /// Open the template-owned CLI login command in a confirm-to-run terminal.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 #[specta::specta]
 pub fn doctor_open_agent_login_terminal(
@@ -104,7 +105,7 @@ pub fn doctor_open_agent_login_terminal(
 /// usually `detect_command` but can differ (Antigravity's `agy`). The command is
 /// resolved against the registered Agent env like
 /// [`doctor_open_agent_login_terminal`].
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 #[specta::specta]
 pub fn doctor_open_agent_cli_terminal(
@@ -131,7 +132,7 @@ pub fn doctor_open_agent_cli_terminal(
 
 /// Environment used to resolve a template login command: the registered Agent's
 /// merged env when one exists, otherwise the bare login-shell env.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn login_command_environment(
     registry: &AgentRegistry,
     template_id: &str,
@@ -156,7 +157,7 @@ fn login_command_environment(
 /// zsh config, so a bare `claude` / `codex` can miss `~/.local/bin` in PATH
 /// (issue #686). Returns the command unchanged when the binary is already
 /// absolute or cannot be resolved.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn resolve_login_command(command: &str, environment: &HashMap<String, String>) -> String {
     let mut tokens = command.split_whitespace();
     let Some(binary) = tokens.next() else {

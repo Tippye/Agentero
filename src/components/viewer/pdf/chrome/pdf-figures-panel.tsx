@@ -16,6 +16,8 @@ type PdfFiguresPanelProps = {
 	paperAbsPath?: string | null;
 	paperRelPath?: string | null;
 	showFigures: boolean;
+	/** Display synced regions without offering a local analysis workflow. */
+	canAnalyze?: boolean;
 	analyzing?: boolean;
 	/** Remote arXiv papers have no local PDF sidecar to replace. */
 	isRemotePaper?: boolean;
@@ -34,6 +36,7 @@ export const PdfFiguresPanel = memo(function PdfFiguresPanel({
 	paperAbsPath,
 	paperRelPath,
 	showFigures,
+	canAnalyze = true,
 	analyzing,
 	isRemotePaper = false,
 	onAnalyze,
@@ -47,15 +50,17 @@ export const PdfFiguresPanel = memo(function PdfFiguresPanel({
 			{/* Same row as the left toolbar (top-2 / h-7), right-aligned chips.
 			    Force re-parse sits immediately left of the overlay toggle. */}
 			<div className="absolute top-2 right-3 z-10 flex items-center gap-1">
-				<PdfForceLayoutButton
-					paperAbsPath={paperAbsPath}
-					paperRelPath={paperRelPath}
-					isRemotePaper={isRemotePaper}
-					className={cn(
-						"flex h-7 items-center rounded-lg p-0.5",
-						PDF_CHROME_CHIP,
-					)}
-				/>
+				{canAnalyze && (
+					<PdfForceLayoutButton
+						paperAbsPath={paperAbsPath}
+						paperRelPath={paperRelPath}
+						isRemotePaper={isRemotePaper}
+						className={cn(
+							"flex h-7 items-center rounded-lg p-0.5",
+							PDF_CHROME_CHIP,
+						)}
+					/>
+				)}
 				<FiguresOverlayToggle
 					documentId={documentId}
 					className={cn(
@@ -68,7 +73,7 @@ export const PdfFiguresPanel = memo(function PdfFiguresPanel({
 				documentId={documentId}
 				paperAbsPath={paperAbsPath}
 				paperRelPath={paperRelPath}
-				viewerReady
+				viewerReady={canAnalyze}
 				analyzing={analyzing}
 				onAnalyze={onAnalyze}
 				onJump={onJump}

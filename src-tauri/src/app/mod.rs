@@ -13,42 +13,126 @@ pub(crate) mod events_contract;
 mod handlers;
 mod logging;
 pub mod menu;
+pub(crate) mod remote_agent;
 pub mod vault_session;
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 pub mod finder_service;
 pub use crate::features::open_request;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 pub mod terminal;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 pub mod window;
 
+#[cfg(desktop)]
 use crate::features::agent::{AgentRegistry, AgentRunController};
 use crate::features::markdown::wiki::WikiIndexState;
 use crate::features::system::settings::AppSettingsStore;
 use crate::features::vault::rename::ExternalRenameRepairStore;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use crate::features::vault::watcher::FsWatchController;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use crate::integration::connector::ConnectorController;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use crate::integration::mcp::tunnel::McpTunnelController;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use crate::integration::mcp::McpController;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use crate::integration::remote::RemoteRegistry;
 // Used on every platform: the exit handler shuts down the agent warm pool.
 use std::sync::Arc;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use tauri::Emitter;
 use tauri::Manager;
+
+fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppError> {
+    let settings_store = AppSettingsStore::load();
+    let layout_backend = settings_store.layout_backend();
+    let import_concurrency = settings_store.batch_import_concurrency();
+    let translate_concurrency = settings_store.auto_translate_import_concurrency();
+    app.manage(settings_store);
+    let remote_agents = crate::features::remote_agent::RemoteAgentService::default();
+    let dsh_remote =
+        Arc::new(crate::integration::dsh_remote::provider::DshRemoteProvider::default());
+    remote_agents.register(dsh_remote.clone())?;
+    app.manage(dsh_remote);
+    app.manage(remote_agents);
+    app.manage(remote_agent::RemoteAgentAccounts::default());
+    app.manage(crate::integration::bridge::BridgeClientController::new());
+    app.manage(
+        crate::features::jobs::JobCenter::with_layout_backend(&layout_backend)
+            .with_import_concurrency(import_concurrency)
+            .with_layout_translate_concurrency(translate_concurrency),
+    );
+    app.manage(crate::features::paper::catalog::CapsCache::new());
+    app.manage(crate::app::vault_session::VaultHolders::new());
+    app.manage(WikiIndexState::new());
+    app.manage(crate::features::vault::doctor::DoctorDirtyPathsState::default());
+    app.manage(ExternalRenameRepairStore::new());
+    app.manage(crate::integration::sync::SyncService::default());
+    app.manage(crate::features::web::html_preview::HtmlPreviewGrants::default());
+
+    #[cfg(desktop)]
+    {
+        // Remote vault sessions are consumed by features (agent / import /
+        // trash) through inversion traits defined in the features themselves;
+        // register the registry both concretely (integration commands) and as
+        // each trait object (feature commands).
+        let remote_registry = Arc::new(RemoteRegistry::new());
+        app.manage(AgentRegistry::load());
+        app.manage(AgentRunController::new());
+        app.manage(Arc::new(
+            crate::features::agent::session::pool::AgentWarmPool::new(),
+        ));
+        app.manage(crate::features::agent::AgentWarmGate::new());
+        app.manage(crate::features::agent::PermissionGate::new());
+        app.manage(crate::features::agent::ElicitationGate::new());
+        app.manage(crate::features::agent::AskUserGate::new());
+        app.manage(crate::features::agent::delegate::DelegateBridge::new());
+        app.manage(crate::integration::bridge::BridgeController::new());
+        app.manage(FsWatchController::new());
+        app.manage(crate::features::paper::ingest::IngestQueue::default());
+        app.manage(Arc::new(ConnectorController::new()));
+        app.manage(crate::integration::word::WordController::default());
+        app.manage(Arc::new(McpController::new()));
+        app.manage(Arc::new(McpTunnelController::new()));
+        app.manage(remote_registry.clone());
+        app.manage(remote_registry.clone() as Arc<dyn crate::features::agent::RemoteAgentHosts>);
+        app.manage(
+            remote_registry.clone() as Arc<dyn crate::features::paper::import::RemoteImportOps>
+        );
+        app.manage(
+            remote_registry as Arc<dyn crate::features::vault::trash::remote_ops::RemoteTrashOps>,
+        );
+    }
+
+    #[cfg(mobile)]
+    {
+        app.manage(
+            Arc::new(crate::features::paper::import::remote_ops::LocalOnlyImports)
+                as Arc<dyn crate::features::paper::import::RemoteImportOps>,
+        );
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        app.manage(Arc::new(crate::core::telemetry::Telemetry::new()));
+        app.manage(crate::features::rtex::RtexSessions::new());
+    }
+
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Both ring and aws-lc-rs backends exist in the dependency tree; rustls
     // panics at connect time unless a process-wide default is installed.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let mut builder = tauri::Builder::default();
+    // Plugin callbacks can arrive before app setup. Keep these zero-I/O
+    // mailboxes alive from builder creation so early deep links are retained.
+    let mut builder = tauri::Builder::default()
+        .manage(crate::app::open_request::PendingVaultOpen::new())
+        .manage(crate::app::open_request::PendingUiRequest::new());
     if let Some(script) = agentero_core::perf::init_script() {
         builder = builder.append_invoke_initialization_script(script);
     }
@@ -134,74 +218,9 @@ pub fn run() {
             );
     }
 
-    let settings_store = AppSettingsStore::load();
-    let layout_backend = settings_store.layout_backend();
-    let import_concurrency = settings_store.batch_import_concurrency();
-    let translate_concurrency = settings_store.auto_translate_import_concurrency();
-    builder = builder
-        .manage(settings_store)
-        .manage(AgentRegistry::load())
-        .manage(AgentRunController::new())
-        .manage(std::sync::Arc::new(
-            crate::features::agent::session::pool::AgentWarmPool::new(),
-        ))
-        .manage(crate::features::agent::AgentWarmGate::new())
-        .manage(crate::features::agent::PermissionGate::new())
-        .manage(crate::features::agent::ElicitationGate::new())
-        .manage(crate::features::agent::AskUserGate::new())
-        .manage(crate::features::agent::delegate::DelegateBridge::new())
-        .manage(crate::integration::bridge::BridgeController::new())
-        .manage(crate::integration::bridge::BridgeClientController::new())
-        .manage(
-            crate::features::jobs::JobCenter::with_layout_backend(&layout_backend)
-                .with_import_concurrency(import_concurrency)
-                .with_layout_translate_concurrency(translate_concurrency),
-        )
-        .manage(crate::features::paper::catalog::CapsCache::new())
-        .manage(crate::app::vault_session::VaultHolders::new())
-        .manage(WikiIndexState::new())
-        .manage(crate::features::vault::doctor::DoctorDirtyPathsState::default())
-        .manage(ExternalRenameRepairStore::new())
-        .manage(crate::integration::sync::SyncService::default())
-        .manage(crate::app::open_request::PendingVaultOpen::new())
-        .manage(crate::app::open_request::PendingUiRequest::new())
-        .manage(crate::features::web::html_preview::HtmlPreviewGrants::default());
-
-    #[cfg(not(target_os = "ios"))]
-    {
-        // Remote vault sessions are consumed by features (agent / import /
-        // trash) through inversion traits defined in the features themselves;
-        // register the registry both concretely (integration commands) and as
-        // each trait object (feature commands).
-        let remote_registry = Arc::new(RemoteRegistry::new());
-        builder = builder
-            .manage(FsWatchController::new())
-            .manage(crate::features::paper::ingest::IngestQueue::default())
-            .manage(Arc::new(ConnectorController::new()))
-            .manage(crate::integration::word::WordController::default())
-            .manage(Arc::new(McpController::new()))
-            .manage(Arc::new(McpTunnelController::new()))
-            .manage(remote_registry.clone())
-            .manage(remote_registry.clone() as Arc<dyn crate::features::agent::RemoteAgentHosts>)
-            .manage(
-                remote_registry.clone() as Arc<dyn crate::features::paper::import::RemoteImportOps>
-            )
-            .manage(
-                remote_registry
-                    as Arc<dyn crate::features::vault::trash::remote_ops::RemoteTrashOps>,
-            );
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        builder = builder
-            .manage(Arc::new(crate::core::telemetry::Telemetry::new()))
-            .manage(crate::features::rtex::RtexSessions::new());
-    }
-
     builder = handlers::attach_handlers(builder);
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     {
         builder = builder.on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
@@ -223,11 +242,23 @@ pub fn run() {
     }
 
     builder = builder.setup(|app| {
+        // iOS already uses its private Library roots; retain them so existing
+        // paired profiles, settings, usage and feed databases keep their paths.
+        #[cfg(target_os = "android")]
+        crate::core::paths::initialize_app_directories(crate::core::paths::AppDirectories {
+            config: app.path().app_config_dir()?,
+            cache: app.path().app_cache_dir()?,
+            data: app.path().app_data_dir()?,
+        })?;
+        manage_state(app.handle())?;
         // Bundled ACP adapter tier (offline fallback): record the packaged
         // adapters root before any catalog scan / spawn path can consult it.
-        crate::features::agent::registry::bundled::init(app.handle());
-        app.state::<std::sync::Arc<crate::features::agent::delegate::DelegateBridge>>()
-            .start(app.handle().clone());
+        #[cfg(desktop)]
+        {
+            crate::features::agent::registry::bundled::init(app.handle());
+            app.state::<Arc<crate::features::agent::delegate::DelegateBridge>>()
+                .start(app.handle().clone());
+        }
         // JobCenter runner registry: business domains own their executors and
         // register them here at assembly time (P2 runner-registry refactor).
         // JobCenter itself lives in features/jobs, alongside the domains it
@@ -237,6 +268,7 @@ pub fn run() {
             crate::features::paper::analyze::refs::register_job_runners(&center);
             crate::features::paper::import::job_runners::register_job_runners(&center);
             crate::features::paper::analyze::layout::model_assets::register_job_runners(&center);
+            #[cfg(desktop)]
             crate::features::compile::register_job_runners(&center);
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             crate::features::jev::register_job_runners(&center);
@@ -253,12 +285,16 @@ pub fn run() {
             app.handle().clone(),
         ));
         let settings_store = app.state::<AppSettingsStore>();
+        #[cfg(desktop)]
         let agents = app.state::<AgentRegistry>();
-        let mut settings = settings_store
+        let settings = settings_store
             .get()
             .map(|result| result.settings)
             .unwrap_or_default();
+        #[cfg(desktop)]
+        let mut settings = settings;
         // Migrate the old Agent-only proxy once into the shared network setting.
+        #[cfg(desktop)]
         if !settings.network_proxy_enabled {
             if let Ok((enabled, url)) = agents.proxy_settings() {
                 if enabled {
@@ -275,12 +311,15 @@ pub fn run() {
         // one-shot proxy migration above so that migration `set` does not
         // fire reactions this boot sequence applies manually below.
         {
-            let handle = app.handle().clone();
-            settings_store.subscribe(move |s| {
-                let _ = handle
-                    .state::<AgentRegistry>()
-                    .set_proxy(s.network_proxy_enabled, s.network_proxy_url.clone());
-            });
+            #[cfg(desktop)]
+            {
+                let handle = app.handle().clone();
+                settings_store.subscribe(move |s| {
+                    let _ = handle
+                        .state::<AgentRegistry>()
+                        .set_proxy(s.network_proxy_enabled, s.network_proxy_url.clone());
+                });
+            }
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             {
                 let handle = app.handle().clone();
@@ -290,7 +329,7 @@ pub fn run() {
                     );
                 });
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(desktop)]
             {
                 let handle = app.handle().clone();
                 settings_store.subscribe(move |s| {
@@ -304,7 +343,7 @@ pub fn run() {
                     });
                 });
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(desktop)]
             {
                 let handle = app.handle().clone();
                 settings_store.subscribe(move |s| {
@@ -326,7 +365,7 @@ pub fn run() {
                     }
                 });
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(desktop)]
             {
                 let handle = app.handle().clone();
                 settings_store.subscribe(move |s| {
@@ -370,6 +409,7 @@ pub fn run() {
         )?;
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         crate::features::paper::import::refresh_parser_config(&settings_store);
+        #[cfg(desktop)]
         let _ = agents.set_proxy(
             settings.network_proxy_enabled,
             settings.network_proxy_url.clone(),
@@ -377,6 +417,7 @@ pub fn run() {
         // Prefetch PP-DocLayoutV3 into XDG as a JobCenter `modelDownload` job;
         // the tasks-panel projection shows progress, concurrent triggers dedupe.
         // Perf runs skip it so a startup measurement is not mixed with a download.
+        #[cfg(desktop)]
         if !agentero_core::perf::enabled() {
             crate::features::paper::analyze::layout::model_assets::spawn_background_download(
                 app.handle().clone(),
@@ -391,18 +432,19 @@ pub fn run() {
             }
         }
         // Ensure registry is loaded early.
+        #[cfg(desktop)]
         let _ = app.state::<AgentRegistry>();
         let _ = app.state::<WikiIndexState>();
         let _ = app.state::<crate::features::vault::doctor::DoctorDirtyPathsState>();
         let _ = app.state::<ExternalRenameRepairStore>();
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(desktop)]
         {
             let connector = app.state::<Arc<ConnectorController>>();
             connector.set_app_handle(app.handle().clone());
             let remote = app.state::<Arc<RemoteRegistry>>();
             connector.set_remote_registry(Arc::clone(&remote));
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(desktop)]
         {
             let mcp = app.state::<Arc<McpController>>();
             crate::integration::mcp::attach_app(&mcp, app.handle().clone());
@@ -411,7 +453,7 @@ pub fn run() {
             ));
             mcp.set_paper_note_mode(settings.paper_note_mode.clone());
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(desktop)]
         {
             let tunnel = app.state::<Arc<McpTunnelController>>();
             tunnel.set_app_handle(app.handle().clone());
@@ -488,6 +530,7 @@ pub fn run() {
         }
 
         // Auto sync: resume background schedulers for configured vaults.
+        #[cfg(desktop)]
         app.state::<crate::integration::sync::SyncService>()
             .start_all(app.handle());
 
@@ -532,7 +575,7 @@ pub fn run() {
         });
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     {
         builder = builder.on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -601,16 +644,22 @@ pub fn run() {
                 event,
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
-                app.state::<Arc<crate::features::agent::session::pool::AgentWarmPool>>()
-                    .shutdown();
-                app.state::<Arc<crate::features::agent::delegate::DelegateBridge>>()
-                    .shutdown();
-                #[cfg(not(target_os = "ios"))]
+                #[cfg(desktop)]
+                {
+                    app.state::<Arc<crate::features::agent::session::pool::AgentWarmPool>>()
+                        .shutdown();
+                    app.state::<Arc<crate::features::agent::delegate::DelegateBridge>>()
+                        .shutdown();
+                }
+                let _ = app
+                    .state::<crate::integration::bridge::BridgeClientController>()
+                    .disconnect();
+                #[cfg(desktop)]
                 app.state::<Arc<ConnectorController>>().stop();
                 // The MCP HTTP listener and the ChatGPT tunnel child are both
                 // desktop-only; stop them here so port 8765/8080 are released
                 // when the app quits. This matches Connector/Bridge behavior.
-                #[cfg(not(target_os = "ios"))]
+                #[cfg(desktop)]
                 {
                     app.state::<Arc<McpController>>().stop_server();
                     app.state::<Arc<McpTunnelController>>().stop();
@@ -618,6 +667,7 @@ pub fn run() {
                 // Close the mobile relay rather than letting the socket die with
                 // the process, so paired clients see a clean shutdown. `stop`
                 // takes the runtime, so the second call in this arm is a no-op.
+                #[cfg(desktop)]
                 let _ = app
                     .state::<crate::integration::bridge::BridgeController>()
                     .stop();
@@ -629,6 +679,7 @@ pub fn run() {
                     .stop_all();
             }
             // Best-effort final push (bounded); only on Exit so it runs once.
+            #[cfg(desktop)]
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<crate::integration::sync::SyncService>()
                     .flush_on_exit(app);

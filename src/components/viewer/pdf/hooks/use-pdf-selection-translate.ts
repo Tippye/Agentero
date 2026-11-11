@@ -49,6 +49,8 @@ import {
 import type { PdfTranslateRecord } from "@/lib/pdf/translate/types";
 
 export type UsePdfSelectionTranslateOptions = {
+	/** Gates both manual and automatic selection translation. */
+	enabled?: boolean;
 	isActive: boolean;
 	/** Sidecar root for `marks/<id>.json` (null for loose PDFs — nothing persists). */
 	paperAbsPath: string | null;
@@ -93,6 +95,7 @@ export type PdfSelectionTranslate = {
 };
 
 export function usePdfSelectionTranslate({
+	enabled = true,
 	isActive,
 	paperAbsPath,
 	paperRelPath,
@@ -106,6 +109,8 @@ export function usePdfSelectionTranslate({
 	activeSessionRef,
 }: UsePdfSelectionTranslateOptions): PdfSelectionTranslate {
 	const { t } = useTranslation("viewer");
+	const enabledRef = useRef(enabled);
+	enabledRef.current = enabled;
 	const tRef = useRef(t);
 	tRef.current = t;
 	const [translateStreaming, setTranslateStreaming] = useState(false);
@@ -266,6 +271,7 @@ export function usePdfSelectionTranslate({
 
 	const translateSelection = useCallback(
 		(anchor: PdfAskAnchor) => {
+			if (!enabledRef.current) return;
 			const quote = anchor.quote?.trim();
 			if (!quote || !isActive) return;
 			stopTranslateSession();

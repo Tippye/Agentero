@@ -12,11 +12,13 @@ import { normalizeHighlightColor } from "@/lib/pdf/highlight/palette";
 
 /** Smart-highlight job submission, result application, and subscription lifetime. */
 export function usePdfSmartHighlights({
+	enabled = true,
 	vaultPath,
 	paperRelPath,
 	createHighlights,
 	t,
 }: {
+	enabled?: boolean;
 	vaultPath: string | null;
 	paperRelPath: string | null;
 	createHighlights: PdfHighlights["createHighlights"];
@@ -113,7 +115,7 @@ export function usePdfSmartHighlights({
 	}, [jevJobId, applyJevHighlights, t]);
 
 	const handleSmartHighlight = useCallback(async () => {
-		if (!vaultPath || !paperRelPath) return;
+		if (!enabled || !vaultPath || !paperRelPath) return;
 		try {
 			const snapshot = await callApiResult(() =>
 				commands.jobJevSmartHighlightsEnqueue({
@@ -125,7 +127,7 @@ export function usePdfSmartHighlights({
 		} catch (err) {
 			notifyError(errorText(err));
 		}
-	}, [vaultPath, paperRelPath]);
+	}, [enabled, vaultPath, paperRelPath]);
 
 	return { smartHighlightBusy, handleSmartHighlight };
 }

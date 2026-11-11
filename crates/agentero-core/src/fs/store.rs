@@ -22,6 +22,26 @@ use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::Mutex;
+
+static FILE_MUTATION: Mutex<()> = Mutex::new(());
+
+/// Serialize cooperating in-process file mutations, including the current-content
+/// check and its replacement/deletion. Keep closures to short local IO; never
+/// await, perform network work, or acquire this lane recursively inside them.
+/// [`atomic_write`] deliberately does not acquire the lane, so it can be used
+/// within a guarded operation without deadlocking.
+///
+/// External editors and other processes do not take this mutex. This is not an
+/// OS compare-and-swap guarantee against their writes or symlink changes.
+pub fn with_file_mutation<T>(
+    operation: impl FnOnce() -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let _guard = FILE_MUTATION
+        .lock()
+        .map_err(|_| AppError::message("file mutation lane poisoned"))?;
+    operation()
+}
 
 /// Options for [`atomic_write_with`] / [`json_store_with`].
 #[derive(Debug, Clone, Default)]
@@ -172,6 +192,66 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["notes.md".to_string()]);
+    }
+
+    #[test]
+    fn staged_sync_replacement_orders_editor_check_and_preserves_both_late_writes() {
+        use std::sync::mpsc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("annotations.json");
+        let conflict = dir.path().join("annotations (conflict editor).json");
+        let base = b"[\"base\"]";
+        let remote = b"[\"base\",\"remote\"]";
+        let editor = b"[\"base\",\"editor\"]";
+        fs::write(&path, base).unwrap();
+        let (staged_tx, staged_rx) = mpsc::channel();
+        let (replace_tx, replace_rx) = mpsc::channel();
+        let (editor_tx, editor_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let sync_path = &path;
+            let sync = scope.spawn(move || {
+                with_file_mutation(|| {
+                    assert_eq!(fs::read(sync_path)?, base);
+                    let mut staged = create_temp(sync_path, &AtomicOpts::default())?;
+                    staged.write_all(remote)?;
+                    // Pause after staging but before rename: the historical race
+                    // allowed a plugin-fs editor write to be lost in this gap.
+                    staged_tx.send(()).unwrap();
+                    replace_rx.recv().unwrap();
+                    replace_with(staged, sync_path)?;
+                    Ok(())
+                })
+                .unwrap();
+            });
+            staged_rx.recv().unwrap();
+            let editor_path = &path;
+            let conflict_path = &conflict;
+            let writer = scope.spawn(move || {
+                assert!(FILE_MUTATION.try_lock().is_err());
+                editor_tx.send(()).unwrap();
+                with_file_mutation(|| {
+                    // A stale viewer checks its own base only after sync has
+                    // published. Preserve its exact late proposal as a conflict.
+                    assert_eq!(fs::read(editor_path)?, remote);
+                    assert_ne!(fs::read(editor_path)?, base);
+                    atomic_write(conflict_path, editor)?;
+                    Ok(())
+                })
+                .unwrap();
+            });
+            editor_rx.recv().unwrap();
+            assert_eq!(fs::read(&path).unwrap(), base);
+            assert!(!conflict.exists());
+            replace_tx.send(()).unwrap();
+            sync.join().unwrap();
+            writer.join().unwrap();
+        });
+
+        assert_eq!(fs::read(path).unwrap(), remote);
+        assert_eq!(fs::read(conflict).unwrap(), editor);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 
     #[test]

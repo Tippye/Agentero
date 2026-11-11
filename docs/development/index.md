@@ -17,8 +17,8 @@
 | [usage-analytics.md](usage-analytics.md) | \#239 Activity 总线。P0 存储已落地：XDG `usage.sqlite`（见 [../backend/usage.md](../backend/usage.md)） |
 | [decision-layer.md](decision-layer.md) | 通用决策层：规则 / System One（jEV/Clef）/ LLM 统一为可插拔 provider + routing。**已落地**（见 [../backend/decision.md](../backend/decision.md)），保留为设计记录 |
 | [A2A.md](A2A.md) | 第一版是本机 Agent 经已连接的远程 Vault SSH 委派远端 CLI Agent。完整 Agent Card + Task 仍是草稿 |
-| [tablet-shared.md](tablet-shared.md) | 平板端（Android 平板 / iPad）实施方案的共享部分（在 `mobile` 分支维护）：本地 Vault、同步、可扩展远程 Agent、手写、多窗口；仅 Android 申请后台常驻。平台篇 `tablet-android.md`、`tablet-ios.md` 分别在 `android`、`ios` 分支。**设计稿，待评审** |
-| [tablet-ios.md](tablet-ios.md) | 平板端实施方案的 iOS / iPadOS 篇：工程配置、存储与 Keychain、后台任务、分屏与多窗口、Apple Pencil、发布。**设计稿，待评审** |
+| [tablet-shared.md](tablet-shared.md) | 平板端（Android 平板 / iPad）实施方案的共享部分（在 `mobile` 分支维护）：本地 Vault、同步、可扩展远程 Agent、手写、多窗口；仅 Android 申请后台常驻。平台篇 `tablet-android.md`、`tablet-ios.md` 分别在 `android`、`ios` 分支。**开发中**，完成范围与未验收项见共享篇实施进度表 |
+| [tablet-ios.md](tablet-ios.md) | 平板端实施方案的 iOS / iPadOS 篇：工程配置、存储与 Keychain、后台任务、分屏与多窗口、Apple Pencil、发布。**开发中**，实际完成范围见平台篇开头 |
 
 macOS 签名与公证（已实现流程说明）在 [`../test/macos-signing.md`](../test/macos-signing.md)。
 
