@@ -1,0 +1,242 @@
+# 平板端实施方案：Android 篇
+
+> 状态：**设计稿，未实现，待评审**。基线 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2），行号对应该提交。
+> 两端共用的部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`android` 基于 `mobile`，这里只写 Android 特有工作；文中 S0–S9 指共享篇工作项。本次仅修改方案，应用配置尚未实施。
+
+## 1. 结论
+
+- 目标是 Android 平板和折叠屏展开态；手机继续可用，只用窄档布局。
+- **Android 现在连伴侣端都跑不通。** Bridge 客户端命令没有注册，配置目录也没有适配。这两项是 M0 的第一件事（A1、A2）。
+- **决策 2（申请权限后常驻后台）在 Android 上可以实现**：前台服务加常驻通知，引导用户关闭电池优化。做法参考 DSH Go 和 ds-harness-remote 的 Android 客户端（A5）。它不是绝对保证，部分厂商系统在息屏后仍会冻结应用。
+- 窗口缩放（分屏、自由窗口、折叠）由共享篇的三档布局覆盖，清单只需小改。「在新窗口打开论文」要做技术验证（A6）。
+- 手写先验证 WebView 路线；不达标时 Android 有现成的 Jetpack Ink 库可用，而且让手指穿透到 WebView 比 iOS 容易（A7）。
+
+## 2. 现状
+
+| 项 | 现状 | 位置 |
+|---|---|---|
+| 工程 | 生成的 Android 工程在仓库里（与 iOS 不同），清单和 Gradle 直接改这里 | `src-tauri/gen/android/` |
+| 版本 | minSdk 24，targetSdk / compileSdk 36；AGP 8.11.0、Kotlin 1.9.25、Gradle 8.14.3 | `src-tauri/gen/android/app/build.gradle.kts:31`、`src-tauri/gen/android/build.gradle.kts` |
+| 清单 | 权限只有联网和相机；单个 Activity，`singleTask`；已声明处理屏幕尺寸等配置变化；`agentero://` 链接 | `src-tauri/gen/android/app/src/main/AndroidManifest.xml` |
+| Activity | 只开启了全面屏 | `src-tauri/gen/android/app/src/main/java/com/poco_ai/agentero/MainActivity.kt` |
+| 命令 | 走 `not(ios)` 分支，注册的是 Bridge Host 命令；前端调用的客户端命令未注册 | `src-tauri/src/app/handlers.rs:173`、`:196`、`:333` |
+| 目录 | 落到 `$HOME/.config`、`.cache`、`.local/share`，没有用应用私有目录 | `crates/agentero-core/src/paths.rs:27` |
+| 密钥 | Bridge 身份是权限 0600 的 JSON 文件 | `src-tauri/src/integration/bridge/identity.rs:285`–`:305` |
+| 备份规则 | 未设置 | 清单 |
+| 文件共享 | `FileProvider` 暴露了整个外部存储根目录和缓存目录 | `src-tauri/gen/android/app/src/main/res/xml/file_paths.xml` |
+| 返回键 | 移动壳没有处理返回 | `src/components/mobile/` |
+| CI 与发布 | PR 上检查 `aarch64-linux-android` 的 Rust 编译；发版时构建签名 APK 放进 GitHub Release 草稿 | `.github/workflows/ci.yml:82`、`.github/workflows/release.yml:253` |
+
+CI 的编译检查发现不了命令注册错配，因为前端是按字符串调用的（共享篇 S0 会把它们接入类型绑定）。
+
+## 3. 平台工作项
+
+### A1 工程与配置
+
+- **命令与状态**：按共享篇 S0 收敛。Android 当前比 iOS 多一层问题——除了命令注册错，`app/mod.rs:170` 还初始化了文件监听、连接器、Word、MCP、SSH 远程这些桌面状态。
+- **更新工程模板**。Tauri 2.12 的模板已升到 Kotlin 2.2 和新版 Gradle 插件，仓库里还是 Kotlin 1.9.25。在加入 Kotlin 代码和 Jetpack 库之前，先用 `tauri android init` 更新模板并合并已有改动（签名配置、相机权限、`MainActivity`）。
+- **最低版本定为 Android 13（API 33）**，以体验与功能优先，不承担旧系统适配。Android 13 的 `MotionEvent.FLAG_CANCELED` 可识别掌触取消，配合已有多窗口能力形成手写与布局基线。这个选择是产品支持范围，不能说 Ink 库强制要求 Android 13：已核对 Ink authoring 1.0.0 的 minSdk 为 23、graphics-core 1.0.4 为 21。实施时同步更新 Gradle minSdk、Tauri Android 配置、CI 的 NDK 编译 API（当前 `.github/workflows/ci.yml:109` 是 24）和发布检查；target/compileSdk 与最低版本分开管理。
+- Android 14 的用户发起传输、`specialUse` 服务类型以及 Android 15+ 的超时规则按版本分支处理；Android 13 用其适用的前台服务声明和启动方式。系统版本达标也必须检查 WebView、手写笔及设备性能。
+- **清单改动汇总**：
+
+  | 改动 | 用途 | 归属 |
+  |---|---|---|
+  | 权限：`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE`、`FOREGROUND_SERVICE_DATA_SYNC`、`POST_NOTIFICATIONS`、`WAKE_LOCK`、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | 后台保活 | A5 |
+  | 权限：`ACCESS_NETWORK_STATE` | 网络变化后立即重连 | A9 |
+  | 保活服务声明（带类型和用途说明） | 后台保活 | A5 |
+  | 意图过滤器：打开 PDF、接收分享的 PDF / 文本 / 图片 | 导入 | A4 |
+  | `configChanges` 增加 `density`、`fontScale`、`layoutDirection` | 换屏、接显示器时不重建 Activity | A6 |
+  | Activity 的最小窗口尺寸 | 自由窗口下不被拖得过小 | A6 |
+  | 备份规则 | 排除密钥、缓存和可重新下载的 PDF | A2、A3 |
+
+- **本地插件**：共享篇第 5 节的 `agentero-mobile` 插件，Android 侧用 Kotlin 实现。
+- CPU 架构：发版目前只出 arm64。x86_64 只在模拟器和少数设备上需要，按需加进发版矩阵。
+
+### A2 路径与存储
+
+- **配置、缓存、数据目录**：`paths.rs` 已经优先读 `XDG_CONFIG_HOME`、`XDG_CACHE_HOME`、`XDG_DATA_HOME`。最小改动是在 `MainActivity.onCreate` 里、Rust 初始化之前，把这三个环境变量设成应用私有的文件目录和缓存目录。必须在原生库加载前设置，因为设置读取发生在 Tauri `setup` 之前（`src-tauri/src/app/mod.rs:137`）。如果实测时序不可靠，退回到在 Rust 里通过 JNI 取目录。
+- **Vault 位置**：应用私有内部存储下的 `vault/`。其他应用看不到，卸载即删除。
+- **对系统文件应用可见**（对应共享篇 D4）：实现一个文档提供器，把 Vault 目录暴露给系统「文件」应用，读写都经它。放在 M5；在那之前靠导出和分享。
+- **备份**：设置备份规则。密钥密文必须排除——它们绑定在本机密钥库上，恢复到另一台设备后无法解密。缓存和可重新下载的 PDF 也排除；笔记和标注保留。
+- 不申请全盘存储权限，不直接读写公共目录。
+
+### A3 密钥存储
+
+- 在系统密钥库里生成一把不可导出的 AES 密钥，用它加密凭据后存到应用私有目录。迁入：Bridge 身份与配对资料、同步凭据、远程 Agent 的设备私钥与令牌、主机公钥固定表。
+- 已有的 JSON 身份文件首次启动时迁移并删除。
+- 密钥不要求用户每次解锁验证，否则后台同步读不到。
+
+### A4 导入、分享、导出
+
+| 入口 | 做法 |
+|---|---|
+| 应用内选文件 | 系统文件选择器，返回的是 `content://` 地址，不是文件路径。`tauri-plugin-dialog` 和 `tauri-plugin-fs` 已是依赖，先验证它们能否直接读这种地址；不能就在本地插件里读流并复制进 Vault |
+| 「打开方式」 | 为 PDF 加查看意图过滤器。Tauri 2.11 起移动端文件关联会触发 `RunEvent::Opened` |
+| 系统分享 | 加接收分享的意图过滤器（单个和多个）。主 Activity 是 `singleTask`，分享会走到已有实例。在插件里把流复制到收件箱目录，再通知前端入队。立即复制，不长期持有对方的地址授权 |
+| 导出 | 「另存为」走系统的创建文档界面；分享走 `FileProvider` |
+| 扫描纸质文档 | 后置。常用的文档扫描组件依赖 Google 服务，国内设备上不可用 |
+
+顺带收紧 `file_paths.xml`：现在暴露的是整个外部存储根目录，改成只暴露一个专用的导出目录。
+
+### A5 后台保活与通知
+
+**仅 Android 提供常驻申请**。设置里新增「后台运行」页，由用户主动开启，展示通知、电池优化和厂商限制的实际状态；拒绝授权后仍可前台使用。iOS 不出现这个入口。
+
+已从 DSH Go 部分克隆按需取回并阅读 `DshService.kt`、`PetOverlayService.kt`、`background_guide_page.dart`、`background_net.dart`（固定版本 `74e1faa`）。可借鉴的是前台通知、退出释放唤醒锁、网络受限检测、回到设置后刷新状态，以及厂商设置页不可用时退回应用详情页。原服务面向本机引擎或悬浮宠物，其用途说明不适用于 Agentero；本方案不引入本机 Agent、悬浮窗、root、Shizuku 或无障碍权限，也不复制 AGPL 实现。
+
+设置页提供以下引导：
+
+1. 允许通知（Android 13 起要运行时申请）。
+2. 关闭电池优化（跳到系统的豁免确认框）。
+3. 厂商系统的自启动和后台限制、在最近任务里锁定应用——这些没有统一接口，只能给出分品牌的操作说明。
+
+**机制**：
+
+| 场景 | 做法 | 说明 |
+|---|---|---|
+| 用户开启后台运行且远程 Agent 会话进行中 | Android 14+ 拟用 `specialUse` 前台服务，声明真实的远程会话用途；常驻通知含「停止」按钮；必要时持有部分唤醒锁并在结束时释放 | 类型选择需与实际用途、分发规则验证；不能照抄 DSH Go 的本机引擎/宠物用途，也不能把 `remoteMessaging` 当通用保活类型 |
+| 同步、批量下载进行中 | 独立的 `dataSync` 前台服务，与 Agent 保活分开计数和停止 | Android 15+ 的相关目标版本受每 24 小时累计 6 小时限制；超时必须落盘并停止，不假定任务一定能在配额内完成 |
+| 应用不在运行时的定期同步 | 系统的延迟任务调度，最短间隔 15 分钟，具体时机由系统决定 | 任务被唤起时没有界面，需要通过 JNI 直接调用同步入口（共享篇 S3 第 1 点）。与正在运行的应用靠 Vault 同步锁互斥。可行性在 M2 开头验证；不行就只在应用存活时同步 |
+| 用户发起的大批量下载（Android 14 起） | 可选：用户发起的数据传输任务 | 系统为它显示通知，受限更少。作为前台服务之外的备选 |
+
+**服务生命周期**：
+
+- 由共享篇的保活接口驱动：持有的令牌数从 0 变 1 时启动，回到 0 时停止。
+- 只在应用可见时启动。Android 12 起从后台启动前台服务受限；用户已关闭电池优化是豁免条件之一，但不依赖它。
+- 用户把应用从最近任务划掉，服务随之停止。远端主机上的任务不受影响，下次打开后重连取结果。
+- 连接本身在 Rust 里，前台服务的作用是让进程保持前台优先级。WebView 的脚本在后台可能被节流，不影响连接。
+- 每 25 秒做一次带超时的探活（与上游一致），断线后有限次数重连；重连用尽就停止服务并发一条通知。
+- 通知种类按共享篇 S8，各自独立的通知渠道，用户可以单独关闭。锁屏只显示泛化文案。
+
+**做不到的**，要写进用户文档：
+
+- 部分厂商系统在息屏后会冻结应用并切断它的连接，即使前台服务和唤醒锁都在。ds-harness-remote 的开发记录里有小米设备息屏约 6 秒后被冻结的实测。所以保活是尽力而为，远端任务本身不会丢，亮屏后自动重连。
+- 如果以后上架 Google Play：`specialUse` 类型要在上架时说明用途并接受审核；直接弹出电池优化豁免请求只允许用于核心功能确实受影响的应用。目前是侧载 APK，不受这两条约束（D-And-3）。
+
+**技术验证（M0）**：主 Activity 被销毁而服务还在时，Rust 运行时和连接是否存活；重新进入时会不会重复初始化。结论决定「划掉即停止」是策略选择还是硬性限制。
+
+### A6 分屏与多窗口
+
+**窗口缩放**（必须支持）：
+
+- targetSdk 已是 36。Android 16 在最小宽度不小于 600dp 的屏幕上会忽略应用对方向、宽高比和可缩放性的限制，所以应用一定会被放进分屏和自由窗口。
+- 清单已声明自行处理屏幕尺寸变化，缩放时 Activity 不会重建，WebView 状态保留。补上 `density` 等几项，避免拖到另一块屏幕时重建。
+- 分屏时本应用可能可见但不是当前焦点窗口。视频、相机这类独占资源我们没有，主要影响是键盘快捷键只在获得焦点时生效。
+- 折叠屏展开和合上会让宽度跨档，由共享篇 S4 的三档布局处理。
+- 设置最小窗口尺寸。
+
+**多窗口**（「在新窗口打开论文」）：
+
+- Tauri 2.11 起，在 Android 上新建窗口会创建一个新的 Activity，tao 提供了选择 Activity 的构建方法，摆放位置由系统决定。有两种形态：
+  - 独立任务窗口：新 Activity 作为单独的任务启动，并请求放到相邻窗口。在分屏和自由窗口模式下，两篇论文各占一个可独立缩放的系统窗口，最近任务里各有一项。**这是目标形态。**
+  - Activity 嵌入：两个 Activity 并排在同一个任务窗口里，需要 Android 12L 以上的大屏设备和 Jetpack WindowManager 的分栏规则。应用内的并排已经由 S4 的布局提供，这种形态增益不大，不做。
+- 主 Activity 保持 `singleTask`（链接和分享要回到同一个实例），文档窗口用另一个 Activity 类。
+- 每个窗口一个 WebView，各自加载一份 PDF 渲染引擎。先量内存再定窗口上限。
+- 系统会在后台销毁 Activity。按窗口标签落盘路由，重建时恢复（共享篇 S7）。
+- **M0 技术验证的出口条件**：在平板上打开第二个窗口并与主窗口并排；两个窗口各自调用命令、各自收到事件；旋转、缩放、切到后台再回来后状态不丢。tao 的构建方法不够用时，在本地插件里用 Kotlin 启动文档 Activity。验证不通过则多窗口后置，窗口缩放不受影响。
+
+### A7 手写笔
+
+数据格式、存储、同步、显示都在共享篇 S6。这里只定输入层。
+
+**先验证路线 A（WebView 指针事件）**，M0 在至少两台不同厂商的平板上实测：
+
+- 笔尖到墨迹的延迟；
+- 压力、倾角、合并事件、预测事件的可用性和采样率；
+- 掌触：系统判定为手掌的触摸会被取消。要确认 WebView 是否把它转成指针取消事件；能收到就在收到时撤销这一笔，收不到则路线 A 不成立。
+
+**路线 A 不达标时用路线 B**：在 WebView 上盖一个 Jetpack Ink 的书写视图。Ink 库 1.0.0 已是稳定版，提供低延迟的落笔渲染。Activity 是视图体系，用它的 View 版本，不引入 Compose。
+
+- 书写层在触摸按下时按工具类型分流：手写笔和橡皮端由它处理，手指触摸不消费，落到下面的 WebView，滚动和缩放照常。
+- 落笔结束后把输入点（坐标、时间、压力、倾角、方位）交给前端，换算到 PDF 页面坐标并按共享格式保存，然后清空原生层。不用 Ink 库自带的存储格式。
+- 前端把当前页面的缩放和偏移同步给书写层，保证落笔位置和页面对齐。
+
+两条路线共有：
+
+- 笔的橡皮端和侧键映射为橡皮和套索；没有这些硬件时用工具栏。
+- 悬停只作增强。
+- 厂商专属能力（例如 S Pen 的隔空手势）不做。
+- 系统的「记事」角色和锁屏快速记事入口不做。
+
+### A8 WebView 与输入
+
+- **WebView 版本**：前端用 Tailwind CSS 4，要求 Chrome 111 以上。系统 WebView 可独立更新，但没有 Google 服务的设备上版本可能偏旧。启动时检查版本，过旧就给出明确提示，不让用户面对错乱的界面。
+- **返回手势**：移动壳目前没有处理返回，在阅读页按返回可能直接退出应用。用 Tauri 2.9 起提供的返回键事件接到移动壳的导航栈：先关弹层，再从阅读页回文献库，到根页面才退出。现有的左缘滑动返回（`src/components/mobile/mobile-gestures.tsx:73`）和系统的边缘返回手势重叠，在 Android 上停用它，统一交给系统手势。
+- **软键盘**：`MainActivity` 开了全面屏，键盘弹出时窗口不会自动让位。要么把键盘高度传给前端，要么确认可视视口接口在这种模式下给出正确的值——M1 开头验证。
+- **外接键盘和鼠标**：快捷键走 Web 键盘事件；有鼠标或触控板时保留悬停菜单和右键菜单。
+- **进程被杀后的恢复**：按落盘的路由恢复到原论文原位置；草稿靠自动保存（共享篇 S2）。
+
+### A9 远程 Agent 的 Android 部分
+
+- 默认使用 ds-harness-remote，通过 `mobile` 的 provider 契约接入。前台服务只感知统一连接和任务状态，不绑定 DSH 的消息结构；新增 provider 无需重写保活与通知。能力不足时返回明确的不支持状态。
+- 监听网络变化（Wi-Fi 与蜂窝切换、网络恢复），通知 Rust 立即重连，不等心跳超时。
+- 账号登录在系统浏览器里完成。上游的浏览器登录流程靠轮询取结果，不需要回跳链接；需要时可用已注册的 `agentero://`。
+- 发版构建禁用了明文流量，这只约束 WebView 和 Java 网络栈。远程 Agent 的连接由 Rust 发起，共享篇已规定明文 HTTP 只允许回环和私网地址。
+- 扫码配对复用现有的相机权限。
+
+### A10 分发
+
+- 沿用现状：签名 APK 随版本放进 GitHub Release。没有应用内更新（更新插件只在桌面注册），在设置里显示当前版本和下载页入口。
+- 新增的权限会在安装和首次使用时出现，发布说明里逐项解释用途。
+- 用同一把签名密钥，保证覆盖安装。
+
+## 4. 里程碑中的 Android 部分
+
+| 里程碑 | Android 工作 |
+|---|---|
+| M0 | A1（命令注册、模板更新、插件骨架）；A2 的目录修复；A3；三项技术验证：A5 的 Activity 销毁后运行时存活、A6 多窗口、A7 手写路线 A |
+| M1 | A2 的 Vault 与备份规则；A4 的选文件与「打开方式」；A8 |
+| M2 | A5 的同步前台服务与定期同步 |
+| M3 | A5 的 Agent 保活、通知、「后台运行」设置页；A9 |
+| M4 | A7 定型（路线 A 或 B）、橡皮端与侧键 |
+| M5 | A6 多窗口落地；A4 的系统分享；A2 的文档提供器；A10 |
+
+## 5. 真机验收
+
+设备与系统：
+
+- 一台原生系统平板（Android 16）、一台三星平板（S Pen、DeX）、一台小米或其他国内厂商平板（后台限制严格，可能没有 Google 服务）、一台折叠屏、一台手机（回归）。
+- 覆盖 Android 13（最低版本）、14（服务类型与数据传输）、15（超时限制）、16（大屏窗口规则），发布时再覆盖当时最新稳定系统；低于 API 33 的设备不进入支持矩阵。
+
+清单：
+
+1. 首次启动进入本地 Vault；Bridge 配对、恢复、数据请求都能完成。
+2. 飞行模式下导入、阅读、高亮、写笔记；杀进程后内容都在。
+3. 分屏、自由窗口、折叠与展开、旋转后，页码、缩放、草稿不变，Activity 没有重建。
+4. 两个窗口并排读两篇论文；后台被回收后恢复到原位置。
+5. 发出 Agent 任务后息屏 1、5、15 分钟：记录连接是否保持；断开的情况下亮屏后自动重连并补齐结果。分别在默认省电和关闭电池优化两种设置下测。
+6. 划掉应用后保活通知消失，唤醒锁释放；再次打开能取回远端结果。
+7. 同步进行中切到后台，同步完成或从断点继续；Wi-Fi 与蜂窝切换不产生重复上传。
+8. 手写：缩放和旋转后笔迹不偏；手掌搁屏不误触也不留下笔迹；橡皮端可用。
+9. 从浏览器和文件管理器分享 PDF、链接到 Agentero，回到应用后已入库。
+10. 返回手势逐级返回，不会从阅读页直接退出。
+11. WebView 版本过旧的设备上出现提示而不是错乱界面。
+
+## 6. 待决事项
+
+| # | 事项 | 建议 |
+|---|---|---|
+| D-And-1（已定） | 体验与功能优先的最低版本 | Android 13 / API 33，实施时同步构建配置和 CI |
+| D-And-2 | Vault 是否通过文档提供器对系统文件应用可见 | 可见，放在 M5 |
+| D-And-3 | 是否上架 Google Play | 暂不上架。上架会让 `specialUse` 前台服务和电池优化豁免请求进入审核范围 |
+| D-And-4 | 划掉应用后是否继续保活 | 不继续。行为可预期，远端任务不受影响 |
+| D-And-5 | 是否支持 HarmonyOS NEXT 等不兼容 Android 应用的系统 | 不在范围内 |
+
+## 7. 参考
+
+- 共享部分：[tablet-shared.md](tablet-shared.md)
+- DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
+- ds-harness-remote 的 Android 前台服务与保活实测记录（`apps/android/plugins/`、`docs/TODO.md`）：<https://github.com/liguobao/ds-harness-remote>
+- 前台服务类型：<https://developer.android.com/develop/background-work/services/fgs/service-types>
+- 前台服务超时：<https://developer.android.com/develop/background-work/services/fgs/timeout>
+- 从后台启动前台服务的限制：<https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start>
+- 低电耗模式与电池优化豁免：<https://developer.android.com/training/monitoring-device-state/doze-standby>
+- 用户发起的数据传输：<https://developer.android.com/develop/background-work/background-tasks/uidt>
+- 多窗口：<https://developer.android.com/develop/ui/compose/layouts/adaptive/support-multi-window-mode>
+- Activity 嵌入：<https://developer.android.com/develop/ui/views/layout/activity-embedding>
+- 手写笔进阶特性：<https://developer.android.com/develop/ui/views/touch-and-input/stylus-input/advanced-stylus-features>
+- Ink 库：<https://developer.android.com/jetpack/androidx/releases/ink>
+- 文档与文件访问：<https://developer.android.com/training/data-storage/shared/documents-files>
+- 预测性返回：<https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture>
+- Tailwind CSS 浏览器要求：<https://tailwindcss.com/docs/compatibility>
+- Tauri / tao 更新记录（移动端多窗口、返回键事件、模板版本）：<https://github.com/tauri-apps/tauri/blob/dev/crates/tauri/CHANGELOG.md>、<https://github.com/tauri-apps/tao/blob/dev/CHANGELOG.md>
