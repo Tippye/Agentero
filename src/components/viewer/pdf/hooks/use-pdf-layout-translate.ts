@@ -63,6 +63,8 @@ import { openSettingsWindow } from "@/lib/shell/settings-window";
 import { displayTranslateError } from "@/lib/translate";
 
 export type UsePdfLayoutTranslateOptions = {
+	/** Host supports JobCenter translation and reflow; false prevents auto-starts too. */
+	enabled?: boolean;
 	reflowContext?: ReflowContext;
 	docId: string;
 	/** Translation-only panes hydrate completed overlays from the shared cache. */
@@ -365,6 +367,7 @@ function createTranslatePublishCoalescer(
 }
 
 export function usePdfLayoutTranslate({
+	enabled = true,
 	reflowContext,
 	docId,
 	layoutRawRegions,
@@ -376,6 +379,8 @@ export function usePdfLayoutTranslate({
 	pdfBytes,
 }: UsePdfLayoutTranslateOptions): PdfLayoutTranslate {
 	const { t } = useTranslation("viewer");
+	const enabledRef = useRef(enabled);
+	enabledRef.current = enabled;
 	/** Progressive layout bulk-translate overlays (body text / abstract / header). */
 	const [sourcePreparing, setSourcePreparing] = useState(false);
 	const [cacheOnly, setCacheOnly] = useState(false);
@@ -402,7 +407,7 @@ export function usePdfLayoutTranslate({
 		reflowPages,
 		exportTranslatedPdf,
 	} = usePdfReflow(
-		reflowContext,
+		enabled ? reflowContext : undefined,
 		layoutRawRegions,
 		layoutTranslateJob.items,
 		layoutTranslateJob.status === "running",
@@ -842,6 +847,7 @@ export function usePdfLayoutTranslate({
 	);
 
 	const startLayoutTranslate = useCallback(() => {
+		if (!enabledRef.current) return;
 		if (
 			paperAbsPath &&
 			paperRelPath &&
@@ -988,6 +994,7 @@ export function usePdfLayoutTranslate({
 
 	const startPageLayoutTranslate = useCallback(
 		(pageIndex: number) => {
+			if (!enabledRef.current) return;
 			const raw = layoutRawRegions;
 			if (!raw?.length) {
 				enterWaitingLayout({ mode: "page", pageIndex });
@@ -1222,6 +1229,7 @@ export function usePdfLayoutTranslate({
 	 * partial run can never drop cached translations.
 	 */
 	const completeMissingLayoutTranslate = useCallback(() => {
+		if (!enabledRef.current) return;
 		const job = layoutTranslateJobRef.current;
 		if (job.status === "running" || job.status === "waitingLayout") return;
 		const pendingIds = new Set(
@@ -1338,6 +1346,7 @@ export function usePdfLayoutTranslate({
 	 * translation so one bad pass cannot empty the cache.
 	 */
 	const retranslateAllLayoutTranslate = useCallback(() => {
+		if (!enabledRef.current) return;
 		if (
 			paperAbsPath &&
 			paperRelPath &&
@@ -1620,6 +1629,7 @@ export function usePdfLayoutTranslate({
 	// so both modes agree on cached blocks and the remaining pending set.
 	useEffect(() => {
 		if (
+			!enabled ||
 			!translationPane ||
 			!paperAbsPath ||
 			(paperRelPath && vaultPath && !vaultPath.startsWith("remote:"))
@@ -1722,6 +1732,7 @@ export function usePdfLayoutTranslate({
 			cancelled = true;
 		};
 	}, [
+		enabled,
 		translationPane,
 		paperAbsPath,
 		paperRelPath,

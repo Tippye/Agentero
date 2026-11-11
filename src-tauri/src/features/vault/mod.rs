@@ -9,6 +9,8 @@ pub use agentero_core::features::vault::*;
 #[cfg(feature = "desktop")]
 pub mod commands;
 pub mod doctor;
+#[cfg(feature = "desktop")]
+pub mod files;
 pub mod rename;
 pub mod trash;
 #[cfg(feature = "desktop")]

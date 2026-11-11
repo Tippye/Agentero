@@ -3,7 +3,7 @@
 //! Async commands return `Result<ApiResult<T>, String>` so `State` borrows are valid
 //! (same pattern as `agent_probe`).
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::core::error::AppError;
 use crate::core::error::{map_err, ApiResult};
 use crate::core::log_util::{trunc, OpTimer};
@@ -104,7 +104,7 @@ pub struct RemoteAgentInstallArgs {
 
 /// Open a local terminal that SSHes into the remote host and runs the template's
 /// install command after the user presses Enter (same confirm UX as local install).
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_agent_open_install_terminal(

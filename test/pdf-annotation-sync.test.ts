@@ -26,11 +26,12 @@ import {
 import {
 	applyAnnotationMutation,
 	enqueueAnnotationSave,
+	invalidateAnnotationPeers,
 	publishAnnotationMutation,
 	subscribeAnnotationPeer,
 } from "@/lib/pdf/highlight/annotation-sync";
 
-async function viewer(id: string) {
+async function viewer(id: string, baseline?: string | null) {
 	const registry = new PluginRegistry({
 		getAllAnnotations: () => PdfTaskHelper.resolve({}),
 	} as unknown as PdfEngine);
@@ -52,14 +53,19 @@ async function viewer(id: string) {
 		.forDocument(id);
 	if (!scope) throw new Error("Annotation scope missing");
 	let receiving = false;
-	const offPeer = subscribeAnnotationPeer("/vault/papers/sync", id, (event) => {
-		receiving = true;
-		try {
-			applyAnnotationMutation(scope, event);
-		} finally {
-			receiving = false;
-		}
-	});
+	const offPeer = subscribeAnnotationPeer(
+		"/vault/papers/sync",
+		id,
+		(event) => {
+			receiving = true;
+			try {
+				applyAnnotationMutation(scope, event);
+			} finally {
+				receiving = false;
+			}
+		},
+		baseline,
+	);
 	const offEvent = scope.onAnnotationEvent((event) => {
 		if (!receiving) publishAnnotationMutation("/vault/papers/sync", event);
 	});
@@ -117,6 +123,42 @@ it("shares highlights, comments, recolouring and deletions between main/embedded
 		await main.dispose();
 		await embed.dispose();
 		await late?.dispose();
+	}
+});
+
+it("does not replay or republish a deleted annotation from an old pane kept mounted across another pane's reload", async () => {
+	const main = await viewer("old-main", "original-disk-bytes");
+	const oldEmbed = await viewer("old-embed", "original-disk-bytes");
+	let mainDisposed = false;
+	let reloaded: Awaited<ReturnType<typeof viewer>> | undefined;
+	try {
+		main.scope.createAnnotation(0, highlight("deleted-remotely"));
+		expect(live(oldEmbed.scope).map((item) => item.id)).toEqual([
+			"deleted-remotely",
+		]);
+		invalidateAnnotationPeers("/vault/papers/sync", "[]\n");
+		await main.dispose();
+		mainDisposed = true;
+		// The frozen embed remains mounted and retains its historical X locally.
+		reloaded = await viewer("fresh-main", "[]\n");
+		expect(live(reloaded.scope)).toEqual([]);
+		// Even an old actor that emits after invalidation cannot contaminate the
+		// freshly loaded working copy or recreate replay history for later panes.
+		oldEmbed.scope.updateAnnotation(0, "deleted-remotely", {
+			contents: "stale event",
+		});
+		expect(live(reloaded.scope)).toEqual([]);
+		expect(await reloaded.scope.exportAnnotations().toPromise()).toEqual([]);
+		const late = await viewer("fresh-late", "[]\n");
+		try {
+			expect(live(late.scope)).toEqual([]);
+		} finally {
+			await late.dispose();
+		}
+	} finally {
+		if (!mainDisposed) await main.dispose();
+		await oldEmbed.dispose();
+		await reloaded?.dispose();
 	}
 });
 

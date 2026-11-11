@@ -40,3 +40,45 @@ pub trait RemoteImportOps: Send + Sync {
         note_mode: NoteShellMode,
     ) -> Result<PaperImportResult, AppError>;
 }
+
+/// Mobile imports are local. Satisfy the command's dependency without creating
+/// an SSH registry or permitting a remote Vault handle to fall through locally.
+#[cfg(mobile)]
+pub struct LocalOnlyImports;
+
+#[cfg(mobile)]
+#[async_trait]
+impl RemoteImportOps for LocalOnlyImports {
+    async fn import_by_identifier_batch_remote(
+        &self,
+        _session_id: &str,
+        _args: LookupImportBatchArgs,
+        _note_mode: NoteShellMode,
+    ) -> Result<LookupImportBatchResult, AppError> {
+        Err(AppError::message(
+            "SSH Vault imports are unavailable on mobile",
+        ))
+    }
+
+    async fn import_local_pdfs_remote(
+        &self,
+        _session_id: &str,
+        _args: ImportLocalPdfArgs,
+        _note_mode: NoteShellMode,
+    ) -> Result<ImportLocalPdfResult, AppError> {
+        Err(AppError::message(
+            "SSH Vault imports are unavailable on mobile",
+        ))
+    }
+
+    async fn import_catalog_remote(
+        &self,
+        _session_id: &str,
+        _args: PaperImportArgs,
+        _note_mode: NoteShellMode,
+    ) -> Result<PaperImportResult, AppError> {
+        Err(AppError::message(
+            "SSH Vault imports are unavailable on mobile",
+        ))
+    }
+}

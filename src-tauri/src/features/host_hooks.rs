@@ -12,7 +12,9 @@
 //! re-exports the tauri-free bridge types.
 
 use crate::core::app_handle::{AppHandle, HostHooks};
-use agentero_core::features::paper::import::{PreparationPlan, PreparationStep};
+use agentero_core::features::paper::import::PreparationPlan;
+#[cfg(desktop)]
+use agentero_core::features::paper::import::PreparationStep;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::Emitter;
@@ -27,21 +29,29 @@ impl HostHooks for TauriHostHooks {
             log::warn!(target: "agentero::lifecycle", "emit {event} failed: {e}");
         }
     }
+    #[cfg(desktop)]
     fn spawn_parse_body_after_assets(&self, vault: &Path, path_rel: &str, force: bool) {
         crate::features::jobs::spawn_parse_body_after_assets(Some(&self.0), vault, path_rel, force);
     }
     fn spawn_parse_after_import(&self, vault: &Path, path_rel: &str) -> bool {
+        #[cfg(desktop)]
         crate::features::paper::analyze::refs::spawn_parse_after_import(
             Some(&self.0),
             vault,
             path_rel,
         );
+        #[cfg(mobile)]
+        let _ = (vault, path_rel);
+        // Mobile intentionally handles the request without scheduling a local
+        // parser. Returning false would trigger the core's direct-spawn fallback.
         true
     }
+    #[cfg(desktop)]
     fn spawn_recognize_metadata(&self, vault: &Path, path_rel: &str) {
         crate::features::jobs::spawn_recognize_metadata(Some(&self.0), vault, path_rel);
     }
 
+    #[cfg(desktop)]
     fn spawn_layout_analysis(&self, vault: &Path, path_rel: &str) {
         crate::features::jobs::spawn_layout_after_import(Some(&self.0), vault, path_rel);
     }
@@ -57,6 +67,9 @@ pub fn wrap(app: &tauri::AppHandle) -> AppHandle {
 /// Same JobCenter helpers and the same `force` flag carried on each
 /// `ParseBody` step. An empty plan does nothing.
 pub fn enqueue_preparation_plan(app: &tauri::AppHandle, vault: &Path, plan: &PreparationPlan) {
+    #[cfg(mobile)]
+    let _ = (app, vault, plan);
+    #[cfg(desktop)]
     for step in &plan.steps {
         match step {
             PreparationStep::ParseBody { force } => {

@@ -1,0 +1,297 @@
+import { describe, expect, it, vi } from "vitest";
+
+const ipc = vi.hoisted(() => ({ execute: vi.fn(), upload: vi.fn() }));
+vi.mock("@/lib/core/bindings", () => ({
+	commands: { remoteAgentExecute: ipc.execute, remoteAgentUpload: ipc.upload },
+}));
+vi.mock("@/lib/core/tauri", () => ({ isTauri: () => true }));
+
+import type { Capabilities, Question, SessionRef } from "@/lib/core/bindings";
+import {
+	canUpload,
+	OperationJournal,
+	sessionKey,
+	supports,
+	validAnswers,
+	validTrustConfirmation,
+} from "@/lib/remote-agent/model";
+
+import { remoteAgent } from "@/lib/remote-agent/service";
+
+const capabilities: Capabilities = {
+	operations: ["listHosts", "sendMessage"],
+	authentication: ["password"],
+	backends: ["harness"],
+	attachments: null,
+};
+const session: SessionRef = {
+	workspace: {
+		host: {
+			connection: { providerId: "ds-harness-remote", connectionId: "launch" },
+			hostId: "host",
+		},
+		backendId: "harness",
+		workspaceId: "workspace",
+	},
+	sessionId: "session",
+};
+
+describe("mobile Remote Agent capabilities and identity", () => {
+	it("requires negotiated operations and route limits rather than assuming provider support", () => {
+		expect(supports(undefined, "sendMessage")).toBe(false);
+		expect(supports(capabilities, "respondQuestion")).toBe(false);
+		expect(
+			canUpload({
+				...capabilities,
+				attachments: { maxBytes: 20_000, mimeTypes: [] },
+			}),
+		).toBe(false);
+		expect(
+			canUpload({ ...capabilities, operations: ["uploadAttachment"] }),
+		).toBe(false);
+		expect(
+			canUpload({
+				...capabilities,
+				operations: ["uploadAttachment"],
+				attachments: { maxBytes: 20_000, mimeTypes: [] },
+			}),
+		).toBe(true);
+	});
+	it("keeps backend, provider and connection namespaces in session identity", () => {
+		const key = sessionKey(session);
+		expect(
+			sessionKey({
+				...session,
+				workspace: { ...session.workspace, backendId: "codex" },
+			}),
+		).not.toBe(key);
+		expect(
+			sessionKey({
+				...session,
+				workspace: {
+					...session.workspace,
+					host: {
+						...session.workspace.host,
+						connection: { providerId: "other", connectionId: "launch" },
+					},
+				},
+			}),
+		).not.toBe(key);
+		expect(
+			sessionKey({
+				...session,
+				workspace: {
+					...session.workspace,
+					host: {
+						...session.workspace.host,
+						connection: {
+							providerId: "ds-harness-remote",
+							connectionId: "other-launch",
+						},
+					},
+				},
+			}),
+		).not.toBe(key);
+	});
+	it("requires the complete displayed fingerprint even for a previously pinned Host", () => {
+		const identity = {
+			host: session.workspace.host,
+			name: "Host",
+			fingerprint: `SHA256:${"ab".repeat(32)}`,
+			pinned: true,
+		};
+		expect(validTrustConfirmation(identity, "")).toBe(false);
+		expect(validTrustConfirmation(identity, "yes")).toBe(false);
+		expect(
+			validTrustConfirmation(identity, identity.fingerprint.slice(0, 20)),
+		).toBe(false);
+		expect(validTrustConfirmation(identity, `SHA256:${"cd".repeat(32)}`)).toBe(
+			false,
+		);
+		expect(validTrustConfirmation(identity, identity.fingerprint)).toBe(true);
+		expect(
+			validTrustConfirmation(
+				{ ...identity, fingerprint: "server said okay" },
+				"server said okay",
+			),
+		).toBe(false);
+	});
+	it("validates structured answers against exactly the advertised options", () => {
+		const questions: Question[] = [
+			{
+				id: "q",
+				prompt: "Choose",
+				options: ["one", "two"],
+				multiple: false,
+				allowsCustom: false,
+			},
+		];
+		expect(
+			validAnswers(questions, [
+				{ questionId: "q", selected: ["one"], custom: null },
+			]),
+		).toBe(true);
+		expect(
+			validAnswers(questions, [
+				{ questionId: "q", selected: ["one", "two"], custom: null },
+			]),
+		).toBe(false);
+		expect(
+			validAnswers(questions, [
+				{ questionId: "q", selected: ["unadvertised"], custom: null },
+			]),
+		).toBe(false);
+		expect(
+			validAnswers(questions, [
+				{ questionId: "q", selected: [], custom: "text" },
+			]),
+		).toBe(false);
+		expect(validAnswers(questions, [])).toBe(false);
+		expect(
+			validAnswers(questions, [
+				{ questionId: "q", selected: [], custom: null },
+			]),
+		).toBe(false);
+		expect(
+			validAnswers(
+				questions,
+				[{ questionId: "q", selected: [], custom: null }],
+				["q"],
+			),
+		).toBe(true);
+		expect(
+			validAnswers(
+				[{ ...questions[0], multiple: true, allowsCustom: true }],
+				[{ questionId: "q", selected: ["one", "two"], custom: "detail" }],
+			),
+		).toBe(true);
+	});
+});
+
+describe("uncertain Remote Agent writes", () => {
+	it("distinguishes a Rust preflight refusal from an interrupted dispatch", async () => {
+		ipc.upload.mockResolvedValueOnce({
+			status: "ok",
+			data: {
+				ok: false,
+				data: null,
+				error: {
+					code: "remote_agent_upload_grant",
+					message: "Private file required",
+				},
+			},
+		});
+		const journal = new OperationJournal();
+		expect(
+			await journal.dispatch("operation-id-0005", "target", () =>
+				remoteAgent.upload(session, "/outside/private", "operation-id-0005"),
+			),
+		).toEqual({
+			status: "rejected",
+			code: "remote_agent_upload_grant",
+			message: "Private file required",
+		});
+		expect(journal.blocked("target")).toBe(false);
+		ipc.execute.mockRejectedValueOnce(new Error("WebView lost receipt"));
+		expect(
+			(
+				await journal.dispatch("operation-id-0006", "target", () =>
+					remoteAgent.execute({
+						operationId: "operation-id-0006",
+						mutation: { type: "cancel", session },
+					}),
+				)
+			).status,
+		).toBe("unknown");
+		expect(journal.blocked("target")).toBe(true);
+	});
+	it("retains only operation IDs and target references across a WebView reload", async () => {
+		let saved = "[]";
+		const storage = {
+			getItem: () => saved,
+			setItem: (_key: string, value: string) => {
+				saved = value;
+			},
+		};
+		const journal = new OperationJournal(() => {}, storage);
+		const send = vi.fn(async () => ({ status: "accepted" as const }));
+		await journal.dispatch("operation-id-0004", sessionKey(session), send);
+		expect(JSON.parse(saved)).toEqual([
+			{ id: "operation-id-0004", target: sessionKey(session) },
+		]);
+		const restored = new OperationJournal(() => {}, storage);
+		expect(restored.blocked(sessionKey(session))).toBe(true);
+		await restored.dispatch("operation-id-0004", sessionKey(session), send);
+		expect(send).toHaveBeenCalledTimes(1);
+		restored.inspect("operation-id-0004", { status: "notFound" });
+		expect(restored.blocked(sessionKey(session))).toBe(true);
+	});
+	it("records uncertainty before dispatch and never retries after an IPC interruption", async () => {
+		const journal = new OperationJournal();
+		const target = sessionKey(session);
+		const send = vi.fn(async () => {
+			expect(journal.blocked(target)).toBe(true);
+			throw new Error("response lost after remote commit");
+		});
+		expect(await journal.dispatch("operation-id-0001", target, send)).toEqual({
+			status: "unknown",
+			reason: "ipcInterrupted",
+		});
+		await journal.dispatch("operation-id-0001", target, send);
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(journal.blocked(target)).toBe(true);
+		journal.inspect("operation-id-0001", { status: "notFound" });
+		expect(journal.blocked(target)).toBe(true);
+		journal.allowNewActions("operation-id-0001");
+		expect(journal.blocked(target)).toBe(false);
+		expect(journal.all()[0].outcome.status).toBe("unknown");
+		await journal.dispatch("operation-id-0001", target, send);
+		expect(send).toHaveBeenCalledTimes(1);
+	});
+	it("shares in-flight writes and uses receipts only as observations", async () => {
+		const journal = new OperationJournal();
+		let finish: ((value: { status: "accepted" }) => void) | undefined;
+		const send = vi.fn(
+			() =>
+				new Promise<{ status: "accepted" }>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const first = journal.dispatch("operation-id-0002", "target", send);
+		const second = journal.dispatch("operation-id-0002", "target", send);
+		expect(send).toHaveBeenCalledTimes(1);
+		finish?.({ status: "accepted" });
+		expect(await first).toEqual({ status: "accepted" });
+		expect(await second).toEqual({ status: "accepted" });
+		journal.inspect("operation-id-0002", {
+			status: "found",
+			outcome: { status: "succeeded", result: { type: "acknowledged" } },
+		});
+		expect(journal.all()[0].outcome.status).toBe("succeeded");
+		await journal.dispatch("operation-id-0002", "target", send);
+		expect(send).toHaveBeenCalledTimes(1);
+	});
+	it("keeps unknown writes isolated to their namespaced target and clears only on a definitive receipt", async () => {
+		const journal = new OperationJournal();
+		await journal.dispatch("operation-id-0003", "first", async () => ({
+			status: "unknown",
+			reason: "transport lost",
+		}));
+		expect(journal.blocked("first")).toBe(true);
+		expect(journal.blocked("other")).toBe(false);
+		journal.inspect("operation-id-0003", {
+			status: "found",
+			outcome: { status: "unknown", reason: "still pending" },
+		});
+		expect(journal.blocked("first")).toBe(true);
+		journal.inspect("operation-id-0003", {
+			status: "found",
+			outcome: {
+				status: "rejected",
+				code: "refused",
+				message: "Known refusal",
+			},
+		});
+		expect(journal.blocked("first")).toBe(false);
+	});
+});

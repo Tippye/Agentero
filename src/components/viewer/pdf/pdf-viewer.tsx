@@ -48,6 +48,7 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
+import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfBottomBar } from "@/components/viewer/pdf/chrome/pdf-bottom-bar";
 import { PdfCardStack } from "@/components/viewer/pdf/chrome/pdf-card-stack";
 import { PdfFiguresPanel } from "@/components/viewer/pdf/chrome/pdf-figures-panel";
@@ -214,6 +215,10 @@ function PdfReadyMark({ ok }: { ok: boolean }) {
 export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 	const { t } = useTranslation("viewer");
 	const reloadPositionRef = useRef<PdfReloadPosition | null>(null);
+	const [annotationReloadRevision, setAnnotationReloadRevision] = useState(0);
+	const reloadAnnotations = useCallback(() => {
+		setAnnotationReloadRevision((revision) => revision + 1);
+	}, []);
 	const {
 		engine,
 		isLoading: engineLoading,
@@ -232,13 +237,17 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 	// caches documents by `documentId`, so a reloaded buffer (TeX recompile /
 	// external overwrite) must register under a fresh id or the engine re-uses
 	// the stale document and drops the new bytes. See `embedPdfDocumentId`.
-	const docId = embedPdfDocumentId(baseDocId, sourceBytes);
+	const sourceDocId = embedPdfDocumentId(baseDocId, sourceBytes);
+	const docId = annotationReloadRevision
+		? `${sourceDocId}::annotations-${annotationReloadRevision}`
+		: sourceDocId;
 
 	// Make a private copy of the PDF bytes for this EmbedPDF mount. The worker
 	// engine may structured-clone/transfer the buffer; sharing the same
 	// ArrayBuffer with another pane or across a StrictMode remount can leave us
 	// with a detached buffer on the second open. The copy is created once per
-	// prop identity; if slicing fails (already detached) we fall back to the URL.
+	// prop identity/reload; if slicing fails (already detached) we fall back to the URL.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a fresh document must own a fresh transferable buffer after annotation reload.
 	const pdfBuffer = useMemo(() => {
 		if (!sourceBytes) return null;
 		try {
@@ -246,7 +255,7 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 		} catch {
 			return null;
 		}
-	}, [sourceBytes]);
+	}, [sourceBytes, annotationReloadRevision]);
 	const effectiveSourceBytes = pdfBuffer ?? sourceBytes;
 
 	const translationOnly = Boolean(props.translationOnly);
@@ -430,6 +439,7 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 										sourceBytes={effectiveSourceBytes}
 										pdfCacheBytes={props.sourceBytes ?? null}
 										reloadPositionRef={reloadPositionRef}
+										onReloadAnnotations={reloadAnnotations}
 									/>
 								)}
 							</>
@@ -491,6 +501,7 @@ function pdfSelectionMenuContext(input: {
 }
 
 function PdfViewerInner({
+	runtime,
 	docId,
 	baseDocId,
 	embeddedTarget,
@@ -514,6 +525,7 @@ function PdfViewerInner({
 	syncTexScope,
 	cloudSyncBackward,
 	reloadPositionRef,
+	onReloadAnnotations,
 	importIdentifier,
 	onOpenSettings,
 	onHandle,
@@ -522,6 +534,7 @@ function PdfViewerInner({
 	onVisualTracesChange,
 	onOpenTranslationTab,
 }: PdfViewerInnerProps) {
+	const capabilities = pdfViewerCapabilities(runtime);
 	const { t } = useTranslation("viewer");
 	const rightGutter =
 		translationOnly || plainViewer || !reserveCommentRail
@@ -611,6 +624,9 @@ function PdfViewerInner({
 
 	// Catalog title + link for the ask card's external "open in chat" query.
 	const paperMetaByRelPath = useLibraryStore((s) => s.paperMetaByRelPath);
+	const selectionTranslateProvider = useSettings((s) => s.translate.provider);
+	const canTranslateSelection =
+		capabilities.ask || selectionTranslateProvider !== "agent";
 	const autoTranslateSelection = useSettings(
 		(s) => s.translate.autoTranslateSelection,
 	);
@@ -726,6 +742,7 @@ function PdfViewerInner({
 		paperKey,
 		totalPages,
 		onHighlightsChangeRef,
+		onReloadAnnotations,
 	});
 
 	// ---- Persisted marks (ask threads / translates / visual traces) ----
@@ -806,8 +823,8 @@ function PdfViewerInner({
 	usePdfSyncTex({
 		docId,
 		tabId: baseDocId,
-		rootPath: texRootPath,
-		pdfPath,
+		rootPath: capabilities.latex ? texRootPath : null,
+		pdfPath: capabilities.latex ? pdfPath : null,
 		scope: syncTexScope,
 		cloudSyncBackward,
 		isActive,
@@ -917,6 +934,7 @@ function PdfViewerInner({
 		clearTranslateError,
 		stopTranslateSession: stopTranslateSessionImpl,
 	} = usePdfSelectionTranslate({
+		enabled: canTranslateSelection,
 		isActive,
 		paperAbsPath,
 		paperRelPath,
@@ -948,6 +966,7 @@ function PdfViewerInner({
 		clearAskError,
 		closeAskChrome,
 	} = usePdfAskThreads({
+		enabled: capabilities.ask,
 		paperAbsPath,
 		paperRelPath,
 		vaultPath,
@@ -1186,7 +1205,11 @@ function PdfViewerInner({
 	clearCrossrefPreviewRef.current = clearCrossrefPreview;
 	clearLinkUrlTipRef.current = clearLinkUrlTip;
 
-	const { askPinAnchors } = usePdfPinAnchors({ threads });
+	const visibleAskThreads = useMemo(
+		() => (capabilities.ask ? threads : []),
+		[capabilities.ask, threads],
+	);
+	const { askPinAnchors } = usePdfPinAnchors({ threads: visibleAskThreads });
 	// Fingerprint computed only when `translates` changes identity: streamed
 	// chunks replace the array, but hover / page turns re-render the viewer
 	// without touching it, so the eager stringify ran for nothing.
@@ -1273,6 +1296,7 @@ function PdfViewerInner({
 		toggleLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutCluster({
+		capabilities,
 		docId,
 		translationPane,
 		totalPages,
@@ -1315,7 +1339,13 @@ function PdfViewerInner({
 	});
 
 	const handleToggleLayoutTranslateWithDualPane = useCallback(() => {
-		if (plainViewer) return;
+		if (!capabilities.layoutTranslation || plainViewer) return;
+		if (
+			displayMode === "dualPane" &&
+			dualPaneSource !== "pdf" &&
+			!capabilities.latex
+		)
+			return;
 		if (displayMode !== "dualPane") {
 			toggleLayoutTranslate();
 			return;
@@ -1343,6 +1373,8 @@ function PdfViewerInner({
 			basenameOf(paperAbsPath),
 		);
 	}, [
+		capabilities.layoutTranslation,
+		capabilities.latex,
 		plainViewer,
 		displayMode,
 		dualPaneSource,
@@ -1355,6 +1387,7 @@ function PdfViewerInner({
 	]);
 
 	const { smartHighlightBusy, handleSmartHighlight } = usePdfSmartHighlights({
+		enabled: capabilities.smartHighlights,
 		vaultPath,
 		paperRelPath,
 		createHighlights,
@@ -1372,7 +1405,7 @@ function PdfViewerInner({
 	const layoutTranslateRunningRef = useRef(layoutTranslateRunning);
 	layoutTranslateRunningRef.current = layoutTranslateRunning;
 	useEffect(() => {
-		if (!translationPane) return;
+		if (!capabilities.layoutTranslation || !translationPane) return;
 		const hasRegions = (layoutRawRegions?.length ?? 0) > 0;
 		if (hasRegions) {
 			hadLayoutRegionsRef.current = true;
@@ -1403,6 +1436,7 @@ function PdfViewerInner({
 		}, 250);
 		return () => window.clearTimeout(timer);
 	}, [
+		capabilities.layoutTranslation,
 		translationPane,
 		layoutRawRegions,
 		layoutTranslateActive,
@@ -1627,6 +1661,7 @@ function PdfViewerInner({
 		handleMenuTranslate,
 		handleMenuCopy,
 	} = usePdfSelectionActions({
+		capabilities,
 		selectionMenu,
 		closeSelectionMenu,
 		createHighlights,
@@ -1667,6 +1702,7 @@ function PdfViewerInner({
 		if (
 			!selectionMenu ||
 			plainViewer ||
+			!canTranslateSelection ||
 			!autoTranslateSelection ||
 			!anchorKey
 		) {
@@ -1677,6 +1713,7 @@ function PdfViewerInner({
 		autoTranslatedSelectionRef.current = anchorKey;
 		translateSelection(selectionMenu.anchor);
 	}, [
+		canTranslateSelection,
 		autoTranslateSelection,
 		isActive,
 		plainViewer,
@@ -2004,6 +2041,7 @@ function PdfViewerInner({
 
 	const handleAddCommentToChat = useCallback(
 		(comment: PageAnnotationComment) => {
+			if (!capabilities.addToChat) return;
 			if (comment.kind === "visual") {
 				handleVisualAddToChatById(comment.id);
 				return;
@@ -2022,7 +2060,12 @@ function PdfViewerInner({
 			pinSelection({ ...selection, id: `ann-${comment.id}` });
 			presentAgentComposer({ preserveCaret: true });
 		},
-		[handleVisualAddToChatById, paperAbsPath, paperRelPath],
+		[
+			capabilities.addToChat,
+			handleVisualAddToChatById,
+			paperAbsPath,
+			paperRelPath,
+		],
 	);
 
 	const pageHandlers = useMemo<PdfPageHandlers>(
@@ -2036,7 +2079,9 @@ function PdfViewerInner({
 			onLinkUrlHover: handleLinkUrlHover,
 			onRegionSelect: handleVisualRegionSelect,
 			onLayoutRegionClick: handleLayoutRegionClick,
-			onTogglePageLayoutTranslate: togglePageLayoutTranslate,
+			onTogglePageLayoutTranslate: capabilities.layoutTranslation
+				? togglePageLayoutTranslate
+				: undefined,
 			onDeleteHighlightAnnotation: handleDeleteHighlightAnnotation,
 			onEditHighlightAnnotation: handleEditHighlightAnnotation,
 			onChangeHighlightColor: handleChangeHighlightColor,
@@ -2046,7 +2091,9 @@ function PdfViewerInner({
 			onDeleteComment: deleteRailComment,
 			onCopyCommentLink: handleCopyCommentLink,
 			onCopyCommentEmbed: handleCopyCommentEmbed,
-			onAddCommentToChat: handleAddCommentToChat,
+			onAddCommentToChat: capabilities.addToChat
+				? handleAddCommentToChat
+				: undefined,
 			onHoverComment: (comment) => setHoveredCommentId(comment.id),
 			onLeaveComment: () => setHoveredCommentId(null),
 			onCommitSelectionComment: handleCommitSelectionComment,
@@ -2062,6 +2109,8 @@ function PdfViewerInner({
 			handleLinkUrlHover,
 			handleVisualRegionSelect,
 			handleLayoutRegionClick,
+			capabilities.layoutTranslation,
+			capabilities.addToChat,
 			togglePageLayoutTranslate,
 			handleDeleteHighlightAnnotation,
 			handleEditHighlightAnnotation,
@@ -2207,8 +2256,8 @@ function PdfViewerInner({
 			state: selectionMenu,
 			onHighlight: handleHighlight,
 			onNote: canMarkSelection ? handleMenuNote : undefined,
-			onAsk: handleMenuAsk,
-			onAddToChat: handleMenuAddToChat,
+			onAsk: capabilities.ask ? handleMenuAsk : undefined,
+			onAddToChat: capabilities.addToChat ? handleMenuAddToChat : undefined,
 			onTranslate: handleMenuTranslate,
 			onCopy: handleMenuCopy,
 			onBookmark:
@@ -2219,19 +2268,26 @@ function PdfViewerInner({
 					: undefined,
 			showHighlight: canMarkSelection,
 			showTranslate:
-				!selectionMenu?.fromTranslation && !isRemotePaper && !plainViewer,
-			contributionContext: pdfSelectionMenuContext({
-				vaultPath,
-				paperRelPath,
-				paperAbsPath,
-				paperId: contributionPaperId,
-				selectionMenu,
-			}),
+				canTranslateSelection &&
+				!selectionMenu?.fromTranslation &&
+				!isRemotePaper &&
+				!plainViewer,
+			contributionContext: capabilities.menuContributions
+				? pdfSelectionMenuContext({
+						vaultPath,
+						paperRelPath,
+						paperAbsPath,
+						paperId: contributionPaperId,
+						selectionMenu,
+					})
+				: undefined,
 		}),
 		[
+			capabilities,
 			plainViewer,
 			selectionMenu,
 			canMarkSelection,
+			canTranslateSelection,
 			handleHighlight,
 			handleMenuNote,
 			handleMenuAsk,
@@ -2280,7 +2336,7 @@ function PdfViewerInner({
 	);
 	const cardAsk = useMemo(
 		() => ({
-			thread: activeThread,
+			thread: capabilities.ask ? activeThread : null,
 			paperTitle,
 			paperLink,
 			streaming,
@@ -2292,6 +2348,7 @@ function PdfViewerInner({
 			onStop: stopAskStreaming,
 		}),
 		[
+			capabilities.ask,
 			activeThread,
 			paperTitle,
 			paperLink,
@@ -2421,6 +2478,7 @@ function PdfViewerInner({
 					paperAbsPath={paperAbsPath}
 					paperRelPath={paperRelPath}
 					showFigures={showFigures}
+					canAnalyze={capabilities.layoutAnalysis}
 					isRemotePaper={isRemotePaper}
 					onAnalyze={handleAnalyzeLayout}
 					onJump={handleJumpToLayoutRegion}
@@ -2442,7 +2500,11 @@ function PdfViewerInner({
 			)}
 			{!translationOnly && !plainViewer && (
 				<PdfToolbar
-					onExportTranslatedPdf={reflowReady ? exportTranslatedPdf : undefined}
+					onExportTranslatedPdf={
+						capabilities.layoutTranslation && reflowReady
+							? exportTranslatedPdf
+							: undefined
+					}
 					regionSelecting={regionSelecting}
 					visualCropPending={visualCropPending}
 					engine={engine}
@@ -2456,13 +2518,19 @@ function PdfViewerInner({
 					layoutTranslatePartial={layoutTranslatePartial}
 					layoutTranslateProgress={layoutTranslateProgress}
 					layoutTranslatePageCounts={layoutTranslatePageCounts}
-					onToggleLayoutTranslate={handleToggleLayoutTranslateWithDualPane}
+					onToggleLayoutTranslate={
+						capabilities.layoutTranslation
+							? handleToggleLayoutTranslateWithDualPane
+							: undefined
+					}
 					isRemotePaper={isRemotePaper}
 					onImportToLibrary={handleImportToLibrary}
 					importBusy={importBusy}
 					smartHighlightBusy={smartHighlightBusy}
 					onSmartHighlight={
-						smartHighlightEnabled ? handleSmartHighlight : undefined
+						capabilities.smartHighlights && smartHighlightEnabled
+							? handleSmartHighlight
+							: undefined
 					}
 				/>
 			)}

@@ -16,6 +16,7 @@ import type { useDocumentManagerCapability } from "@embedpdf/plugin-document-man
 import type { useLayoutAnalysisCapability } from "@embedpdf/plugin-layout-analysis/react";
 import type { useScroll } from "@embedpdf/plugin-scroll/react";
 import { type RefObject, useCallback } from "react";
+import type { PdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import type { PdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutRun } from "@/components/viewer/pdf/hooks/use-pdf-layout-run";
@@ -36,6 +37,7 @@ type DocumentManagerCapability = ReturnType<
 type ScrollCapability = ReturnType<typeof useScroll>["provides"];
 
 export type UsePdfLayoutClusterOptions = {
+	capabilities: PdfViewerCapabilities;
 	docId: string;
 	translationPane?: boolean;
 	totalPages: number;
@@ -84,6 +86,7 @@ export type PdfLayoutCluster = Omit<PdfLayoutRegions, "layoutDocRegions"> &
 	};
 
 export function usePdfLayoutCluster({
+	capabilities,
 	docId,
 	translationPane = false,
 	totalPages,
@@ -113,6 +116,7 @@ export function usePdfLayoutCluster({
 	} = usePdfLayoutRegions(docId);
 
 	const { startLayoutAnalysisRef, layoutTaskRef } = usePdfLayoutRun({
+		canAnalyze: capabilities.layoutAnalysis,
 		docId,
 		paperAbsPath,
 		paperRelPath,
@@ -128,7 +132,7 @@ export function usePdfLayoutCluster({
 	});
 
 	const handleAnalyzeLayout = useCallback(() => {
-		if (isRemotePaper || plainViewer) return;
+		if (!capabilities.layoutAnalysis || isRemotePaper || plainViewer) return;
 		startLayoutAnalysisRef.current({
 			force: false,
 			openFigures: true,
@@ -136,7 +140,12 @@ export function usePdfLayoutCluster({
 			asBackgroundTask: true,
 			notifyOnError: true,
 		});
-	}, [isRemotePaper, plainViewer, startLayoutAnalysisRef]);
+	}, [
+		capabilities.layoutAnalysis,
+		isRemotePaper,
+		plainViewer,
+		startLayoutAnalysisRef,
+	]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef is an injected stable ref; EmbedPDF returns a fresh scope object per render, so only the ref may be read here.
 	const handleJumpToLayoutRegion = useCallback(
 		(region: PdfLayoutRegion) => {
@@ -202,6 +211,7 @@ export function usePdfLayoutCluster({
 		toggleLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutTranslate({
+		enabled: capabilities.layoutTranslation,
 		reflowContext: () => {
 			const engine = engineRef.current,
 				document = docCapRef.current?.getDocument(docId);

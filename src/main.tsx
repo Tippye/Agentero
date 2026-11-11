@@ -261,7 +261,7 @@ async function boot() {
 		`op end frontend_boot ok=true duration_ms=${bootElapsed()} window=main`,
 	);
 	perfEmit("frontend_boot", bootElapsed() * 1000, true, "window=main");
-	if (perfActive()) return;
+	if (perfActive() || isMobileApp()) return;
 	void checkForStartupUpdate();
 	// After an in-app update relaunches the app, re-align the installed CLI
 	// shim with the new build (the updater only replaces the GUI package).

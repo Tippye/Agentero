@@ -19,6 +19,7 @@ import {
 	type TaskExecutorContext,
 	type TaskReportArgs,
 } from "@/lib/core/tasks";
+import { isMobileApp } from "@/lib/core/tauri";
 import { findCanonicalPaperPdfPath } from "@/lib/paper/media";
 import { analyzePaperLayoutHeadless } from "@/lib/pdf/layout/headless-analyze";
 import {
@@ -120,6 +121,16 @@ export function enqueuePaperLayoutAnalysis(opts: {
 	autoTranslate?: boolean;
 	onError?: (error: unknown) => void;
 }): void {
+	// Mobile reads synced sidecars but does not run desktop layout/OCR jobs.
+	// In particular, opening a local PDF must not queue an unavailable executor.
+	if (isMobileApp()) {
+		if (opts.focus) {
+			queueMicrotask(() =>
+				opts.onError?.(new Error(i18n.t("viewer:pdf.layoutTranslate.failed"))),
+			);
+		}
+		return;
+	}
 	const paperAbsPath = normalizePaperKey(opts.paperAbsPath);
 	if (!paperAbsPath || (!opts.focus && queuedPapers.has(paperAbsPath))) return;
 

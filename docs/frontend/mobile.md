@@ -1,8 +1,18 @@
-# 移动端前端与 iOS 远程连接
+# 移动端前端与远程连接
 
-> 状态：**M1 已实现，M2 已提交 TestFlight（内测）**；iOS 发布已冻结（2026-10-16）：不再随 tag 自动构建上传，需要时手动触发 `ios-testflight.yml`。当前移动端已包含二维码/配对链接连接、连接状态恢复、论文库搜索、PDF 分块缓存、NOTES 编辑、桌面 Agent 流式输出与权限应答、ACP Agent 切换、历史会话恢复和移动端侧栏；多主机/LAN 回退仍在后续范围。面向用户的操作说明见 [移动端](../usage/mobile.md)。
-> 决策：iOS **不做本地 Vault**，App 是桌面端的纯远程客户端 —— 扫码配对后经 **relay + 端到端加密** 连接电脑上的 Agentero，读写电脑上的库，并驱动电脑上的 BYOA Agent。
-> Android：已初始化 Tauri Android 目标（`src-tauri/gen/android`，包名 `com.poco_ai.agentero`）。定位与 iOS 相同——纯远程客户端，`src/main.tsx` 经 `isMobileApp()`（`src/lib/core/tauri.ts`，iOS/Android UA 检测）加载同一移动壳；liteparse、菜单事件等桌面能力用 `cfg(not(any(target_os = "ios", target_os = "android")))` 一并排除。本地调试：`pnpm tauri android dev` / `pnpm tauri android build --apk`（需 ANDROID_HOME + NDK）。发布：`.github/workflows/release.yml` 的 `android` job（与 `installers`/`cli` 并行，同一 draft release）在 tag 推送时构建签名 APK `Agentero_<版本>_aarch64.apk`；需 `ANDROID_KEYSTORE*` secrets，缺失则跳过该 job 而不阻塞桌面发布。
+> `mobile` 分支正在从伴侣端扩展为本地优先的平板应用，完整范围和验收状态见 [平板实施方案](../development/tablet-shared.md)。下文 §1–§8 保留既有 Bridge 伴侣端的架构与历史决策；其中「不做本地 Vault」已被新方案取代，不能作为当前分支的产品约束。
+
+## 当前分支的本地阅读闭环
+
+- 启动不再强制配对。在 `appDataDir()/Vault` 创建或恢复库，文献列表读取本地 Catalog；回到前台、同步结束和手动刷新时重扫。
+- PDF 文件经应用私有临时目录导入，再交给既有论文导入服务。当前是应用内选文件入口，原生分享与文件提供器仍待平台实现。
+- 阅读器使用本地 PDF 字节与真实 `paperAbsPath`/`vaultPath`，让已有高亮与标注存储正常工作。PDF 和笔记只挂载一份，切换到 Agent 页或改变布局时保留。
+- NOTES 使用成熟 Plate 编辑器与 Markdown 自动保存，保留冲突处理、未保存草稿退出保护、wiki 补全和嵌入。同笔记的标题/块跳转可用，跨文档导航尚待移动工作区接入。
+- Agent 页默认使用 DSH provider，支持 Host 指纹确认、工作区/会话、历史、消息、取消、审批、结构化提问和受限附件上传。Bridge 配对与聊天保留为显式可选入口。DSH 凭据暂存在 Rust 内存并可刷新；系统安全持久化尚待平台实现。未知结果保留原操作 ID，页面恢复不自动重发。
+- 移动端使用独立命令白名单和应用私有文件作用域，不注册本机 Agent、CLI、SSH Vault、Word、TeX 与桌面服务命令。客户端 Bridge 命令改为 `bridge_client_*` 并导出类型绑定，避免与桌面 Host 的 `bridge_status` 冲突。
+- Android 的配置/缓存/数据根在原生路径解析后、设置和身份存储初始化前指定。iOS 保留原有 Library 根，避免升级时丢失配对资料。
+
+当前已通过针对性单元测试和桌面宿主编译/IPC 检查；macOS 的 `?mobilePreview=1` 原生预览验证了建库与读取调用链，尚不代表 Android/iOS 真机通过。最低系统版本、常驻后台、原生导入与多窗口仍以平台篇的实际实施进度为准。iOS TestFlight 自动发布仍保持冻结。
 
 ---
 

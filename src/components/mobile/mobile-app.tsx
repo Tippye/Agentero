@@ -1,10 +1,11 @@
-import { ArrowLeft, Search } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, LoaderCircle, Plus, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
+import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
 import {
@@ -21,9 +22,16 @@ import { MobileNav, type MobileTab } from "@/components/mobile/mobile-nav";
 import { MobilePairing } from "@/components/mobile/mobile-pairing";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
+import { MobileRemoteAgentPage } from "@/components/mobile/remote/mobile-remote-agent-page";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import type { SessionRef } from "@/lib/core/bindings";
+import { errorText } from "@/lib/core/error";
+import { notifyError } from "@/lib/core/notify";
+import { cn } from "@/lib/core/utils";
+import { importMobilePdfs } from "@/lib/mobile/import-pdf";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 export default function MobileApp() {
@@ -39,15 +47,25 @@ export default function MobileApp() {
 	const [readerMode, setReaderMode] = useState<MobileReaderMode>("pdf");
 	const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const [agentProvider, setAgentProvider] = useState("ds-harness-remote");
+	const [remoteSession, setRemoteSession] = useState<SessionRef | null>(null);
+	const [notesDirty, setNotesDirty] = useState(false);
+	const [importing, setImporting] = useState(false);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const {
+		vaultPath,
+		loading: vaultLoading,
+		retry: retryVault,
+	} = useMobileVault();
 
 	const { status, setStatus, pairPending } = useBridgeStatus();
 	const paired = status.paired;
 	const connected = status.connected;
-	const { papers, loading: papersLoading } = useMobilePapers({
-		paired,
-		connected,
-		libraryVisible: tab === "library",
-	});
+	const {
+		papers,
+		loading: papersLoading,
+		refresh,
+	} = useMobilePapers({ vaultPath });
 	const {
 		agents,
 		loading: agentsLoading,
@@ -57,10 +75,11 @@ export default function MobileApp() {
 	} = useMobileAgents({
 		paired,
 		connected,
-		agentVisible: tab === "agent",
+		agentVisible: tab === "agent" && agentProvider === "agentero-bridge",
 	});
 
 	const acceptPairOffer = useCallback((offerUrl: string) => {
+		setAgentProvider("agentero-bridge");
 		setPendingOffer(offerUrl);
 		setPairingRequested(true);
 	}, []);
@@ -68,14 +87,31 @@ export default function MobileApp() {
 
 	useEffect(() => {
 		if (paired) return;
-		setSelectedPaper(null);
 		setAgentSessionId(null);
 	}, [paired]);
 
 	const closeReader = useCallback(() => {
+		if (notesDirty) {
+			notifyError(t("reader.unsavedNotes"));
+			return;
+		}
 		setSelectedPaper(null);
 		setReaderMode("pdf");
-	}, []);
+	}, [notesDirty, t]);
+
+	const importFiles = async (files: File[]) => {
+		if (!vaultPath || importing || !files.length) return;
+		setImporting(true);
+		try {
+			const result = await importMobilePdfs(vaultPath, files);
+			if (result.errors.length) notifyError(result.errors.join("\n"));
+		} catch (error) {
+			notifyError(errorText(error));
+		} finally {
+			await refresh();
+			setImporting(false);
+		}
+	};
 
 	const handleSelectAgent = useCallback(
 		(agentId: string) => {
@@ -106,21 +142,6 @@ export default function MobileApp() {
 		},
 	);
 
-	if (!paired || pairingRequested) {
-		return (
-			<MobilePairing
-				status={status}
-				pending={pairPending}
-				initialOffer={pendingOffer}
-				onStatus={setStatus}
-				onDone={() => {
-					setPendingOffer(null);
-					setPairingRequested(false);
-				}}
-			/>
-		);
-	}
-
 	const inReader = tab === "library" && selectedPaper !== null;
 
 	return (
@@ -128,8 +149,28 @@ export default function MobileApp() {
 			className="mobile-shell flex h-dvh min-h-0 overflow-hidden bg-background text-foreground"
 			{...swipeHandlers}
 		>
+			<input
+				ref={fileInput}
+				type="file"
+				accept="application/pdf,.pdf"
+				multiple
+				hidden
+				aria-label={t("library.importPdf")}
+				onChange={(event) => {
+					const files = Array.from(event.target.files ?? []);
+					event.target.value = "";
+					void importFiles(files);
+				}}
+			/>
 			<aside className="hidden w-20 shrink-0 flex-col items-center border-r bg-muted/25 py-6 md:flex">
-				<MobileBrand />
+				<button
+					type="button"
+					className="grid size-12 place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
+					aria-label={t("settings.menu")}
+					onClick={() => setSidebarOpen(true)}
+				>
+					<MobileBrand />
+				</button>
 				<MobileNav
 					tab={tab}
 					onTab={setTab}
@@ -141,12 +182,17 @@ export default function MobileApp() {
 					title={inReader ? selectedPaper.title : t(`tabs.${tab}`)}
 					status={status}
 					statusLabel={
-						connected ? t("settings.connected") : t("settings.offline")
+						tab === "library"
+							? t("settings.localVault")
+							: connected
+								? t("settings.connected")
+								: t("settings.offline")
 					}
 					brand={<MobileBrand />}
 					brandButtonLabel={t("settings.menu")}
 					onBrandClick={() => setSidebarOpen(true)}
-					showBrand={!selectedPaper}
+					showBrand={!inReader}
+					showStatus={tab === "agent" && agentProvider === "agentero-bridge"}
 					leading={
 						inReader ? (
 							<Button
@@ -167,62 +213,204 @@ export default function MobileApp() {
 								onChange={setReaderMode}
 							/>
 						) : tab === "library" ? (
-							<div className="relative w-[min(10rem,38vw)] shrink-0">
-								<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-								<Input
-									value={libraryQuery}
-									onChange={(event) => setLibraryQuery(event.target.value)}
-									placeholder={t("library.search")}
-									aria-label={t("library.search")}
-									className="h-10 w-full pl-8 text-base md:text-sm"
-								/>
+							<div className="flex shrink-0 items-center gap-1">
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-12"
+									disabled={!vaultPath || papersLoading}
+									aria-label={t("library.refresh")}
+									onClick={() => void refresh(true)}
+								>
+									<RefreshCw
+										className={cn("size-4", papersLoading && "animate-spin")}
+									/>
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-12"
+									disabled={!vaultPath || importing}
+									aria-label={t("library.importPdf")}
+									onClick={() => fileInput.current?.click()}
+								>
+									{importing ? (
+										<LoaderCircle className="size-4 animate-spin" />
+									) : (
+										<Plus className="size-5" />
+									)}
+								</Button>
+								<div className="relative w-[min(10rem,28vw)]">
+									<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+									<Input
+										value={libraryQuery}
+										onChange={(event) => setLibraryQuery(event.target.value)}
+										placeholder={t("library.search")}
+										aria-label={t("library.search")}
+										className="h-12 w-full pl-8 text-base md:text-sm"
+									/>
+								</div>
 							</div>
 						) : (
-							<MobileAgentToolbar
-								agents={agents}
-								loading={agentsLoading}
-								selectedAgentId={selectedAgentId}
-								onSelectAgent={handleSelectAgent}
-								onOpenHistory={() => setHistoryOpen(true)}
-							/>
+							<div className="flex min-w-0 items-center gap-2">
+								<select
+									aria-label={t("remote.provider")}
+									className="h-12 max-w-40 rounded-md border bg-background px-2 text-base md:text-sm"
+									value={agentProvider}
+									onChange={(event) => setAgentProvider(event.target.value)}
+								>
+									<option value="ds-harness-remote">
+										{t("remote.dshProvider")}
+									</option>
+									<option value="agentero-bridge">
+										{t("remote.bridgeProvider")}
+									</option>
+								</select>
+								{agentProvider === "agentero-bridge" ? (
+									<MobileAgentToolbar
+										agents={agents}
+										loading={agentsLoading}
+										selectedAgentId={selectedAgentId}
+										onSelectAgent={handleSelectAgent}
+										onOpenHistory={() => setHistoryOpen(true)}
+									/>
+								) : null}
+							</div>
 						)
 					}
 				/>
 				<div className="h-16 shrink-0 md:hidden" aria-hidden="true" />
 				<div className="min-h-0 flex-1 overflow-hidden">
-					{tab === "library" ? (
-						selectedPaper ? (
-							<EdgeSwipeBack onBack={closeReader}>
-								<MobileReaderPage paper={selectedPaper} mode={readerMode} />
-							</EdgeSwipeBack>
-						) : (
-							<MobileLibraryPage
-								papers={papers}
-								loading={papersLoading}
-								selected={selectedPaper}
-								onSelect={setSelectedPaper}
-								query={libraryQuery}
-							/>
-						)
+					{!vaultPath && tab === "library" ? (
+						<div className="grid h-full place-items-center p-6" role="status">
+							{vaultLoading ? (
+								<div className="flex items-center gap-2 text-muted-foreground">
+									<LoaderCircle className="size-5 animate-spin" />
+									{t("local.opening")}
+								</div>
+							) : (
+								<Button
+									variant="outline"
+									className="min-h-12"
+									onClick={retryVault}
+								>
+									{t("local.retry")}
+								</Button>
+							)}
+						</div>
 					) : null}
-					{tab === "agent" ? (
-						<MobileAgentPage
-							key={selectedAgentId ?? "default"}
-							selectedAgentId={selectedAgentId}
-							sessionId={agentSessionId}
-							onSessionId={setAgentSessionId}
-							historyOpen={historyOpen}
-							onHistoryOpenChange={setHistoryOpen}
+					{vaultPath && selectedPaper ? (
+						<div
+							className={cn("h-full min-h-0", tab !== "library" && "hidden")}
+						>
+							<EdgeSwipeBack onBack={closeReader}>
+								<MobileReaderPage
+									key={selectedPaper.path ?? selectedPaper.id}
+									paper={selectedPaper}
+									vaultPath={vaultPath}
+									mode={readerMode}
+									active={tab === "library" && !pairingRequested}
+									onNotesDirtyChange={setNotesDirty}
+								/>
+							</EdgeSwipeBack>
+						</div>
+					) : vaultPath && tab === "library" ? (
+						<MobileLibraryPage
+							papers={papers}
+							loading={papersLoading}
+							selected={selectedPaper}
+							onSelect={setSelectedPaper}
+							query={libraryQuery}
 						/>
+					) : null}
+					<div
+						className={cn(
+							"h-full min-h-0",
+							(tab !== "agent" || agentProvider !== "ds-harness-remote") &&
+								"hidden",
+						)}
+					>
+						<MobileRemoteAgentPage
+							active={
+								tab === "agent" &&
+								agentProvider === "ds-harness-remote" &&
+								!pairingRequested
+							}
+							selection={remoteSession}
+							onSelectionChange={setRemoteSession}
+						/>
+					</div>
+					{connected ? (
+						<div
+							className={cn(
+								"h-full min-h-0",
+								(tab !== "agent" || agentProvider !== "agentero-bridge") &&
+									"hidden",
+							)}
+						>
+							<MobileAgentPage
+								key={selectedAgentId ?? "default"}
+								selectedAgentId={selectedAgentId}
+								sessionId={agentSessionId}
+								onSessionId={setAgentSessionId}
+								historyOpen={historyOpen}
+								onHistoryOpenChange={setHistoryOpen}
+							/>
+						</div>
+					) : tab === "agent" && agentProvider === "agentero-bridge" ? (
+						<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+							<p className="max-w-sm text-muted-foreground text-sm">
+								{t("agent.connectionRequired")}
+							</p>
+							<Button
+								className="min-h-12"
+								onClick={() => setPairingRequested(true)}
+							>
+								{t("connect.title")}
+							</Button>
+						</div>
 					) : null}
 				</div>
 			</main>
+			<Dialog open={pairingRequested} onOpenChange={setPairingRequested}>
+				<DialogContent
+					showCloseButton={false}
+					aria-describedby={undefined}
+					className="h-dvh w-screen max-w-none rounded-none bg-background p-0 sm:max-w-none"
+				>
+					<DialogTitle className="sr-only">{t("connect.title")}</DialogTitle>
+					<MobilePairing
+						status={status}
+						pending={pairPending}
+						initialOffer={pendingOffer}
+						onStatus={setStatus}
+						onDone={() => {
+							setPendingOffer(null);
+							setPairingRequested(false);
+						}}
+					/>
+				</DialogContent>
+			</Dialog>
 			<MobileSidebar
+				navigation={
+					<MobileNav
+						tab={tab}
+						variant="sidebar"
+						agentTemplate={selectedAgent?.template}
+						onTab={(next) => {
+							setTab(next);
+							setSidebarOpen(false);
+						}}
+					/>
+				}
 				open={sidebarOpen}
 				status={status}
 				onClose={() => setSidebarOpen(false)}
 				onStatus={setStatus}
 				onPairAnother={() => {
+					setAgentProvider("agentero-bridge");
 					setPendingOffer(null);
 					setPairingRequested(true);
 				}}

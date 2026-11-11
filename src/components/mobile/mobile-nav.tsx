@@ -92,6 +92,7 @@ function TabButton({
 					? "font-medium text-foreground"
 					: "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
 			)}
+			aria-label={t(`tabs.${id}`)}
 			aria-current={active ? "page" : undefined}
 		>
 			{id === "agent" ? (

@@ -1,16 +1,13 @@
 //! Typed IPC contract (tauri-specta): keeps `src/lib/core/bindings.ts` in
 //! sync with the Rust command signatures.
 //!
-//! Coverage: every command registered for desktop in `app::handlers`
-//! (`common_commands!` + the desktop-only extras) is collected here, and every
-//! event emitted on desktop is declared in `app::events_contract`;
-//! `event_name` matches the emit literal, emit sites unchanged). The iOS-only
-//! bridge client commands (`integration::bridge::client_commands`) and client
-//! events (`bridge:status` / `bridge:progress` / `bridge:pair-pending`) are
-//! intentionally excluded: they are registered/emitted only in the iOS branch
-//! of `attach_handlers` / `integration::bridge::client`, and their
-//! `bridge_status` collides by command name with the desktop host
-//! `bridge_status`.
+//! Coverage: desktop commands and the mobile Bridge client commands are
+//! collected here. Client commands use `bridge_client_*` names so they cannot
+//! collide with the desktop host. Exporting a command does not register it on
+//! a platform: `app::handlers` owns the mobile allowlist.
+//! Desktop events are declared in `app::events_contract`. The pre-existing
+//! Bridge client events and dynamic forwarded payloads retain their event
+//! listeners; this command migration does not change their wire shapes.
 //!
 //! By default this only verifies the committed file matches the Rust
 //! signatures without overwriting it, so `cargo test` does not dirty the
@@ -23,6 +20,25 @@ use std::path::Path;
 pub(crate) fn export_typescript_bindings() {
     let builder = tauri_specta::Builder::<tauri::Wry>::new()
         .commands(tauri_specta::collect_commands![
+            crate::features::vault::files::vault_write_text_file,
+            crate::features::vault::files::vault_remove_file,
+            crate::app::remote_agent::remote_agent_catalog,
+            crate::app::remote_agent::remote_agent_login,
+            crate::app::remote_agent::remote_agent_logout,
+            crate::app::remote_agent::remote_agent_hosts,
+            crate::app::remote_agent::remote_agent_host_identity,
+            crate::app::remote_agent::remote_agent_trust_host,
+            crate::app::remote_agent::remote_agent_workspaces,
+            crate::app::remote_agent::remote_agent_sessions,
+            crate::app::remote_agent::remote_agent_read_session,
+            crate::app::remote_agent::remote_agent_execute,
+            crate::app::remote_agent::remote_agent_receipt,
+            crate::app::remote_agent::remote_agent_upload,
+            crate::integration::bridge::client_commands::bridge_client_connect,
+            crate::integration::bridge::client_commands::bridge_client_resume,
+            crate::integration::bridge::client_commands::bridge_client_disconnect,
+            crate::integration::bridge::client_commands::bridge_client_status,
+            crate::integration::bridge::client_commands::bridge_client_rpc,
             crate::features::system::settings::commands::settings_get,
             crate::features::system::settings::commands::settings_set,
             crate::features::system::settings::commands::network_system_proxy,
@@ -376,6 +392,15 @@ pub(crate) fn export_typescript_bindings() {
         builder
             .export(specta_typescript::Typescript::default(), out_path)
             .expect("export typescript bindings");
+        // Multiline unions can end lines with spaces. Keep generated output
+        // clean without changing the normalized IPC comparison below.
+        let generated = std::fs::read_to_string(out_path).expect("read exported bindings");
+        let clean = generated
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(out_path, format!("{clean}\n")).expect("normalize exported bindings");
         return;
     }
 
