@@ -680,6 +680,10 @@ export const commands = {
 	syncEvictPaper: (args: SyncPaperArgs) => typedError<ApiResult<number>, string>(__TAURI_INVOKE("sync_evict_paper", { args })),
 	/**  Explicit hints supplement native writes/imports; they never bypass auto-sync preferences. */
 	syncNotifyChange: (args: SyncVaultArgs) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("sync_notify_change", { args })),
+	/**  Read a validated page and the hash of the same exact on-disk bytes. */
+	pdfReadInk: (args: InkReadArgs) => typedError<ApiResult<InkPageSnapshot>, string>(__TAURI_INVOKE("pdf_read_ink", { args })),
+	/**  Apply drafts to the exact page baseline; native code assigns all revisions. */
+	pdfApplyInk: (args: InkApplyArgs) => typedError<ApiResult<InkPageSnapshot>, string>(__TAURI_INVOKE("pdf_apply_ink", { args })),
 	/**
 	 *  Used and included bytes for the signed-in personal or team space.
 	 *  The bearer stays in the keychain; the webview only sees the numbers.
@@ -3539,6 +3543,102 @@ export type ImportLocalPdfResult_Serialize = {
 	/**  `"<file>: <reason>"` for each file that failed to import. */
 	errors: string[],
 };
+
+export type InkApplyArgs = {
+	vaultPath: string,
+	paperFolder: string,
+	page: number,
+	expectedRevision: string | null,
+	operations: InkEdit[],
+};
+
+export type InkDraftPoint = {
+	x: number | null,
+	y: number | null,
+	pressure: number | null,
+	elapsedMs: number | null,
+	tilt: [(number | null), (number | null)] | null,
+};
+
+export type InkEdit = { kind: "put"; stroke: InkStrokeDraft } | { kind: "delete"; id: string };
+
+export type InkPage = {
+	version: number,
+	page: number,
+	strokes: InkStroke[],
+	tombstones: InkTombstone[],
+};
+
+export type InkPageSnapshot = {
+	document: InkPage,
+	/**  SHA-256 of the exact bytes read, or null only when the file is absent. */
+	revision: string | null,
+	/**  Opaque decimal creation metadata for undo, avoiding JS u64 roundtrips. */
+	creationTimes: { [key in string]: string },
+	updateTimes: { [key in string]: string },
+};
+
+export type InkPoint = {
+	x: number | null,
+	y: number | null,
+	/**  Normalized [0, 1]; None means unavailable, not zero pressure. */
+	pressure: number | null,
+	/**
+	 *  Milliseconds since stroke start, not a wall clock. Present samples must
+	 *  be nondecreasing; the first observed sample may be later than zero.
+	 */
+	elapsedMs: number | null,
+	/**  Degrees in [-90, 90] about each device axis; unavailable as a pair. */
+	tilt: [(number | null), (number | null)] | null,
+};
+
+export type InkReadArgs = {
+	vaultPath: string,
+	paperFolder: string,
+	page: number,
+};
+
+/**
+ *  Lamport counter, incremented above all observed revisions when editing an ID.
+ *  Actor is a stable, non-nil replica UUID. Wall clocks never determine winners.
+ */
+export type InkRevision = {
+	counter: number,
+	actor: string,
+};
+
+export type InkStroke = {
+	id: string,
+	page: number,
+	revision: InkRevision,
+	tool: InkTool,
+	/**  RGBA bytes, including opacity, independent of any platform color syntax. */
+	color: [number, number, number, number],
+	baseWidth: number | null,
+	points: InkPoint[],
+	/**  Unix milliseconds, metadata only; updated_at_ms >= created_at_ms. */
+	createdAtMs: number,
+	updatedAtMs: number,
+};
+
+export type InkStrokeDraft = {
+	id: string,
+	tool: InkTool,
+	color: [number, number, number, number],
+	baseWidth: number | null,
+	points: InkDraftPoint[],
+	createdAtMs?: string | null,
+	updatedAtMs?: string | null,
+};
+
+export type InkTombstone = {
+	id: string,
+	revision: InkRevision,
+	/**  Unix milliseconds, metadata only. */
+	deletedAtMs: number,
+};
+
+export type InkTool = "pen" | "highlighter";
 
 /**
  *  A parsed explicit Vault-local link. Markdown remains the source of truth; this

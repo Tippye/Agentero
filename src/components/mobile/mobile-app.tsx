@@ -7,6 +7,7 @@ import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
 import { useMobilePaperSync } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
+import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
 import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
@@ -22,6 +23,7 @@ import {
 import { MobileLibraryPage } from "@/components/mobile/mobile-library-page";
 import { MobileNav, type MobileTab } from "@/components/mobile/mobile-nav";
 import { MobilePairing } from "@/components/mobile/mobile-pairing";
+import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
 import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
@@ -35,6 +37,11 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 import { importMobilePdfs } from "@/lib/mobile/import-pdf";
+import {
+	canLeaveMobilePaper,
+	type MobileWorkspacePreset,
+	mobileWorkspaceLayout,
+} from "@/lib/mobile/workspace";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 export default function MobileApp() {
@@ -49,6 +56,12 @@ export default function MobileApp() {
 		null,
 	);
 	const [readerMode, setReaderMode] = useState<MobileReaderMode>("pdf");
+	const [workspacePreset, setWorkspacePreset] =
+		useState<MobileWorkspacePreset>("read");
+	const [inkDirty, setInkDirty] = useState(false);
+	const [inkMode, setInkMode] = useState(false);
+	const { ref: workspaceRef, widthClass } =
+		useMobileWorkspaceWidth<HTMLDivElement>();
 	const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [agentProvider, setAgentProvider] = useState("ds-harness-remote");
@@ -56,6 +69,12 @@ export default function MobileApp() {
 	const [notesDirty, setNotesDirty] = useState(false);
 	const [importing, setImporting] = useState(false);
 	const fileInput = useRef<HTMLInputElement>(null);
+	const layout = mobileWorkspaceLayout({
+		width: widthClass,
+		preset: workspacePreset,
+		tab,
+		hasPaper: selectedPaper !== null,
+	});
 	const {
 		vaultPath,
 		loading: vaultLoading,
@@ -88,7 +107,7 @@ export default function MobileApp() {
 	} = useMobileAgents({
 		paired,
 		connected,
-		agentVisible: tab === "agent" && agentProvider === "agentero-bridge",
+		agentVisible: layout.agent && agentProvider === "agentero-bridge",
 	});
 
 	const acceptPairOffer = useCallback((offerUrl: string) => {
@@ -103,14 +122,48 @@ export default function MobileApp() {
 		setAgentSessionId(null);
 	}, [paired]);
 
+	const canLeaveReader = useCallback(() => {
+		if (canLeaveMobilePaper(notesDirty, inkDirty)) return true;
+		notifyError(t("reader.unsavedChanges"));
+		return false;
+	}, [notesDirty, inkDirty, t]);
 	const closeReader = useCallback(() => {
-		if (notesDirty) {
-			notifyError(t("reader.unsavedNotes"));
-			return;
-		}
+		if (!canLeaveReader()) return;
 		setSelectedPaper(null);
+		setInkMode(false);
 		setReaderMode("pdf");
-	}, [notesDirty, t]);
+	}, [canLeaveReader]);
+	const selectPaper = useCallback(
+		(paper: PaperMetadata) => {
+			if (selectedPaper?.path === paper.path && selectedPaper?.id === paper.id)
+				return;
+			if (!canLeaveReader()) return;
+			setInkMode(false);
+			setSelectedPaper(paper);
+		},
+		[selectedPaper, canLeaveReader],
+	);
+	const selectPreset = useCallback(
+		(preset: MobileWorkspacePreset) => {
+			if (inkDirty && widthClass === "narrow" && preset !== "read") {
+				notifyError(t("reader.unsavedChanges"));
+				return;
+			}
+			setWorkspacePreset(preset);
+			setReaderMode(preset === "compare" ? "notes" : "pdf");
+		},
+		[inkDirty, widthClass, t],
+	);
+	const selectTab = useCallback(
+		(next: MobileTab) => {
+			if (inkDirty && next !== "library") {
+				notifyError(t("reader.unsavedChanges"));
+				return;
+			}
+			setTab(next);
+		},
+		[inkDirty, t],
+	);
 
 	const importFiles = async (files: File[]) => {
 		if (!vaultPath || importing || !files.length) return;
@@ -153,12 +206,15 @@ export default function MobileApp() {
 				setTab("library");
 			}
 		},
+		inkMode || inkDirty || pairingRequested || syncOpen,
 	);
 
 	const inReader = tab === "library" && selectedPaper !== null;
 
 	return (
 		<div
+			ref={workspaceRef}
+			data-workspace-width={widthClass}
 			className="mobile-shell flex h-dvh min-h-0 overflow-hidden bg-background text-foreground"
 			{...swipeHandlers}
 		>
@@ -175,7 +231,11 @@ export default function MobileApp() {
 					void importFiles(files);
 				}}
 			/>
-			<aside className="hidden w-20 shrink-0 flex-col items-center border-r bg-muted/25 py-6 md:flex">
+			<aside
+				hidden={widthClass !== "wide"}
+				style={{ display: widthClass === "wide" ? undefined : "none" }}
+				className="flex w-20 shrink-0 flex-col items-center border-r bg-muted/25 py-6"
+			>
 				<button
 					type="button"
 					className="grid size-12 place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
@@ -186,7 +246,7 @@ export default function MobileApp() {
 				</button>
 				<MobileNav
 					tab={tab}
-					onTab={setTab}
+					onTab={selectTab}
 					agentTemplate={selectedAgent?.template}
 				/>
 			</aside>
@@ -205,13 +265,15 @@ export default function MobileApp() {
 					brandButtonLabel={t("settings.menu")}
 					onBrandClick={() => setSidebarOpen(true)}
 					showBrand={!inReader}
-					showStatus={tab === "agent" && agentProvider === "agentero-bridge"}
+					wide={widthClass === "wide"}
+					showStatus={layout.agent && agentProvider === "agentero-bridge"}
 					leading={
 						inReader ? (
 							<Button
 								type="button"
 								variant="ghost"
 								size="icon-sm"
+								className="size-11"
 								aria-label={t("reader.back")}
 								onClick={closeReader}
 							>
@@ -224,6 +286,9 @@ export default function MobileApp() {
 							<MobileReaderModeToggle
 								mode={readerMode}
 								onChange={setReaderMode}
+								preset={workspacePreset}
+								widthClass={widthClass}
+								onPresetChange={selectPreset}
 							/>
 						) : tab === "library" ? (
 							<div className="flex shrink-0 items-center gap-1">
@@ -255,152 +320,227 @@ export default function MobileApp() {
 										<Plus className="size-5" />
 									)}
 								</Button>
-								<div className="relative w-[min(10rem,28vw)]">
+								<div
+									className={cn(
+										"relative min-w-0",
+										widthClass === "narrow" ? "w-24" : "w-40",
+									)}
+								>
 									<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
 									<Input
 										value={libraryQuery}
 										onChange={(event) => setLibraryQuery(event.target.value)}
 										placeholder={t("library.search")}
 										aria-label={t("library.search")}
-										className="h-12 w-full pl-8 text-base md:text-sm"
+										className={cn(
+											"h-12 w-full pl-8",
+											widthClass === "narrow" ? "text-base" : "text-sm",
+										)}
 									/>
 								</div>
 							</div>
-						) : (
-							<div className="flex min-w-0 items-center gap-2">
-								<select
-									aria-label={t("remote.provider")}
-									className="h-12 max-w-40 rounded-md border bg-background px-2 text-base md:text-sm"
-									value={agentProvider}
-									onChange={(event) => setAgentProvider(event.target.value)}
-								>
-									<option value="ds-harness-remote">
-										{t("remote.dshProvider")}
-									</option>
-									<option value="agentero-bridge">
-										{t("remote.bridgeProvider")}
-									</option>
-								</select>
-								{agentProvider === "agentero-bridge" ? (
-									<MobileAgentToolbar
-										agents={agents}
-										loading={agentsLoading}
-										selectedAgentId={selectedAgentId}
-										onSelectAgent={handleSelectAgent}
-										onOpenHistory={() => setHistoryOpen(true)}
-									/>
-								) : null}
-							</div>
-						)
+						) : undefined
 					}
 				/>
-				<div className="h-16 shrink-0 md:hidden" aria-hidden="true" />
 				<div className="min-h-0 flex-1 overflow-hidden">
-					{!vaultPath && tab === "library" ? (
-						<div className="grid h-full place-items-center p-6" role="status">
-							{vaultLoading ? (
-								<div className="flex items-center gap-2 text-muted-foreground">
-									<LoaderCircle className="size-5 animate-spin" />
-									{t("local.opening")}
-								</div>
-							) : (
-								<Button
-									variant="outline"
-									className="min-h-12"
-									onClick={retryVault}
-								>
-									{t("local.retry")}
-								</Button>
-							)}
-						</div>
-					) : null}
-					{vaultPath && selectedPaper ? (
-						<div
-							className={cn("h-full min-h-0", tab !== "library" && "hidden")}
-						>
-							<EdgeSwipeBack onBack={closeReader}>
-								<MobileReaderPage
-									key={selectedPaper.path ?? selectedPaper.id}
-									paper={selectedPaper}
-									vaultPath={vaultPath}
-									mode={readerMode}
-									active={tab === "library" && !pairingRequested && !syncOpen}
-									onNotesDirtyChange={setNotesDirty}
-									fetchMissing={paperSync.fetchMissing}
-								/>
-							</EdgeSwipeBack>
-						</div>
-					) : vaultPath && tab === "library" ? (
-						<MobileLibraryPage
-							papers={papers}
-							loading={papersLoading}
-							selected={selectedPaper}
-							onSelect={setSelectedPaper}
-							query={libraryQuery}
-							syncStates={paperSync.states}
-							onPinChange={paperSync.setPinned}
-							syncProgress={paperSync.progressText}
-						/>
-					) : null}
-					<div
-						className={cn(
-							"h-full min-h-0",
-							(tab !== "agent" || agentProvider !== "ds-harness-remote") &&
-								"hidden",
-						)}
-					>
-						<MobileRemoteAgentPage
-							active={
-								tab === "agent" &&
-								agentProvider === "ds-harness-remote" &&
-								!pairingRequested
-							}
-							selection={remoteSession}
-							onSelectionChange={setRemoteSession}
-						/>
-					</div>
-					{connected ? (
-						<div
-							className={cn(
-								"h-full min-h-0",
-								(tab !== "agent" || agentProvider !== "agentero-bridge") &&
-									"hidden",
-							)}
-						>
-							<MobileAgentPage
-								key={selectedAgentId ?? "default"}
-								selectedAgentId={selectedAgentId}
-								sessionId={agentSessionId}
-								onSessionId={setAgentSessionId}
-								historyOpen={historyOpen}
-								onHistoryOpenChange={setHistoryOpen}
-							/>
-						</div>
-					) : tab === "agent" && agentProvider === "agentero-bridge" ? (
-						<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-							<p className="max-w-sm text-muted-foreground text-sm">
-								{t("agent.connectionRequired")}
-							</p>
-							{paired ? (
-								<Button
-									variant="outline"
-									className="min-h-12"
-									onClick={() => void resume()}
-								>
-									{t("local.retry")}
-								</Button>
-							) : null}
-							{resetAvailable ? (
-								<MobileBridgeReset onStatus={setStatus} />
-							) : null}
-							<Button
-								className="min-h-12"
-								onClick={() => setPairingRequested(true)}
-							>
-								{t("connect.title")}
-							</Button>
-						</div>
-					) : null}
+					<MobilePaneGroup
+						id="mobile-workspace"
+						layoutKey={`${widthClass}:${workspacePreset}:${tab}:${Boolean(selectedPaper)}`}
+						panes={[
+							{
+								id: "library",
+								visible: layout.library,
+								weight: 1.3,
+								separatorLabel: t("workspace.resizeLibrary"),
+								content: vaultPath ? (
+									<div className="flex h-full min-h-0 flex-col">
+										<div
+											hidden={!selectedPaper || widthClass !== "wide"}
+											className="shrink-0 border-b p-3"
+										>
+											<Input
+												value={libraryQuery}
+												onChange={(event) =>
+													setLibraryQuery(event.target.value)
+												}
+												aria-label={t("library.search")}
+												placeholder={t("library.search")}
+												className="h-11"
+											/>
+										</div>
+										<div className="min-h-0 flex-1">
+											<MobileLibraryPage
+												papers={papers}
+												loading={papersLoading}
+												selected={selectedPaper}
+												onSelect={selectPaper}
+												query={libraryQuery}
+												syncStates={paperSync.states}
+												onPinChange={paperSync.setPinned}
+												syncProgress={paperSync.progressText}
+											/>
+										</div>
+									</div>
+								) : (
+									<div
+										className="grid h-full place-items-center p-6"
+										role="status"
+									>
+										{vaultLoading ? (
+											<div className="flex items-center gap-2 text-muted-foreground">
+												<LoaderCircle className="size-5 animate-spin" />
+												{t("local.opening")}
+											</div>
+										) : (
+											<Button
+												variant="outline"
+												className="min-h-12"
+												onClick={retryVault}
+											>
+												{t("local.retry")}
+											</Button>
+										)}
+									</div>
+								),
+							},
+							{
+								id: "reader",
+								visible: layout.reader,
+								weight: workspacePreset === "discuss" ? 2 : 3.7,
+								separatorLabel: t("workspace.resizeDiscussion"),
+								content: (
+									<EdgeSwipeBack
+										onBack={closeReader}
+										disabled={
+											widthClass === "wide" ||
+											notesDirty ||
+											inkDirty ||
+											inkMode ||
+											pairingRequested ||
+											syncOpen
+										}
+									>
+										{vaultPath && selectedPaper ? (
+											<MobileReaderPage
+												key={selectedPaper.path ?? selectedPaper.id}
+												paper={selectedPaper}
+												vaultPath={vaultPath}
+												mode={readerMode}
+												preset={workspacePreset}
+												widthClass={widthClass}
+												active={layout.reader && !pairingRequested && !syncOpen}
+												onNotesDirtyChange={setNotesDirty}
+												onInkDirtyChange={setInkDirty}
+												onInkModeChange={setInkMode}
+												fetchMissing={paperSync.fetchMissing}
+											/>
+										) : null}
+									</EdgeSwipeBack>
+								),
+							},
+							{
+								id: "agent",
+								visible: layout.agent,
+								weight: 1.7,
+								content: (
+									<div className="flex h-full min-h-0 flex-col">
+										<div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-3">
+											<select
+												aria-label={t("remote.provider")}
+												className="h-11 min-w-0 max-w-full rounded-md border bg-background px-2 text-base"
+												value={agentProvider}
+												onChange={(event) =>
+													setAgentProvider(event.target.value)
+												}
+											>
+												<option value="ds-harness-remote">
+													{t("remote.dshProvider")}
+												</option>
+												<option value="agentero-bridge">
+													{t("remote.bridgeProvider")}
+												</option>
+											</select>
+											{agentProvider === "agentero-bridge" ? (
+												<MobileAgentToolbar
+													agents={agents}
+													loading={agentsLoading}
+													selectedAgentId={selectedAgentId}
+													onSelectAgent={handleSelectAgent}
+													onOpenHistory={() => setHistoryOpen(true)}
+												/>
+											) : null}
+										</div>
+										<div
+											hidden={agentProvider !== "ds-harness-remote"}
+											style={{
+												display:
+													agentProvider !== "ds-harness-remote"
+														? "none"
+														: undefined,
+											}}
+											className="min-h-0 flex-1"
+										>
+											<MobileRemoteAgentPage
+												active={
+													layout.agent &&
+													agentProvider === "ds-harness-remote" &&
+													!pairingRequested &&
+													!syncOpen
+												}
+												selection={remoteSession}
+												onSelectionChange={setRemoteSession}
+											/>
+										</div>
+										<div
+											hidden={agentProvider !== "agentero-bridge"}
+											style={{
+												display:
+													agentProvider !== "agentero-bridge"
+														? "none"
+														: undefined,
+											}}
+											className="min-h-0 flex-1"
+										>
+											{connected ? (
+												<MobileAgentPage
+													key={selectedAgentId ?? "default"}
+													selectedAgentId={selectedAgentId}
+													sessionId={agentSessionId}
+													onSessionId={setAgentSessionId}
+													historyOpen={historyOpen}
+													onHistoryOpenChange={setHistoryOpen}
+												/>
+											) : (
+												<div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+													<p className="max-w-sm text-muted-foreground text-sm">
+														{t("agent.connectionRequired")}
+													</p>
+													{paired ? (
+														<Button
+															variant="outline"
+															className="min-h-12"
+															onClick={() => void resume()}
+														>
+															{t("local.retry")}
+														</Button>
+													) : null}
+													{resetAvailable ? (
+														<MobileBridgeReset onStatus={setStatus} />
+													) : null}
+													<Button
+														className="min-h-12"
+														onClick={() => setPairingRequested(true)}
+													>
+														{t("connect.title")}
+													</Button>
+												</div>
+											)}
+										</div>
+									</div>
+								),
+							},
+						]}
+					/>
 				</div>
 			</main>
 			<Dialog open={pairingRequested} onOpenChange={setPairingRequested}>
@@ -437,7 +577,7 @@ export default function MobileApp() {
 						variant="sidebar"
 						agentTemplate={selectedAgent?.template}
 						onTab={(next) => {
-							setTab(next);
+							selectTab(next);
 							setSidebarOpen(false);
 						}}
 					/>

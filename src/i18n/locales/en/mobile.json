@@ -27,6 +27,15 @@
 			"connected": "Connected"
 		}
 	},
+	"workspace": {
+		"presets": "Workspace layout",
+		"read": "Read",
+		"compare": "Compare",
+		"discuss": "Discuss",
+		"resizeLibrary": "Resize library and reader",
+		"resizeDiscussion": "Resize reader and Agent",
+		"resizeNotes": "Resize PDF and notes"
+	},
 	"local": {
 		"opening": "Opening local library…",
 		"retry": "Try again"
@@ -60,6 +69,7 @@
 		"pdfUnavailable": "This paper has no available PDF.",
 		"linkUnavailable": "This link cannot be opened in the mobile reader yet.",
 		"unsavedNotes": "Notes have not been saved yet. Finish saving or resolve the conflict before leaving.",
+		"unsavedChanges": "Notes or handwriting have not been saved yet. Finish saving or resolve the conflict before leaving.",
 		"empty": "Choose a paper",
 		"save": "Save notes",
 		"saving": "Saving…"

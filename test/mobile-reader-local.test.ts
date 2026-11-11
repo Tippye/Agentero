@@ -49,7 +49,22 @@ import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 
 let root: ReturnType<typeof createRoot>;
 let width = 500;
-let resize: () => void;
+const observers = new Set<{
+	callback: ResizeObserverCallback;
+	targets: Set<Element>;
+}>();
+function resize() {
+	for (const observer of observers) {
+		const entries = [...observer.targets].map((target) => ({
+			target,
+			contentRect: target.getBoundingClientRect(),
+			borderBoxSize: [{ inlineSize: width, blockSize: 900 }],
+			contentBoxSize: [{ inlineSize: width, blockSize: 900 }],
+			devicePixelContentBoxSize: [{ inlineSize: width, blockSize: 900 }],
+		}));
+		observer.callback(entries, observer as unknown as ResizeObserver);
+	}
+}
 let host: HTMLDivElement;
 const paper = { id: "example", path: "papers/example" } as PaperMetadata;
 const dirty = vi.fn();
@@ -72,15 +87,35 @@ beforeEach(() => {
 	vi.stubGlobal(
 		"ResizeObserver",
 		class {
-			constructor(callback: () => void) {
-				resize = callback;
+			targets = new Set<Element>();
+			constructor(public callback: ResizeObserverCallback) {
+				observers.add(this);
 			}
-			observe() {}
-			disconnect() {}
+			observe(target: Element) {
+				this.targets.add(target);
+			}
+			unobserve(target: Element) {
+				this.targets.delete(target);
+			}
+			disconnect() {
+				this.targets.clear();
+				observers.delete(this);
+			}
 		},
 	);
 	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-		() => ({ width }) as DOMRect,
+		() =>
+			({
+				x: 0,
+				y: 0,
+				left: 0,
+				top: 0,
+				width,
+				height: 900,
+				right: width,
+				bottom: 900,
+				toJSON: () => ({}),
+			}) as DOMRect,
 	);
 	width = 500;
 	state.error.mockClear();
@@ -90,11 +125,15 @@ beforeEach(() => {
 	state.pdfMounts = 0;
 	state.notesMounts = 0;
 	state.viewer = null;
+	observers.clear();
 	host = document.createElement("div");
+	document.body.append(host);
 	root = createRoot(host);
 });
 afterEach(async () => {
 	await act(() => root.unmount());
+	host.remove();
+	observers.clear();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 });

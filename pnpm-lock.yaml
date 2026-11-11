@@ -374,6 +374,9 @@ importers:
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
+      perfect-freehand:
+        specifier: 1.2.3
+        version: 1.2.3
       platejs:
         specifier: ^53.3.14
         version: 53.3.14(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(scheduler@0.27.0)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -5693,6 +5696,9 @@ packages:
 
   perfect-freehand@1.2.0:
     resolution: {integrity: sha512-h/0ikF1M3phW7CwpZ5MMvKnfpHficWoOEyr//KVNTxV4F6deRK1eYMtHyBKEAKFK0aXIEUK9oBvlF6PNXMDsAw==}
+
+  perfect-freehand@1.2.3:
+    resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
 
   performance-now@2.1.0:
     resolution: {integrity: sha512-7EAHlyLHI56VEIdK57uwHdHKIaAGbnXPiw0yWbarQZOKaKpvUIgW0jWRVLiatnM+XXlSwsanIBH/hzGMJulMow==}
@@ -12568,6 +12574,8 @@ snapshots:
       tslib: 1.14.1
 
   perfect-freehand@1.2.0: {}
+
+  perfect-freehand@1.2.3: {}
 
   performance-now@2.1.0: {}
 
