@@ -4,6 +4,8 @@
 > 两端共用的部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`android` 基于 `mobile`，这里只写 Android 特有工作；文中 S0–S9 指共享篇工作项。
 > 已落地的首批平台配置：Tauri 与 Gradle 最低 API 同步为 33；Activity 显式允许自由调整窗口，并接收密度、字体和布局方向变化。后台服务、权限引导、原生导入与多窗口仍待实现和设备验收。
 
+DSH 账户安全存储接入共享 Rust 凭据接口；平台固定 Android native keyring 1.0.0 的局部补丁：新命名空间显式生成 AES-256/GCM 密钥，磁盘提交失败返回错误，失败后的缓存读取隔离，缺失记录的删除重试仍确认落盘，损坏编码不当作空账号。原始许可证、来源及补丁边界见 [后端补丁说明](../../vendor/android-native-keyring-store/AGENTERO_PATCHES.md)。云备份和设备迁移排除此密文 preferences 文件与过渡期 Bridge 凭据目录。两项后端主机测试和 Android ARM64 编译已通过；设备硬件密钥、掉电和后台生命周期仍未验收。Bridge 身份与同步凭据迁移尚待完成。
+
 ## 1. 结论
 
 - 目标是 Android 平板和折叠屏展开态；手机继续可用，只用窄档布局。
