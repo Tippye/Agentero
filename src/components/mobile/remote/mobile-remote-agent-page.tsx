@@ -95,6 +95,11 @@ export function MobileRemoteAgentPage({
 	const [busy, setBusy] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [revision, setRevision] = useState(0);
+	const [journalConnection, setJournalConnection] = useState<string | null>(
+		null,
+	);
+	const [journalFault, setJournalFault] = useState(false);
+	const journalEpoch = useRef(0);
 	const busyRef = useRef(false);
 	const journalRef = useRef<OperationJournal | null>(null);
 	if (!journalRef.current) {
@@ -118,7 +123,17 @@ export function MobileRemoteAgentPage({
 	const selectedKey = session ? sessionKey(session) : null;
 	const currentSelectionKey = useRef(selectedKey);
 	currentSelectionKey.current = selectedKey;
-	const blocked = selectedKey ? journal.blocked(selectedKey) : false;
+	const connectionKey = account
+		? JSON.stringify([
+				account.info.connection.providerId,
+				account.info.connection.connectionId,
+			])
+		: null;
+	const journalReady = Boolean(
+		connectionKey && journalConnection === connectionKey,
+	);
+	const blocked =
+		!journalReady || (selectedKey ? journal.blocked(selectedKey) : false);
 	const entries = account
 		? journal
 				.all()
@@ -214,6 +229,33 @@ export function MobileRemoteAgentPage({
 			cancelled = true;
 		};
 	}, [active, adoptCatalog]);
+	const restoreOperations = useCallback(async () => {
+		if (!account) return;
+		const epoch = ++journalEpoch.current;
+		setJournalConnection(null);
+		setJournalFault(false);
+		const connection = account.info.connection;
+		try {
+			const records = await remoteAgent.localOperations(connection);
+			if (epoch !== journalEpoch.current) return;
+			journal.restore(connection, records);
+			setJournalConnection(
+				JSON.stringify([connection.providerId, connection.connectionId]),
+			);
+		} catch {
+			if (epoch === journalEpoch.current) {
+				setJournalFault(true);
+				notifyError(t("remote.journalUnavailable"));
+			}
+		}
+	}, [account, journal, t]);
+	useEffect(() => {
+		if (!active) return;
+		void restoreOperations();
+		return () => {
+			journalEpoch.current++;
+		};
+	}, [active, restoreOperations]);
 	// Official snapshots include history and currently-owned interactions. Never replay writes on focus/reconnect.
 	useEffect(() => {
 		if (!active || !session || !supports(capabilities, "readSession")) return;
@@ -263,6 +305,7 @@ export function MobileRemoteAgentPage({
 		mutation: Mutation,
 		target: string,
 	): Promise<OperationOutcome> {
+		if (!journalReady) throw new Error(t("remote.journalUnavailable"));
 		const operationId = crypto.randomUUID();
 		const outcome = await journal.dispatch(operationId, target, () =>
 			remoteAgent.execute({ operationId, mutation }),
@@ -343,7 +386,8 @@ export function MobileRemoteAgentPage({
 		await refresh();
 	}
 	async function upload() {
-		if (!session || !canUpload(capabilities) || blocked) return;
+		if (!journalReady || !session || !canUpload(capabilities) || blocked)
+			return;
 		const path = await open({
 			multiple: false,
 			directory: false,
@@ -608,6 +652,7 @@ export function MobileRemoteAgentPage({
 													className="min-h-11 min-w-11"
 													disabled={
 														busy ||
+														!journalReady ||
 														journal.blocked(workspaceKey(workspace.workspace))
 													}
 													aria-label={t("remote.newSession")}
@@ -761,6 +806,26 @@ export function MobileRemoteAgentPage({
 							</div>
 						)}
 					</>
+				)}
+				{account && !journalReady && (
+					<div className="flex items-center gap-3 p-3 text-sm" role="status">
+						<p className="min-w-0 flex-1 text-muted-foreground">
+							{t(
+								journalFault
+									? "remote.journalUnavailable"
+									: "remote.recoveringOperations",
+							)}
+						</p>
+						{journalFault ? (
+							<Button
+								variant="outline"
+								className="min-h-11"
+								onClick={() => void restoreOperations()}
+							>
+								{t("local.retry")}
+							</Button>
+						) : null}
+					</div>
 				)}
 				{entries.length > 0 && (
 					<div className="space-y-2 border-t p-3 text-sm" aria-live="polite">

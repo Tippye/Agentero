@@ -13,27 +13,43 @@ pub struct BridgeConnectArgs {
 
 #[tauri::command]
 #[specta::specta]
-pub fn bridge_client_connect(
+pub async fn bridge_client_connect(
     app: AppHandle,
     controller: State<'_, BridgeClientController>,
     args: BridgeConnectArgs,
-) -> ApiResult<BridgeClientStatus> {
-    match controller.connect(app, args.offer_url, args.device_name) {
-        Ok(status) => ApiResult::ok(status),
-        Err(error) => map_err(error),
-    }
+) -> Result<ApiResult<BridgeClientStatus>, String> {
+    Ok(
+        match controller
+            .connect(app, args.offer_url, args.device_name)
+            .await
+        {
+            Ok(status) => ApiResult::ok(status),
+            Err(error) => map_err(error),
+        },
+    )
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn bridge_client_resume(
+pub async fn bridge_client_resume(
     app: AppHandle,
     controller: State<'_, BridgeClientController>,
-) -> ApiResult<BridgeClientStatus> {
-    match controller.resume(app) {
+) -> Result<ApiResult<BridgeClientStatus>, String> {
+    Ok(match controller.resume(app).await {
         Ok(status) => ApiResult::ok(status),
         Err(error) => map_err(error),
-    }
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bridge_client_reset_identity(
+    controller: State<'_, BridgeClientController>,
+) -> Result<ApiResult<BridgeClientStatus>, String> {
+    Ok(match controller.reset_identity().await {
+        Ok(status) => ApiResult::ok(status),
+        Err(error) => map_err(error),
+    })
 }
 
 #[tauri::command]

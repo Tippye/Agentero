@@ -17,6 +17,8 @@
 		"cameraHint": "Point the camera at the pairing code on your computer.",
 		"cameraUnavailable": "Camera access is unavailable. Paste the pairing link instead.",
 		"pending": "Confirm the code on your desktop",
+		"resetIdentity": "Reset Bridge identity",
+		"resetIdentityConfirm": "Clear this device’s Bridge identity and saved pairing? Pair again to request desktop approval.",
 		"progress": {
 			"relayConnecting": "Connecting to relay…",
 			"e2eeHandshake": "Securing the connection…",
@@ -85,6 +87,8 @@
 	},
 	"remote": {
 		"title": "Remote Agent",
+		"recoveringOperations": "Restoring operation receipts…",
+		"journalUnavailable": "Operation history is unavailable. Restore it before starting a new remote action.",
 		"provider": "Provider",
 		"bridgeProvider": "Agentero Bridge",
 		"dshProvider": "DSH Remote",
@@ -165,6 +169,11 @@
 		"disconnect": "Disconnect"
 	},
 	"errors": {
+		"bridgeIdentityLocked": "Unlock the system credential store, then try Bridge again.",
+		"bridgeIdentityUnavailable": "The system credential store is unavailable. Try Bridge again when it recovers.",
+		"bridgeIdentityInvalid": "The saved Bridge identity is invalid. Reset it and pair again.",
+		"bridgeIdentityMissing": "The saved Bridge identity is missing. Pair with your desktop again.",
+		"bridgeIdentityCleanup": "Bridge identity cleanup is incomplete. Retry resetting the identity.",
 		"connect": "Could not connect",
 		"networkPermission": "iOS is blocking network access for Agentero. Open Settings > Agentero and allow Wireless Data (WLAN & Cellular), then try again."
 	}

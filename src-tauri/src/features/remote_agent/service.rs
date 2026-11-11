@@ -9,21 +9,21 @@ fn invalid(message: impl Into<String>) -> AppError {
     AppError::domain("remote_agent_invalid", message)
 }
 
-fn boundary() -> AppError {
+pub(super) fn boundary() -> AppError {
     AppError::domain(
         "remote_agent_namespace",
         "Remote Agent reference crossed its namespace",
     )
 }
 
-fn identifier(value: &str) -> Result<(), AppError> {
+pub(super) fn identifier(value: &str) -> Result<(), AppError> {
     if value.trim().is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
         return Err(invalid("Invalid opaque Remote Agent identifier"));
     }
     Ok(())
 }
 
-fn connection_ref(connection: &ConnectionRef) -> Result<(), AppError> {
+pub(super) fn connection_ref(connection: &ConnectionRef) -> Result<(), AppError> {
     identifier(&connection.provider_id.0)?;
     identifier(&connection.connection_id.0)
 }
@@ -33,18 +33,18 @@ fn host_ref(host: &HostRef) -> Result<(), AppError> {
     identifier(&host.host_id.0)
 }
 
-fn workspace_ref(workspace: &WorkspaceRef) -> Result<(), AppError> {
+pub(super) fn workspace_ref(workspace: &WorkspaceRef) -> Result<(), AppError> {
     host_ref(&workspace.host)?;
     identifier(&workspace.backend_id.0)?;
     identifier(&workspace.workspace_id.0)
 }
 
-fn session_ref(session: &SessionRef) -> Result<(), AppError> {
+pub(super) fn session_ref(session: &SessionRef) -> Result<(), AppError> {
     workspace_ref(&session.workspace)?;
     identifier(&session.session_id.0)
 }
 
-fn operation_id(id: &OperationId) -> Result<(), AppError> {
+pub(super) fn operation_id(id: &OperationId) -> Result<(), AppError> {
     if !(16..=128).contains(&id.0.len())
         || !id
             .0
@@ -137,16 +137,11 @@ struct Registry {
     providers: HashMap<ProviderId, RegisteredProvider>,
 }
 
-struct OperationRecord {
-    request: Option<OperationRequest>,
-    outcome: OperationOutcome,
-}
-
 #[derive(Default)]
 struct ConnectionState {
     info: Option<ConnectionInfo>,
     active: bool,
-    operations: HashMap<OperationId, OperationRecord>,
+    operations: HashMap<OperationId, JournalEntry>,
 }
 
 impl ConnectionState {
@@ -162,27 +157,33 @@ impl ConnectionState {
 
 /// One process-owned service for all windows and background tasks. Connection
 /// calls are serialized per configured instance, never under the registry lock.
-/// The operation journal lives for this service's lifetime, including disconnects.
-/// Applications must retain operation IDs across restart and inspect official
-/// receipts/history before deciding what a user should do next.
+/// The injected journal owns operation identity across service lifetimes. A local
+/// cache retains conservative Unknown states even if a storage future is dropped.
+/// Neither disconnects nor missing official receipts authorize redispatch.
 pub struct RemoteAgentService {
     registry: RwLock<Registry>,
     connections: Mutex<HashMap<ConnectionRef, Arc<Mutex<ConnectionState>>>>,
+    journal: Arc<dyn OperationJournal>,
 }
 
 impl Default for RemoteAgentService {
     fn default() -> Self {
+        Self::with_journal(Arc::new(MemoryOperationJournal::default()))
+    }
+}
+
+impl RemoteAgentService {
+    pub fn with_journal(journal: Arc<dyn OperationJournal>) -> Self {
         Self {
             registry: RwLock::new(Registry {
                 default_provider: ProviderId::from(DEFAULT_PROVIDER_ID),
                 providers: HashMap::new(),
             }),
             connections: Mutex::new(HashMap::new()),
+            journal,
         }
     }
-}
 
-impl RemoteAgentService {
     pub fn register(&self, adapter: Arc<dyn RemoteAgentProvider>) -> Result<(), AppError> {
         let descriptor = adapter.descriptor();
         identifier(&descriptor.provider_id.0)?;
@@ -424,6 +425,26 @@ impl RemoteAgentService {
         })
     }
 
+    async fn recorded(
+        &self,
+        state: &mut ConnectionState,
+        connection: &ConnectionRef,
+        id: &OperationId,
+    ) -> Result<Option<JournalEntry>, AppError> {
+        if let Some(entry) = state.operations.get(id) {
+            return Ok(Some(entry.clone()));
+        }
+        let entry = self.journal.get(connection, id).await?;
+        if let Some(entry) = &entry {
+            entry.validate()?;
+            if &entry.connection != connection || &entry.operation_id != id {
+                return Err(boundary());
+            }
+            state.operations.insert(id.clone(), entry.clone());
+        }
+        Ok(entry)
+    }
+
     pub async fn execute(&self, request: &OperationRequest) -> Result<OperationOutcome, AppError> {
         operation_id(&request.operation_id)?;
         let workspace = request.mutation.workspace();
@@ -432,58 +453,74 @@ impl RemoteAgentService {
         let provider = self.provider(connection)?;
         let state = self.state(connection).await;
         let mut state = state.lock().await;
-        // Check the journal before connectivity/capabilities: an uncertain write
-        // remains uncertain after disconnect or capability renegotiation.
-        if let Some(previous) = state.operations.get(&request.operation_id) {
-            if previous
-                .request
-                .as_ref()
-                .is_some_and(|original| original != request)
-            {
-                return Err(AppError::domain(
-                    "remote_agent_operation_conflict",
-                    "Operation ID was already used for a different request",
-                ));
-            }
-            // A receipt imported after restart may have no original request.
-            // Still reject any result that does not belong to this target.
-            validate_outcome(&previous.outcome, Some(&request.mutation), connection)?;
-            return Ok(previous.outcome.clone());
+        // Check durable identity before connectivity/capabilities. Restart,
+        // cancellation and capability changes never make a used ID dispatchable.
+        if let Some(previous) = self
+            .recorded(&mut state, connection, &request.operation_id)
+            .await?
+        {
+            return previous.check_request(request);
         }
         let info = state.connected()?;
         require(info, request.mutation.capability())?;
         backend(info, workspace)?;
         validate_mutation(&request.mutation, info)?;
-        state.operations.insert(
-            request.operation_id.clone(),
-            OperationRecord {
-                request: Some(request.clone()),
-                outcome: OperationOutcome::Unknown {
-                    reason: "Dispatch started; no definitive receipt was recorded".into(),
-                },
-            },
-        );
-        // The entry is inserted before awaiting, so a dropped future cannot make
-        // the same ID eligible for blind redispatch.
+        let intent = JournalEntry::intent(request)?;
+        // Cache first to quarantine the ID if the commit future is cancelled.
+        // A provider call is allowed ONLY after a successful durable reservation.
+        state
+            .operations
+            .insert(request.operation_id.clone(), intent.clone());
+        let reservation = self.journal.reserve(&intent).await?;
+        reservation.entry.validate()?;
+        if reservation.entry.connection != *connection
+            || reservation.entry.operation_id != request.operation_id
+        {
+            return Err(boundary());
+        }
+        if !reservation.inserted {
+            state
+                .operations
+                .insert(request.operation_id.clone(), reservation.entry.clone());
+            return reservation.entry.check_request(request);
+        }
+        if reservation.entry != intent {
+            return Err(journal_unavailable());
+        }
         let outcome = match provider.adapter.execute(request).await {
-            Ok(outcome) => match validate_outcome(&outcome, Some(&request.mutation), connection) {
-                Ok(()) => outcome,
-                Err(error) => OperationOutcome::Unknown {
-                    reason: error.to_string(),
-                },
-            },
-            Err(error) => OperationOutcome::Unknown {
-                reason: error.to_string(),
-            },
+            Ok(outcome)
+                if validate_outcome(&outcome, Some(&request.mutation), connection).is_ok() =>
+            {
+                journal_outcome(&outcome)
+            }
+            _ => unknown_outcome(),
         };
-        state.operations.insert(
-            request.operation_id.clone(),
-            OperationRecord {
-                request: Some(request.clone()),
-                outcome: outcome.clone(),
-            },
-        );
-        Ok(outcome)
+        let proposed = match intent.with_outcome(&outcome) {
+            Ok(proposed) => proposed,
+            Err(_) => return Ok(unknown_outcome()),
+        };
+        // Do not publish a definitive local outcome unless its journal update
+        // completed. An error/cancellation leaves the cached durable Unknown.
+        match self.journal.update(&proposed).await {
+            Ok(stored) => {
+                if stored.validate().is_err() {
+                    return Ok(unknown_outcome());
+                }
+                if stored.connection != intent.connection
+                    || stored.operation_id != intent.operation_id
+                    || stored.request_digest != intent.request_digest
+                    || stored.context != intent.context
+                {
+                    return Ok(unknown_outcome());
+                }
+                let outcome = stored.outcome.clone();
+                state
+                    .operations
+                    .insert(request.operation_id.clone(), stored);
+                Ok(outcome)
+            }
+            Err(_) => Ok(unknown_outcome()),
+        }
     }
 
     pub async fn local_outcome(
@@ -491,14 +528,40 @@ impl RemoteAgentService {
         connection: &ConnectionRef,
         id: &OperationId,
     ) -> Result<Option<OperationOutcome>, AppError> {
-        self.provider(connection)?;
+        connection_ref(connection)?;
         operation_id(id)?;
         let state = self.state(connection).await;
+        let mut state = state.lock().await;
+        Ok(self
+            .recorded(&mut state, connection, id)
+            .await?
+            .map(|record| record.outcome))
+    }
+
+    /// Local-only restoration: no provider registration, credential refresh or RPC.
+    pub async fn local_operations(
+        &self,
+        connection: &ConnectionRef,
+    ) -> Result<Vec<JournalEntry>, AppError> {
+        connection_ref(connection)?;
+        let state = self.state(connection).await;
         let state = state.lock().await;
-        Ok(state
-            .operations
-            .get(id)
-            .map(|record| record.outcome.clone()))
+        let mut entries = HashMap::new();
+        for entry in self.journal.list(connection).await? {
+            entry.validate()?;
+            if &entry.connection != connection {
+                return Err(boundary());
+            }
+            if entries.insert(entry.operation_id.clone(), entry).is_some() {
+                return Err(journal_unavailable());
+            }
+        }
+        // A failed/cancelled outcome commit may be more uncertain than a later
+        // readback. Preserve this process's conservative result until lookup.
+        entries.extend(state.operations.clone());
+        let mut entries: Vec<_> = entries.into_values().collect();
+        entries.sort_by(|a, b| a.operation_id.0.cmp(&b.operation_id.0));
+        Ok(entries)
     }
 
     /// Receipt lookup only; NotFound never clears the journal. Also works for a
@@ -512,28 +575,46 @@ impl RemoteAgentService {
         operation_id(id)?;
         let state = self.state(connection).await;
         let mut state = state.lock().await;
-        // A retained ID represents a potentially submitted write even when the
-        // connection is down, receipts are unsupported, or the query fails.
-        state
-            .operations
-            .entry(id.clone())
-            .or_insert_with(|| OperationRecord {
-                request: None,
-                outcome: OperationOutcome::Unknown {
-                    reason: "Receipt lookup pending; operation may already have executed".into(),
-                },
-            });
+        let known = self
+            .recorded(&mut state, connection, id)
+            .await?
+            .unwrap_or_else(|| JournalEntry::imported(connection, id));
+        state.operations.insert(id.clone(), known.clone());
+        // Import is durable even if the following connection/capability check
+        // fails. Receipt queries can never accidentally authorize a resend.
+        let reserved = self
+            .journal
+            .reserve(&known.with_outcome(&unknown_outcome())?)
+            .await?;
+        reserved.entry.validate()?;
+        if &reserved.entry.connection != connection || &reserved.entry.operation_id != id {
+            return Err(boundary());
+        }
+        let known = if reserved.inserted {
+            known
+        } else {
+            reserved.entry
+        };
+        state.operations.insert(id.clone(), known.clone());
         require(state.connected()?, Capability::OperationReceipts)?;
         let receipt = provider.adapter.lookup_receipt(connection, id).await?;
         if let ReceiptLookup::Found(outcome) = &receipt {
-            let mutation = state
-                .operations
-                .get(id)
-                .and_then(|record| record.request.as_ref())
-                .map(|request| &request.mutation);
-            validate_outcome(outcome, mutation, connection)?;
-            if let Some(record) = state.operations.get_mut(id) {
-                record.outcome = outcome.clone();
+            super::journal::validate_context_outcome(outcome, known.context.as_ref(), connection)?;
+            let proposed = known.with_outcome(outcome)?;
+            match self.journal.update(&proposed).await {
+                Ok(stored) => {
+                    stored.validate()?;
+                    if stored.connection != known.connection
+                        || stored.operation_id != known.operation_id
+                        || stored.request_digest != known.request_digest
+                    {
+                        return Err(boundary());
+                    }
+                    let outcome = stored.outcome.clone();
+                    state.operations.insert(id.clone(), stored);
+                    return Ok(ReceiptLookup::Found(outcome));
+                }
+                Err(_) => return Ok(ReceiptLookup::Found(known.outcome)),
             }
         }
         Ok(receipt)

@@ -5,6 +5,7 @@ const ipc = vi.hoisted(() => ({
 	upload: vi.fn(),
 	catalog: vi.fn(),
 	logout: vi.fn(),
+	localOperations: vi.fn(),
 }));
 vi.mock("@/lib/core/bindings", () => ({
 	commands: {
@@ -12,12 +13,14 @@ vi.mock("@/lib/core/bindings", () => ({
 		remoteAgentUpload: ipc.upload,
 		remoteAgentCatalog: ipc.catalog,
 		remoteAgentLogout: ipc.logout,
+		remoteAgentLocalOperations: ipc.localOperations,
 	},
 }));
 vi.mock("@/lib/core/tauri", () => ({ isTauri: () => true }));
 
 import type {
 	Capabilities,
+	JournalEntry,
 	Question,
 	RemoteAgentCatalog,
 	RemoteCredentialState,
@@ -389,5 +392,82 @@ describe("uncertain Remote Agent writes", () => {
 			},
 		});
 		expect(journal.blocked("first")).toBe(false);
+	});
+});
+
+describe("native operation history hydration", () => {
+	const connection = session.workspace.host.connection;
+	const record: JournalEntry = {
+		version: 1,
+		connection,
+		operationId: "native-operation-0001",
+		requestDigest: "a".repeat(64),
+		context: { type: "sendMessage", session },
+		outcome: { status: "unknown", reason: "observation interrupted" },
+	};
+	it("restores native IDs after WebView storage loss without executing anything", async () => {
+		ipc.localOperations.mockResolvedValueOnce({
+			status: "ok",
+			data: { ok: true, data: [record], error: null },
+		});
+		const journal = new OperationJournal();
+		journal.restore(connection, await remoteAgent.localOperations(connection));
+		expect(journal.blocked(sessionKey(session))).toBe(true);
+		const send = vi.fn();
+		expect(
+			await journal.dispatch(record.operationId, sessionKey(session), send),
+		).toEqual(record.outcome);
+		expect(send).not.toHaveBeenCalled();
+	});
+	it("accepts a definitive native outcome and never downgrades it on an older observation", () => {
+		const journal = new OperationJournal();
+		journal.restore(connection, [record]);
+		journal.restore(connection, [
+			{
+				...record,
+				outcome: { status: "succeeded", result: { type: "acknowledged" } },
+			},
+		]);
+		journal.restore(connection, [record]);
+		expect(journal.blocked(sessionKey(session))).toBe(false);
+		expect(journal.all()[0].outcome.status).toBe("succeeded");
+	});
+	it("keeps a known UI target when a receipt imported without request context is restored", async () => {
+		const journal = new OperationJournal();
+		journal.restore(connection, [record]);
+		journal.restore(connection, [
+			{ ...record, requestDigest: null, context: null },
+		]);
+		expect(journal.blocked(sessionKey(session))).toBe(true);
+		const send = vi.fn();
+		await journal.dispatch(record.operationId, sessionKey(session), send);
+		expect(send).not.toHaveBeenCalled();
+	});
+	it("rejects foreign connection and target metadata", () => {
+		const journal = new OperationJournal();
+		expect(() =>
+			journal.restore({ ...connection, connectionId: "foreign" }, [record]),
+		).toThrow();
+		expect(() =>
+			journal.restore(connection, [
+				{
+					...record,
+					context: {
+						type: "sendMessage",
+						session: {
+							...session,
+							workspace: {
+								...session.workspace,
+								host: {
+									...session.workspace.host,
+									connection: { ...connection, connectionId: "foreign" },
+								},
+							},
+						},
+					},
+				},
+			]),
+		).toThrow();
+		expect(journal.all()).toEqual([]);
 	});
 });

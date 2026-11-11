@@ -18,9 +18,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
+import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import { Button } from "@/components/ui/button";
 import type { BridgeClientStatus } from "@/lib/bridge/client";
-import { bridgeDisconnect } from "@/lib/bridge/client";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
@@ -30,6 +30,7 @@ export function MobileSidebar({
 	status,
 	onClose,
 	onStatus,
+	onDisconnect,
 	onPairAnother,
 	onSync,
 	syncDisabled = false,
@@ -39,6 +40,7 @@ export function MobileSidebar({
 	status: BridgeClientStatus;
 	onClose: () => void;
 	onStatus: (status: BridgeClientStatus) => void;
+	onDisconnect: () => Promise<void>;
 	onPairAnother: () => void;
 	onSync: () => void;
 	syncDisabled?: boolean;
@@ -59,8 +61,7 @@ export function MobileSidebar({
 
 	const disconnect = async () => {
 		try {
-			await bridgeDisconnect();
-			onStatus({ connected: false, paired: false });
+			await onDisconnect();
 			onClose();
 		} catch (error) {
 			notifyError(errorText(error));
@@ -217,6 +218,10 @@ export function MobileSidebar({
 												{t("settings.disconnect")}
 											</span>
 										</button>
+										<MobileBridgeReset
+											onStatus={onStatus}
+											onComplete={onClose}
+										/>
 									</div>
 								</div>
 							) : null}

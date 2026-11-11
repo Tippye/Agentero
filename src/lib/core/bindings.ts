@@ -20,9 +20,12 @@ export const commands = {
 	remoteAgentReadSession: (session: SessionRef) => typedError<ApiResult<SessionSnapshot>, string>(__TAURI_INVOKE("remote_agent_read_session", { session })),
 	remoteAgentExecute: (request: OperationRequest) => typedError<ApiResult<OperationOutcome>, string>(__TAURI_INVOKE("remote_agent_execute", { request })),
 	remoteAgentReceipt: (connection: ConnectionRef, operationId: OperationId) => typedError<ApiResult<ReceiptLookup>, string>(__TAURI_INVOKE("remote_agent_receipt", { connection, operationId })),
+	/**  Read this device's journal without refreshing credentials or contacting a Host. */
+	remoteAgentLocalOperations: (connection: ConnectionRef) => typedError<ApiResult<JournalEntry[]>, string>(__TAURI_INVOKE("remote_agent_local_operations", { connection })),
 	remoteAgentUpload: (session: SessionRef, path: string, operationId: OperationId) => typedError<ApiResult<OperationOutcome>, string>(__TAURI_INVOKE("remote_agent_upload", { session, path, operationId })),
-	bridgeClientConnect: (args: BridgeConnectArgs) => __TAURI_INVOKE<ApiResult<BridgeClientStatus>>("bridge_client_connect", { args }),
-	bridgeClientResume: () => __TAURI_INVOKE<ApiResult<BridgeClientStatus>>("bridge_client_resume"),
+	bridgeClientConnect: (args: BridgeConnectArgs) => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_connect", { args })),
+	bridgeClientResume: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_resume")),
+	bridgeClientResetIdentity: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_reset_identity")),
 	bridgeClientDisconnect: () => __TAURI_INVOKE<ApiResult<null>>("bridge_client_disconnect"),
 	bridgeClientStatus: () => __TAURI_INVOKE<ApiResult<BridgeClientStatus>>("bridge_client_status"),
 	bridgeClientRpc: (method: string, params: Json) => typedError<ApiResult<Json>, string>(__TAURI_INVOKE("bridge_client_rpc", { method, params })),
@@ -3841,6 +3844,23 @@ export type JobVaultScopeEnqueueArgs = {
 	params?: Json | null,
 };
 
+/**
+ *  A private journal record and the safe local restore DTO. No prompt, title,
+ *  selected answer, attachment content, local file path or provider error text.
+ */
+export type JournalEntry = {
+	version: number,
+	connection: ConnectionRef,
+	operationId: OperationId,
+	/**
+	 *  None means a retained ID imported without its original request. It can
+	 *  be inspected, but can never authorize dispatch or confirm changed args.
+	 */
+	requestDigest: string | null,
+	context: OperationContext | null,
+	outcome: OperationOutcome,
+};
+
 /**  TypeScript-side representation of arbitrary JSON values. */
 export type Json =
 /**  JSON `null`. */
@@ -4388,6 +4408,8 @@ export type OpenInTerminalResult = {
 	/**  Absolute directory opened as the terminal cwd. */
 	cwd: string,
 };
+
+export type OperationContext = { type: "createSession"; workspace: WorkspaceRef } | { type: "sendMessage"; session: SessionRef } | { type: "cancel"; session: SessionRef } | { type: "respondPermission"; session: SessionRef; requestId: string } | { type: "respondQuestion"; session: SessionRef; requestId: string } | { type: "uploadAttachment"; session: SessionRef };
 
 export type OperationId = string;
 

@@ -19,7 +19,7 @@ export async function bridgeConnect(args: {
 	offerUrl: string;
 	deviceName: string;
 }): Promise<BridgeClientStatus> {
-	return callApi(() => commands.bridgeClientConnect(args));
+	return callApiResult(() => commands.bridgeClientConnect(args));
 }
 
 export async function bridgeDisconnect(): Promise<void> {
@@ -27,7 +27,11 @@ export async function bridgeDisconnect(): Promise<void> {
 }
 
 export async function bridgeResume(): Promise<BridgeClientStatus> {
-	return callApi(() => commands.bridgeClientResume());
+	return callApiResult(() => commands.bridgeClientResume());
+}
+
+export async function bridgeResetIdentity(): Promise<BridgeClientStatus> {
+	return callApiResult(() => commands.bridgeClientResetIdentity());
 }
 
 export async function bridgeStatus(): Promise<BridgeClientStatus> {
