@@ -20,7 +20,7 @@
 
 网络恢复阶段另外完成 Rust 全量 908 项检查（898 通过、10 项既有外部环境用例忽略）、原生频道 3 项、绑定只读比对与 9 项事件契约。独立审查发现提示读取可能跨过正常轮询截止时间，现已限制提示预算并用阻塞回归验证；修复后 21 项后台观察、18 项 Bridge、4 项计数接入与 14 项网络筛选检查，以及 workspace/all-targets 严格 Clippy 均通过。Android 20 项 JVM 策略与 iOS Foundation 的 69 项断言不替代实际设备切网或完整 iOS 目标验收。实现边界见[移动网络恢复](../backend/mobile-connectivity.md)。
 
-原生 PDF 选择阶段复用固定版本的系统 picker，在 Rust 私有 cache 流式暂存后进入同一 commit；Android 整文件描述符边界与可选显示名另由私有原生适配器保证。8 项新宿主用例、移动命令登记、绑定生成/只读比对和事件契约通过；移动端/PDF 共 74 个文件、1246 项测试通过，10 项既有跳过；TypeScript 与依赖图（1477 模块、8109 边）、严格 Clippy 通过。Android Kotlin 编译及 34 项 JVM 策略检查通过。隔离的 `pnpm tauri dev` 已验证真实 IPC 与平板页面初始化；预览窗口无法由桌面控制服务捕获/激活，因此原生选择器的实际取消不计为通过。这些检查不等同于真实 Android/iOS 提供器、系统分享和完整 iOS 目标验收；资源及权限边界见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)。
+原生 PDF 选择阶段复用固定版本的系统 picker，在 Rust 私有 cache 流式暂存后进入同一 commit；Android 整文件描述符边界与可选显示名另由私有原生适配器保证。9 项新宿主用例、移动命令登记、绑定生成/只读比对和事件契约通过；最终宿主全套 918 项中 908 通过、10 项既有忽略；移动端/PDF 共 74 个文件、1246 项测试通过，10 项既有跳过；TypeScript 与依赖图（1477 模块、8109 边）、严格 Clippy 通过。Android Kotlin 编译及 38 项 JVM 策略检查通过。隔离的 `pnpm tauri dev` 已验证真实 IPC 与平板页面初始化；预览窗口无法由桌面控制服务捕获/激活，因此原生选择器的实际取消不计为通过。这些检查不等同于真实 Android/iOS 提供器、系统分享和完整 iOS 目标验收；资源及权限边界见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)。
 
 后续凭据与编辑安全阶段另通过 37 项原生测试（包含跨启动、刷新前持久化、未知刷新不重试、失败清除、精确 Markdown 并发写入与凭据缓存隔离）、99 项定向前端测试、全量 TypeScript、依赖检查、只读绑定/事件契约和全工作区严格 Clippy；新的移动凭据路径通过 Android ARM64 交叉编译。Android/iOS 使用仅 Rust 可调用的 keyring-store，iOS 明确配置 `AfterFirstUnlockThisDeviceOnly`；桌面移动预览仍为启动内会话。Android 的 AES-256 与持久化后端补丁留在平台分支，不把这些测试视为真实设备验证。
 
