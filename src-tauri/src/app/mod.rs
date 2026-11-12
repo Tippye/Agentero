@@ -98,6 +98,14 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
         ),
     );
     crate::features::mobile_background::install(app);
+    app.manage(crate::features::mobile_route::MobileRouteStore::new(
+        app.path()
+            .app_data_dir()
+            .map_err(|error| {
+                crate::core::error::AppError::domain("mobile_route_unavailable", error.to_string())
+            })?
+            .join("mobile-routes"),
+    ));
     app.manage(Arc::new(
         remote_agent::background::RemoteBackgroundMonitors::new(
             app.clone(),

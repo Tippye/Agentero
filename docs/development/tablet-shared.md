@@ -14,7 +14,7 @@
 | S5 远程 Agent | provider 契约、命名空间、能力协商、未知结果控制；DSH REST/Noise/relay/RPC；原生会话/历史/审批/提问/附件映射；类型 IPC 和默认 DSH 移动界面；移动端系统凭据存储、稳定设备身份与连接/指纹恢复、刷新不确定性落盘、清除失败保留账号；Bridge 身份系统迁移、严格恢复与显式重置；原生 SQLite 操作 journal、WebView 重建后恢复 ID 与未知结果保护 | OS 密钥存储与真实账号/Host 的设备闭环；ACP/Codex、DSH 扫码配对与直连目前明确不支持 |
 | S3 结构同步 | 批注/笔迹结构合并；原件冲突保留；移动 S3/WebDAV 设置；PDF 按需获取与离线固定、完整下载选择和校验后清缓存；移动凭据迁入系统存储；前台保存静置/间隔/恢复调度；远端命名空间绑定与精确 HEAD 检查，覆盖换库、清单分叉和 CAS 重试 | 真机与真实 MinIO/WebDAV 的端到端和恢复验收；过滤发布者不能证明整篇删除时仍保守保留笔迹；原生后台另见平台阶段 |
 | S6 手写数据 | 原生 CAS 笔迹 sidecar、逻辑版本/墓碑与耐久同步；WebView 输入及只读显示、笔/荧光笔/按笔擦除/套索移动复制删除/撤销重做、标准压力 Ink 副本导出；套索区域经预览草稿明确发送到默认远程 Agent，未知结果不重放 | Android 笔/Apple Pencil 真机输入、性能/取消/压力验收；来源回跳、原生分享与平台输入路线取舍 |
-| S7/S8/S9 | Android 双前台服务、iOS 有限窗口、Rust 工作计数/过期取消、只读会话观察和 Android 显式设置已接入；scene 临时中断与多 scene 前台标记有回归 | 原生多窗口、完成/审批通知与回跳、网络监听、分享队列、完整 APK/IPA 和设备后台仍未整体验收 |
+| S7/S8/S9 | 按窗口/Vault 保存论文、模式、页码与缩放并在库载入后恢复；Android 双前台服务、iOS 有限窗口、Rust 工作计数/过期取消、只读会话观察和 Android 显式设置已接入；scene 临时中断与多 scene 前台标记有回归 | 原生多窗口、完成/审批通知与回跳、网络监听、分享队列、完整 APK/IPA 和设备后台仍未整体验收 |
 
 已完成的检查包括 Android ARM64 library 目标编译、IPC 绑定生成和只读比对、事件契约、provider 与 DSH 原生协议测试、44 项核心测试和 96 项前端测试。两项需要真实 MinIO/WebDAV 服务的既有测试保持忽略。macOS 原生移动预览在移动端私有文件 ACL 下验证了创建/恢复 Vault、目录内写入、版本校验、旧版本拒写、原件保留、越界拒绝、删除和默认 DSH 页面；这不等同于 Android/iOS 真机通过。完整 Xcode/iPhoneOS SDK 在当前环境不可用。
 
@@ -245,10 +245,12 @@ DSH 原生会话默认走 `harness.remote.*`。ACP 与 Codex 属于独立协议�
 
 ### S7 分屏与多窗口
 
+阅读路由恢复已接通：Rust 按调用窗口与 Vault 隔离、版本 CAS、私有原子落盘；前端等库载入后恢复论文、模式、预设、页码与缩放，不覆盖用户在等待期间的导航。5 项 Rust 存储回归、91 项联合前端回归、绑定/事件/Clippy/TypeScript/依赖检查通过，隔离 Tauri 宿主实际验证原生读写、陈旧 CAS 拒绝和 WebView 协调器恢复后再保存。独立 Activity/Scene、聚焦确认、系统回收映射与设备验收仍待实现；不得把注册表中的标签当作新系统窗口已成功的证据。
+
 分两级：
 
 1. **窗口可缩放**（系统分屏、侧拉、自由窗口）。必须支持，靠 S4 的三档布局实现，缩放时不重置状态。
-2. **多个应用窗口**（「在新窗口打开论文」）。桌面已有文档窗口（`doc_window_open`，`src-tauri/src/app/window/commands.rs:390`；`src/components/shell/doc-window-root.tsx`），窗口标签由路径派生。Tauri 2.11 起，移动端新建窗口会对应到 Android 的新 Activity 和 iOS 的新 Scene；仓库已在 2.12.5，但移动端还没用过，需要技术验证。
+2. **多个应用窗口**（「在新窗口打开论文」）。桌面已有文档窗口（`doc_window_open`，`src-tauri/src/app/window/commands.rs:390`；`src/components/shell/doc-window-root.tsx`），窗口标签由路径派生。仓库固定 Tauri 2.12.5 的移动窗口创建有平台前提：Android 必须显式选择合适的独立 Activity，iOS 必须配置且实际支持多 Scene。默认 builder 可能复用现有容器，注册表标签或返回成功不能证明创建/聚焦独立系统窗口。当前先实现按窗口的阅读路由持久化；原生映射、原子去重和回收恢复仍需技术验证，见[路由恢复与 SDK 边界](../backend/mobile-route.md)。
 
 规则：
 

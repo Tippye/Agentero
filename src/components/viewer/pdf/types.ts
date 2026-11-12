@@ -20,6 +20,7 @@ import type { HighlightColor } from "@/lib/pdf/highlight/palette";
 import type { PdfHighlight } from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 import type { PdfNavigationTarget } from "@/lib/pdf/pending-pdf-page";
+import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 import type { PdfReloadPosition } from "@/lib/pdf/reload-position";
 import type { PdfViewerHandle } from "@/lib/workspace/viewer/pdf-viewer-registry";
 
@@ -90,6 +91,13 @@ export type PdfViewerProps = {
 	reserveCommentRail?: boolean;
 	/** Note embeds keep their own scroll position instead of changing the paper's last-read page. */
 	rememberReadingPosition?: boolean;
+	/** Applied once for this stable document identity, before position emission. */
+	initialReadingSnapshot?: PdfReadingSnapshot | null;
+	/** Identity fences late old-document cleanup from a reused parent view. */
+	onReadingSnapshotChange?: (
+		position: PdfReadingSnapshot,
+		baseDocId: string,
+	) => void;
 	/** Absolute path to paper folder for annotations/marks persistence */
 	paperAbsPath?: string | null;
 	/** Vault-relative paper path stored inside JSON */

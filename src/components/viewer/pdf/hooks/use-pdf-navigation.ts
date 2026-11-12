@@ -26,7 +26,12 @@ import {
 	type PdfNavigationTarget,
 	registerPdfNavigationOwner,
 } from "@/lib/pdf/pending-pdf-page";
-import { readReadingPage, writeReadingPage } from "@/lib/pdf/reading-position";
+import {
+	normalizePdfReadingSnapshot,
+	type PdfReadingSnapshot,
+	readReadingPage,
+	writeReadingPage,
+} from "@/lib/pdf/reading-position";
 import { scrollToPdfRegion } from "@/lib/pdf/region-navigation";
 import {
 	capturePdfReloadPosition,
@@ -58,6 +63,10 @@ export type UsePdfNavigationOptions = {
 	scrollRef: RefObject<ScrollCapability>;
 	zoomRef?: RefObject<ReturnType<typeof useZoom>["provides"]>;
 	reloadPositionRef?: RefObject<PdfReloadPosition | null>;
+	onReadingSnapshotChange?: (
+		position: PdfReadingSnapshot,
+		baseDocId: string,
+	) => void;
 };
 
 export type PdfNavigation = {
@@ -86,10 +95,14 @@ export function usePdfNavigation({
 	scrollRef,
 	zoomRef,
 	reloadPositionRef,
+	onReadingSnapshotChange,
 }: UsePdfNavigationOptions): PdfNavigation {
 	const [pageField, setPageField] = useState("1");
 	const pageFocusedRef = useRef(false);
 	const restoredRef = useRef(false);
+	const snapshotCallback = useRef(onReadingSnapshotChange);
+	snapshotCallback.current = onReadingSnapshotChange;
+	const awaitingPosition = useRef<{ page: number; zoom?: number } | null>(null);
 	const embeddedTargetRef = useRef(embeddedTarget);
 	embeddedTargetRef.current = embeddedTarget;
 	const { provides: scrollCapability } = useScrollCapability();
@@ -107,6 +120,7 @@ export function usePdfNavigation({
 		let restoreFrame: number | null = null;
 		let disposed = false;
 		restoredRef.current = false;
+		awaitingPosition.current = null;
 		const owner = registerPdfNavigationOwner(baseDocId, {
 			navigate: (target) => {
 				const scope = scrollRef.current ?? scrollCapability.forDocument(docId);
@@ -115,6 +129,7 @@ export function usePdfNavigation({
 					cancelAnimationFrame(restoreFrame);
 					restoreFrame = null;
 				}
+				awaitingPosition.current = { page: target.page };
 				restoredRef.current = true;
 				if (target.region) {
 					scrollToPdfRegion(
@@ -136,6 +151,10 @@ export function usePdfNavigation({
 				const snapshot = reloadPositionRef?.current;
 				if (snapshot && snapshot.documentId !== docId && zoomRef?.current) {
 					restoredRef.current = false;
+					awaitingPosition.current = {
+						page: Math.max(1, Math.min(pages, snapshot.page)),
+						zoom: snapshot.zoom,
+					};
 					zoomRef.current.requestZoom(snapshot.zoom);
 					// Zoom changes the virtual page layout. Restore only after the
 					// new document has rendered at the requested scale.
@@ -159,6 +178,7 @@ export function usePdfNavigation({
 				if (!paperKey || scope.getMetrics().currentPage > 1) return true;
 				const saved = readReadingPage(paperKey);
 				if (saved && saved > 1 && saved <= pages) {
+					awaitingPosition.current = { page: saved };
 					scope.scrollToPage({ pageNumber: saved, behavior: "instant" });
 				}
 				return true;
@@ -213,6 +233,20 @@ export function usePdfNavigation({
 			if (!restoredRef.current) return;
 			try {
 				const metrics = scope.getMetrics();
+				const reading = normalizePdfReadingSnapshot({
+					page: metrics.currentPage,
+					zoom: zoomRef?.current?.getState().currentZoomLevel ?? 1,
+				});
+				if (!reading) return;
+				const expected = awaitingPosition.current;
+				if (
+					expected &&
+					(reading.page !== expected.page ||
+						(expected.zoom !== undefined &&
+							Math.abs(reading.zoom - expected.zoom) > 1e-6))
+				)
+					return;
+				awaitingPosition.current = null;
 				const state = docCapRef.current?.getDocumentState(docId);
 				const page = state?.document?.pages[metrics.currentPage - 1];
 				const snapshot = capturePdfReloadPosition(
@@ -228,6 +262,7 @@ export function usePdfNavigation({
 						: undefined,
 				);
 				if (snapshot) reloadPositionRef.current = snapshot;
+				snapshotCallback.current?.(reading, baseDocId);
 			} catch {
 				/* The old document scope can already be gone during replacement. */
 			}
@@ -239,7 +274,14 @@ export function usePdfNavigation({
 			offScroll();
 			offZoom?.();
 		};
-	}, [docId, scrollCapability, reloadPositionRef, zoomRef, docCapRef]);
+	}, [
+		docId,
+		baseDocId,
+		scrollCapability,
+		reloadPositionRef,
+		zoomRef,
+		docCapRef,
+	]);
 
 	// Persist the last read page (debounced) as the user scrolls.
 	useEffect(() => {

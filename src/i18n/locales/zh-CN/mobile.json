@@ -1,4 +1,8 @@
 {
+	"route": {
+		"restoreFailed": "无法恢复阅读位置。",
+		"saveFailed": "无法保存阅读位置。"
+	},
 	"background": {
 		"title": "后台活动",
 		"description": "此设备的系统权限与当前任务状态。",
