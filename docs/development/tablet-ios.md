@@ -2,7 +2,7 @@
 
 > 状态：**开发中，尚未完成真机验收**。现状分析与行号基于 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2）。
 > 两端共用部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`ios` 基于 `mobile`，这里只写 iOS / iPadOS 特有工作；文中 S0–S9 指共享篇工作项。
-> 已落地的首批平台配置：Tauri 与 XcodeGen 模板最低系统同步为 18.2，发布预检检查两处一致。仍不声明常驻后台；有限后台恢复、多场景、原生导入和手写输入仍待实现和设备验收。当前环境缺少完整 Xcode/iPhoneOS SDK。
+> 已落地的首批平台配置：Tauri 与 XcodeGen 模板最低系统同步为 18.2，发布预检检查两处一致。I5 有限后台窗口已有 Swift 适配与纯策略测试，UIKit 集成仍须完整 SDK 与设备验收；不声明常驻、系统调度或后台传输能力。多场景、原生导入仍待实现和设备验收。当前环境缺少完整 Xcode/iPhoneOS SDK。
 
 ## 1. 结论
 
@@ -36,7 +36,7 @@
   | 键 | 用途 | 归属 |
   |---|---|---|
   | `UIApplicationSceneManifest`，其中 `UIApplicationSupportsMultipleScenes = true` | 多窗口 | I6 |
-  | `UIBackgroundModes`：`fetch`、`processing`；`BGTaskSchedulerPermittedIdentifiers` | 后台同步 | I5 |
+  | `UIBackgroundModes`：`fetch`、`processing`；`BGTaskSchedulerPermittedIdentifiers` | 后置：只有实现实际原生工作启动处理器后才配置，当前有限窗口不增加这些键 | I5 |
   | `CFBundleDocumentTypes`（PDF） | 「打开方式」里出现 Agentero | I4 |
   | `UIFileSharingEnabled`、`LSSupportsOpeningDocumentsInPlace` | Vault 在「文件」应用里可见（取决于 D-iOS-2） | I2 |
   | 更新 `NSLocalNetworkUsageDescription` 文案 | 连接局域网里的自部署服务器 | I9 |
@@ -90,7 +90,19 @@
 - **不能在后台长时间维持 Agent 连接。** 审核规则要求后台模式只能用于其本来用途，不能借音频、定位等模式保活。持续处理任务也不适合，等待远端回复没有可报告的进度。
 - **后台收不到 Agent 完成通知**，除非有服务器推送。ds-harness-remote 的代码里没有找到推送实现；Agentero 自己的中继把推送列在后续阶段（[../frontend/mobile.md](../frontend/mobile.md) §8.4）。首个版本的行为是：应用在前台或刚退后台的短时窗口内，用本地通知；之后要等用户回到应用，重连后补齐状态并在应用内提示。
 
-通知权限在第一次用到时才申请（第一次发出 Agent 任务时），不在启动时弹。
+通知权限只通过用户明确发起的前台 `requestNotifications` 申请，状态读取与启动都不弹授权。当前适配器没有发送通知或注册远端推送；授权不代表有后台 Agent 通知能力。
+
+本轮 I5 实现位于 `src-tauri/plugins/agentero-mobile/ios/Sources/`：`AgenteroMobilePlugin.swift` 将五个命令统一分派到主线程，`MobileFiniteWindow.swift` 是无 UIKit 依赖的 epoch 策略，`MobileBackgroundModels.swift` 是与 Rust 对齐的 JSON 契约，`MobileBackgroundController.swift` 管理实际 `UIApplication.beginBackgroundTask` / `endBackgroundTask`、通知状态及设置跳转。插件沿用已合入的 iOS 18.2 Swift Package 与 `init_plugin_agentero_mobile` 入口。
+
+- 原生内部接口固定为 `readState`、`configure({enabled})`、`requestNotifications`、`openSettings({target})`、`apply({generation,agentCount,syncCount,transferCount})`。`configure(true)` 与电池豁免设置返回不支持；`enabled`、`persistentConnection`、`agentActive`、`syncActive`、`backgroundTransfer` 始终为 `false`，`finiteTasks` 为 `true`，电池豁免为 `null`。`syncActive` 表示常驻服务状态，有限窗口另以 `finiteTaskActive` 表示。
+- `generation` 是 Rust 进程级单调递增计数的规范十进制字符串（从 `1` 起），Swift 原生按 `UInt64` 验证并保留最近接受值。重复或较旧的 `apply` 只返回实际状态，不能改变计数、结束新窗口或复活旧工作；取消、到期与生命周期变化不会重置 generation，不经 JS 数字传递。
+- Rust 汇总的同步或传输计数从零变正，且应用仍在前台时，申请一个有限窗口；两类工作重叠共用该窗口，最后一项释放后结束。Agent 计数不参与申请；窗口不是 Agent 保活令牌。
+- 到期时立即结束相应 UIKit 标识符，设置 `finiteTaskExpired`，直接通过 Tauri 原生频道触发 `background-expired` 给 Rust。该路径不依赖 WebView JS。取消、到期及迟到的旧 epoch 回调都不能重复结束同一个窗口；计数未归零前也不能靠重发 `apply` 续期。
+- 前后台切换不代表同步或传输已经完成，因此工作尚未归零时保留同一个有效 UIKit 窗口，直到实际完成、取消或系统到期；再次退后台不会申请新窗口、续期或重置系统预算。Rust 仍按常规生命周期恢复。没有 `BGTaskScheduler` 注册、`fetch` / `processing` 模式、`URLSession` 后台传输或 iOS 26 持续处理任务，因此不宣称系统调度或传输能力。有限时间和是否授予由系统决定，不承诺具体秒数。
+
+验证：纯 Swift 策略与 Foundation JSON 契约已通过 `swiftc` 编译执行，覆盖计数重叠、到期与取消竞态、旧 epoch、前后台切换、Agent 不持有窗口、计数上界、乱序 generation、显式 `null` 字段及准确能力声明；UIKit 与插件桥接叶文件通过 Swift 语法解析。复跑：`swiftc Sources/MobileFiniteWindow.swift Sources/MobileBackgroundModels.swift Tests/MobileFiniteWindowTests.swift -o /tmp/agentero-finite-tests && /tmp/agentero-finite-tests`（在插件 `ios` 目录执行；缓存目录写权限不足时额外指定 `-module-cache-path`）。当前环境只有 Command Line Tools，没有完整 Xcode/iPhoneOS SDK，因此这些检查不等于 UIKit SDK 类型检查、模拟器或真机测试。仍需在 iOS/iPadOS 18.2 真机验证短时同步退后台、系统到期、回前台、通知拒绝与设置返回。
+
+参考取舍：Tauri 官方通知插件展示 `Invoke.parseArgs`、`Invoke.resolve` 和 Swift 插件注册；[通用后台任务插件](https://github.com/guillemcordoba/tauri-plugin-background-tasks/blob/main/ios/Sources/ExamplePlugin.swift) 的 iOS 端仅为模板回显，没有实际有限窗口与到期逻辑，不能直接复用。此处使用 [UIKit 官方有限后台 API](https://developer.apple.com/documentation/uikit/uiapplication/beginbackgroundtask(withname:expirationhandler:))，没有拷贝通用插件代码。
 
 ### I6 分屏与多窗口
 
@@ -153,7 +165,7 @@
 |---|---|
 | M0 | I1（版本、插件骨架、隐私清单）；I3；两项技术验证：I6 多窗口、I7 手写路线 A |
 | M1 | I2；I4 的选文件与「打开方式」；I8 |
-| M2 | I5 的短时任务、后台刷新、后台处理 |
+| M2 | I5 的短时有限窗口；系统调度的后台刷新、后台处理待实际工作启动路径实现 |
 | M3 | I9 |
 | M4 | I7 定型（路线 A 或 B）、Pencil 手势 |
 | M5 | I6 多窗口落地；I4 的分享扩展和拖放；I5 的持续处理任务；I10 |
