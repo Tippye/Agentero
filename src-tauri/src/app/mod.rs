@@ -91,6 +91,21 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
     app.manage(ExternalRenameRepairStore::new());
     app.manage(crate::integration::sync::SyncService::default());
     app.manage(crate::integration::sync::credentials::SyncCredentialService::default());
+    #[cfg(target_os = "ios")]
+    app.manage(
+        crate::features::mobile_background::scene::ForegroundScenes::new(
+            app.webview_windows().keys().cloned(),
+        ),
+    );
+    crate::features::mobile_background::install(app);
+    app.manage(Arc::new(
+        remote_agent::background::RemoteBackgroundMonitors::new(
+            app.clone(),
+            app.state::<Arc<crate::features::mobile_background::MobileBackgroundService>>()
+                .inner()
+                .clone(),
+        ),
+    ));
     app.manage(crate::features::web::html_preview::HtmlPreviewGrants::default());
 
     #[cfg(desktop)]
@@ -654,9 +669,26 @@ pub fn run() {
     {
         builder = builder.on_window_event(|window, event| {
             let service = window.state::<crate::integration::sync::SyncService>();
+            #[cfg(target_os = "ios")]
+            {
+                let active = match event {
+                    tauri::WindowEvent::Resumed | tauri::WindowEvent::Focused(true) => Some(true),
+                    tauri::WindowEvent::Suspended | tauri::WindowEvent::Destroyed => Some(false),
+                    _ => None,
+                };
+                if let Some(foreground) = active.and_then(|active| window.state::<crate::features::mobile_background::scene::ForegroundScenes>().update(window.label(), active)) {
+                    service.set_foreground(window.app_handle(), foreground);
+                    let monitors = window.state::<Arc<remote_agent::background::RemoteBackgroundMonitors>>();
+                    if foreground { monitors.resume(); } else {
+                        monitors.suspend();
+                        window.state::<Arc<crate::features::mobile_background::MobileBackgroundService>>().suspend();
+                    }
+                }
+            }
+            #[cfg(target_os = "android")]
             match event {
                 tauri::WindowEvent::Suspended => service.set_foreground(window.app_handle(), false),
-                tauri::WindowEvent::Resumed => service.set_foreground(window.app_handle(), true),
+                tauri::WindowEvent::Resumed | tauri::WindowEvent::Focused(true) => service.set_foreground(window.app_handle(), true),
                 _ => {}
             }
         });
@@ -681,6 +713,15 @@ pub fn run() {
                 event,
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
+                app.state::<Arc<remote_agent::background::RemoteBackgroundMonitors>>()
+                    .shutdown();
+                let background = app
+                    .state::<Arc<crate::features::mobile_background::MobileBackgroundService>>()
+                    .inner()
+                    .clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = background.shutdown().await;
+                });
                 #[cfg(desktop)]
                 {
                     app.state::<Arc<crate::features::agent::session::pool::AgentWarmPool>>()

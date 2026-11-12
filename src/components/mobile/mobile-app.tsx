@@ -10,6 +10,7 @@ import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
+import { MobileBackgroundSettings } from "@/components/mobile/mobile-background-settings";
 import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import {
 	EdgeSwipeBack,
@@ -36,6 +37,10 @@ import type { SessionRef } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
+import {
+	type BackgroundState,
+	getMobileBackgroundState,
+} from "@/lib/mobile/background";
 import { importMobilePdfs } from "@/lib/mobile/import-pdf";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import {
@@ -51,6 +56,9 @@ export default function MobileApp() {
 	const [libraryQuery, setLibraryQuery] = useState("");
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [syncOpen, setSyncOpen] = useState(false);
+	const [backgroundOpen, setBackgroundOpen] = useState(false);
+	const [backgroundState, setBackgroundState] =
+		useState<BackgroundState | null>(null);
 	const [pairingRequested, setPairingRequested] = useState(false);
 	const [pendingOffer, setPendingOffer] = useState<string | null>(null);
 	const [selectedPaper, setSelectedPaper] = useState<PaperMetadata | null>(
@@ -91,7 +99,7 @@ export default function MobileApp() {
 		agentProvider,
 		widthClass,
 		inkDirty,
-		blocked: pairingRequested || syncOpen,
+		blocked: pairingRequested || syncOpen || backgroundOpen,
 	});
 	latestRegionTarget.current = {
 		vaultPath,
@@ -99,7 +107,7 @@ export default function MobileApp() {
 		agentProvider,
 		widthClass,
 		inkDirty,
-		blocked: pairingRequested || syncOpen,
+		blocked: pairingRequested || syncOpen || backgroundOpen,
 	};
 
 	const { status, setStatus, pairPending, disconnect, resume, resetAvailable } =
@@ -116,7 +124,7 @@ export default function MobileApp() {
 	const paperSync = useMobilePaperSync({
 		vaultPath,
 		papers,
-		active: !syncOpen,
+		active: !syncOpen && !backgroundOpen,
 		onChanged: refreshAfterDownload,
 	});
 	const {
@@ -137,6 +145,22 @@ export default function MobileApp() {
 		setPairingRequested(true);
 	}, []);
 	usePairOfferLinks(acceptPairOffer);
+
+	useEffect(() => {
+		if (!sidebarOpen) return;
+		let current = true;
+		void (async () => {
+			try {
+				const state = await getMobileBackgroundState();
+				if (current) setBackgroundState(state);
+			} catch {
+				// Optional capability discovery is retried when the menu reopens.
+			}
+		})();
+		return () => {
+			current = false;
+		};
+	}, [sidebarOpen]);
 
 	useEffect(() => {
 		if (paired) return;
@@ -259,7 +283,7 @@ export default function MobileApp() {
 				setTab("library");
 			}
 		},
-		inkMode || inkDirty || pairingRequested || syncOpen,
+		inkMode || inkDirty || pairingRequested || syncOpen || backgroundOpen,
 	);
 
 	const inReader = tab === "library" && selectedPaper !== null;
@@ -470,7 +494,8 @@ export default function MobileApp() {
 											inkDirty ||
 											inkMode ||
 											pairingRequested ||
-											syncOpen
+											syncOpen ||
+											backgroundOpen
 										}
 									>
 										{vaultPath && selectedPaper ? (
@@ -481,7 +506,12 @@ export default function MobileApp() {
 												mode={readerMode}
 												preset={workspacePreset}
 												widthClass={widthClass}
-												active={layout.reader && !pairingRequested && !syncOpen}
+												active={
+													layout.reader &&
+													!pairingRequested &&
+													!syncOpen &&
+													!backgroundOpen
+												}
 												onNotesDirtyChange={setNotesDirty}
 												onInkDirtyChange={setInkDirty}
 												onInkModeChange={setInkMode}
@@ -543,7 +573,8 @@ export default function MobileApp() {
 													layout.agent &&
 													agentProvider === "ds-harness-remote" &&
 													!pairingRequested &&
-													!syncOpen
+													!syncOpen &&
+													!backgroundOpen
 												}
 												selection={remoteSession}
 												onSelectionChange={setRemoteSession}
@@ -628,7 +659,17 @@ export default function MobileApp() {
 				onOpenChange={setSyncOpen}
 				onSynced={rescanAfterSync}
 			/>
+			<MobileBackgroundSettings
+				open={backgroundOpen}
+				onOpenChange={setBackgroundOpen}
+				onStateChange={setBackgroundState}
+			/>
 			<MobileSidebar
+				onBackground={
+					backgroundState?.persistentConnection
+						? () => setBackgroundOpen(true)
+						: undefined
+				}
 				onSync={() => setSyncOpen(true)}
 				syncDisabled={!vaultPath}
 				navigation={

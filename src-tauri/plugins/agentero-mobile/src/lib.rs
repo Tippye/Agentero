@@ -35,6 +35,25 @@ impl<R: Runtime> MobileBackground<R> {
             Ok(BackgroundState::unsupported(BackgroundPlatform::Desktop))
         }
     }
+    /// Subscribe directly into Rust; expiration cannot depend on a live WebView.
+    #[cfg(mobile)]
+    pub async fn on_expired(
+        &self,
+        expired: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let handler = tauri::ipc::Channel::<serde_json::Value>::new(move |_| {
+            expired();
+            Ok(())
+        });
+        self.handle
+            .run_mobile_plugin_async::<serde_json::Value>(
+                "registerListener",
+                serde_json::json!({"event":"background-expired", "handler": handler}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
     pub async fn read_state(&self) -> Result<BackgroundState, String> {
         self.call("readState", serde_json::json!({})).await
     }

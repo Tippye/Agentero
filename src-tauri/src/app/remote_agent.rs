@@ -1,4 +1,5 @@
 //! Application coordinator: typed provider operations and native DSH credentials.
+pub(crate) mod background;
 mod lifecycle;
 mod stored_account;
 use crate::{
@@ -197,6 +198,7 @@ pub async fn remote_agent_login(
     service: State<'_, RemoteAgentService>,
     provider: State<'_, Arc<DshRemoteProvider>>,
     accounts: State<'_, RemoteAgentAccounts>,
+    monitors: State<'_, Arc<background::RemoteBackgroundMonitors>>,
 ) -> Result<ApiResult<RemoteAgentAccount>, String> {
     envelope(
         async {
@@ -251,9 +253,13 @@ pub async fn remote_agent_login(
                     },
                 },
             };
-            current
+            let result = current
                 .activate(account, accounts.store.as_ref(), &service, &provider)
-                .await
+                .await;
+            if result.is_ok() {
+                monitors.resume();
+            }
+            result
         }
         .await,
     )
@@ -264,10 +270,15 @@ pub async fn remote_agent_logout(
     service: State<'_, RemoteAgentService>,
     provider: State<'_, Arc<DshRemoteProvider>>,
     accounts: State<'_, RemoteAgentAccounts>,
+    monitors: State<'_, Arc<background::RemoteBackgroundMonitors>>,
 ) -> Result<ApiResult<()>, String> {
+    monitors.suspend();
     envelope(
         async {
             let mut current = accounts.current.lock().await;
+            if let Some(account) = &current.account {
+                monitors.stop_connection(&account.view.info.connection);
+            }
             current
                 .clear(accounts.store.as_ref(), &service, &provider)
                 .await
@@ -330,6 +341,7 @@ pub async fn remote_agent_trust_host(
     service: State<'_, RemoteAgentService>,
     provider: State<'_, Arc<DshRemoteProvider>>,
     accounts: State<'_, RemoteAgentAccounts>,
+    monitors: State<'_, Arc<background::RemoteBackgroundMonitors>>,
 ) -> Result<ApiResult<ConnectionInfo>, String> {
     envelope(
         async {
@@ -348,6 +360,8 @@ pub async fn remote_agent_trust_host(
                 account.pins.get(&host.host_id.0),
                 Some(&expected_fingerprint),
             )?;
+            // A captured observer must not reconnect the previously selected Host.
+            monitors.select_host(&host);
             current
                 .pin(
                     &host.connection,
@@ -425,6 +439,8 @@ pub async fn remote_agent_execute(
     service: State<'_, RemoteAgentService>,
     provider: State<'_, Arc<DshRemoteProvider>>,
     accounts: State<'_, RemoteAgentAccounts>,
+    background: State<'_, Arc<crate::features::mobile_background::MobileBackgroundService>>,
+    monitors: State<'_, Arc<background::RemoteBackgroundMonitors>>,
 ) -> Result<ApiResult<OperationOutcome>, String> {
     if let Err(error) = preflight(
         &request.mutation.workspace().host.connection,
@@ -441,7 +457,32 @@ pub async fn remote_agent_execute(
             "Use the private-file upload command",
         )));
     }
-    envelope(service.execute(&request).await)
+    let ticket = if matches!(&request.mutation, Mutation::SendMessage { .. }) {
+        match background.state().await {
+            Ok(state) if state.persistent_connection && state.enabled => {
+                match monitors.prepare(&request).await {
+                    Ok(ticket) => ticket,
+                    Err(error) => {
+                        log::warn!(
+                            "Native session observation was not admitted: {}",
+                            error.code()
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let result = service.execute(&request).await;
+    if let Some(ticket) = ticket {
+        if let Ok(outcome) = &result {
+            ticket.finish(outcome);
+        }
+    }
+    envelope(result)
 }
 /// Read this device's journal without refreshing credentials or contacting a Host.
 #[tauri::command]
@@ -529,24 +570,31 @@ pub async fn remote_agent_upload(
                 .to_owned();
             // Opaque one-use authority key; no local filesystem path enters the provider mutation.
             let grant = uuid::Uuid::new_v4().to_string();
-            provider
-                .grant_upload_file(&session.workspace.host.connection, grant.clone(), file)
-                .await
-                .map_err(remote)?;
-            service
-                .execute(&OperationRequest {
-                    operation_id,
-                    mutation: Mutation::UploadAttachment {
-                        upload: AttachmentUpload {
-                            session,
-                            local_path: grant,
-                            file_name,
-                            mime_type: "application/octet-stream".into(),
-                            size_bytes: metadata.len(),
-                        },
-                    },
-                })
-                .await
+            crate::features::mobile_background::with_work(
+                &app,
+                crate::features::mobile_background::BackgroundReason::Transfer,
+                async {
+                    provider
+                        .grant_upload_file(&session.workspace.host.connection, grant.clone(), file)
+                        .await
+                        .map_err(remote)?;
+                    service
+                        .execute(&OperationRequest {
+                            operation_id,
+                            mutation: Mutation::UploadAttachment {
+                                upload: AttachmentUpload {
+                                    session,
+                                    local_path: grant,
+                                    file_name,
+                                    mime_type: "application/octet-stream".into(),
+                                    size_bytes: metadata.len(),
+                                },
+                            },
+                        })
+                        .await
+                },
+            )
+            .await
         }
         .await,
     )
