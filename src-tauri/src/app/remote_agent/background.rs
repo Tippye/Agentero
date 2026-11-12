@@ -38,6 +38,7 @@ fn locked<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Clone, Copy)]
 struct Policy {
     interval: Duration,
+    hint_interval: Duration,
     baseline: Duration,
     read: Duration,
     failures: usize,
@@ -47,6 +48,7 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             interval: Duration::from_secs(25),
+            hint_interval: Duration::from_secs(1),
             baseline: Duration::from_secs(3),
             read: Duration::from_secs(15),
             failures: 3,
@@ -129,6 +131,10 @@ enum ReadFailure {
 #[async_trait]
 trait ObservationSource: Send + Sync {
     async fn read(&self, session: &SessionRef) -> Result<Observation, ReadFailure>;
+    /// A path-change hint must never fall through to credential refresh.
+    async fn read_network_hint(&self, _session: &SessionRef) -> Result<Observation, ReadFailure> {
+        Err(ReadFailure::Unavailable)
+    }
 }
 struct NativeSource {
     app: tauri::AppHandle,
@@ -171,6 +177,19 @@ impl ObservationSource for NativeSource {
         self.check_account(session).await?;
         Observation::snapshot(session, snapshot)
     }
+    async fn read_network_hint(&self, session: &SessionRef) -> Result<Observation, ReadFailure> {
+        self.check_account(session).await?;
+        // Use only the current provider's cached access token. Authentication
+        // failures stay read failures; only the normal poll owns preflight/refresh.
+        let snapshot = self
+            .app
+            .state::<RemoteAgentService>()
+            .read_session(session)
+            .await
+            .map_err(|_| ReadFailure::Unavailable)?;
+        self.check_account(session).await?;
+        Observation::snapshot(session, snapshot)
+    }
 }
 
 struct MonitorState {
@@ -188,6 +207,7 @@ struct Monitor {
     admission: tokio::sync::Mutex<()>,
     cancelled: CancellationToken,
     wake: Notify,
+    network: Notify,
 }
 impl Monitor {
     fn stop(&self) {
@@ -362,6 +382,7 @@ impl RemoteBackgroundMonitors {
                         admission: tokio::sync::Mutex::new(()),
                         cancelled: CancellationToken::new(),
                         wake: Notify::new(),
+                        network: Notify::new(),
                     })
                 })
                 .clone();
@@ -435,6 +456,17 @@ impl RemoteBackgroundMonitors {
         }
         for (_, monitor) in registry.monitors.drain() {
             monitor.stop();
+        }
+    }
+    /// Hint only already-running observers. Notify retains at most one pending
+    /// hint while a read is in flight; admission, leases and baselines are intact.
+    #[cfg(any(mobile, test))]
+    pub fn network_changed(&self) {
+        let registry = locked(&self.inner.registry);
+        for monitor in registry.monitors.values() {
+            if registry.current(monitor) && locked(&monitor.state).running {
+                monitor.network.notify_one();
+            }
         }
     }
     pub fn stop_connection(&self, connection: &ConnectionRef) {
@@ -658,6 +690,10 @@ async fn observe(scope: ObserverOwner, source: Arc<dyn ObservationSource>, polic
     let mut revision = 0;
     let mut progress = Progress::new(None);
     let mut failures = 0usize;
+    let mut network_hint = false;
+    let mut network_pending = false;
+    let mut next_normal = tokio::time::Instant::now();
+    let mut next_hint = next_normal;
     loop {
         let (current, baseline) = {
             let state = locked(&monitor.state);
@@ -674,10 +710,22 @@ async fn observe(scope: ObserverOwner, source: Arc<dyn ObservationSource>, polic
         {
             break;
         }
+        let read_deadline = tokio::time::Instant::now() + policy.read;
+        let read_deadline = if network_hint {
+            read_deadline.min(next_normal)
+        } else {
+            read_deadline
+        };
         let sample = tokio::select! { biased;
             _ = monitor.cancelled.cancelled() => break,
             _ = cancellation.cancelled() => break,
-            value = tokio::time::timeout(policy.read, source.read(&monitor.session)) => value,
+            value = tokio::time::timeout_at(read_deadline, async {
+                if network_hint {
+                    source.read_network_hint(&monitor.session).await
+                } else {
+                    source.read(&monitor.session).await
+                }
+            }) => value,
         };
         if !manager
             .upgrade()
@@ -686,6 +734,14 @@ async fn observe(scope: ObserverOwner, source: Arc<dyn ObservationSource>, polic
             break;
         }
         let (stop, force) = match sample {
+            Ok(Ok(sample)) if network_hint => {
+                let unsettled = progress.unsettled;
+                let result = progress.observe(&sample, usize::MAX);
+                // Hints may prove a fresh whole turn, but flaps must not consume
+                // or reset the scheduled poll's finite settling budget.
+                progress.unsettled = unsettled;
+                (result == ObservationResult::FreshTerminal, false)
+            }
             Ok(Ok(sample)) => {
                 failures = 0;
                 (
@@ -694,6 +750,7 @@ async fn observe(scope: ObserverOwner, source: Arc<dyn ObservationSource>, polic
                 )
             }
             Ok(Err(ReadFailure::Namespace)) => (true, true),
+            _ if network_hint => (false, false),
             _ => {
                 failures += 1;
                 (failures >= policy.failures, true)
@@ -707,12 +764,25 @@ async fn observe(scope: ObserverOwner, source: Arc<dyn ObservationSource>, polic
                 break;
             }
         }
-        tokio::select! { biased;
-            _ = monitor.cancelled.cancelled() => break,
-            _ = cancellation.cancelled() => break,
-            _ = tokio::time::sleep(policy.interval) => {},
-            _ = monitor.wake.notified() => {},
+        if network_hint {
+            next_hint = tokio::time::Instant::now() + policy.hint_interval;
+        } else {
+            next_normal = tokio::time::Instant::now() + policy.interval;
         }
+        // Hints must not postpone scheduled credential policy or observation.
+        network_hint = loop {
+            tokio::select! { biased;
+                _ = monitor.cancelled.cancelled() => return,
+                _ = cancellation.cancelled() => return,
+                _ = tokio::time::sleep_until(next_normal) => break false,
+                _ = monitor.wake.notified() => break false,
+                _ = tokio::time::sleep_until(next_hint), if network_pending => {
+                    network_pending = false;
+                    break true;
+                },
+                _ = monitor.network.notified() => network_pending = true,
+            }
+        };
     }
     // ObserverOwner releases local work on every exit. Never call execute/cancel,
     // change durable receipts or clear operation IDs.

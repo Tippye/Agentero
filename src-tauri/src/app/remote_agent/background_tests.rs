@@ -62,6 +62,9 @@ struct Source {
     steps: Mutex<VecDeque<Step>>,
     fallback: Mutex<Result<Observation, ReadFailure>>,
     calls: AtomicUsize,
+    hint_calls: AtomicUsize,
+    hint_steps: Mutex<VecDeque<Step>>,
+    hint_fallback: Mutex<Result<Observation, ReadFailure>>,
     dropped: AtomicUsize,
     targets: Mutex<Vec<SessionRef>>,
     blocked: AtomicBool,
@@ -73,6 +76,9 @@ impl Source {
             steps: Mutex::new(VecDeque::new()),
             fallback: Mutex::new(Ok(sample(TaskStatus::Running, 0, &[]))),
             calls: AtomicUsize::new(0),
+            hint_calls: AtomicUsize::new(0),
+            hint_steps: Mutex::new(VecDeque::new()),
+            hint_fallback: Mutex::new(Err(ReadFailure::Unavailable)),
             dropped: AtomicUsize::new(0),
             targets: Mutex::new(Vec::new()),
             blocked: AtomicBool::new(false),
@@ -81,6 +87,15 @@ impl Source {
     }
     fn push(&self, values: impl IntoIterator<Item = Result<Observation, ReadFailure>>) {
         locked(&self.steps).extend(values.into_iter().map(Step::Value));
+    }
+    async fn hint_calls(&self, count: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.hint_calls.load(Ordering::SeqCst) < count {
+                self.changed.notified().await;
+            }
+        })
+        .await
+        .expect("observer did not read the nonrotating hint path");
     }
     async fn calls(&self, count: usize) {
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -114,6 +129,17 @@ impl ObservationSource for Source {
             Some(Step::Value(value)) => value,
             Some(Step::Gate(gate)) => gate.await.unwrap_or(Err(ReadFailure::Unavailable)),
             None => locked(&self.fallback).clone(),
+        }
+    }
+    async fn read_network_hint(&self, session: &SessionRef) -> Result<Observation, ReadFailure> {
+        locked(&self.targets).push(session.clone());
+        self.hint_calls.fetch_add(1, Ordering::SeqCst);
+        self.changed.notify_one();
+        let step = locked(&self.hint_steps).pop_front();
+        match step {
+            Some(Step::Value(value)) => value,
+            Some(Step::Gate(gate)) => gate.await.unwrap_or(Err(ReadFailure::Unavailable)),
+            None => locked(&self.hint_fallback).clone(),
         }
     }
 }
@@ -167,19 +193,23 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_policy(Policy {
+            interval: Duration::from_millis(5),
+            hint_interval: Duration::from_millis(5),
+            baseline: Duration::from_millis(50),
+            read: Duration::from_millis(30),
+            failures: 3,
+            settling: 4,
+        })
+    }
+    fn with_policy(policy: Policy) -> Self {
         let driver = Arc::new(Driver::default());
         let common = MobileBackgroundService::new(driver.clone());
         let source = Arc::new(Source::new());
         let monitors = Arc::new(RemoteBackgroundMonitors::with_source(
             common.clone(),
             source.clone(),
-            Policy {
-                interval: Duration::from_millis(5),
-                baseline: Duration::from_millis(50),
-                read: Duration::from_millis(30),
-                failures: 3,
-                settling: 4,
-            },
+            policy,
         ));
         monitors.select_host(&session().workspace.host);
         Self {
@@ -278,6 +308,129 @@ fn first_terminal_history_is_unproven_and_unknown_or_reset_cursors_never_claim_c
     let mut replaced = done.clone();
     replaced.through.as_mut().unwrap().stream = "new-epoch".into();
     assert_eq!(progress.observe(&replaced, 3), ObservationResult::Continue);
+}
+
+fn network_policy() -> Policy {
+    Policy {
+        interval: Duration::from_secs(10),
+        hint_interval: Duration::from_millis(2),
+        baseline: Duration::from_millis(50),
+        read: Duration::from_secs(1),
+        failures: 2,
+        settling: 2,
+    }
+}
+
+#[tokio::test]
+async fn network_bursts_use_nonrotating_reads_without_admission_or_budget_consumption() {
+    let fixture = Fixture::with_policy(network_policy());
+    fixture.monitors.network_changed();
+    assert_eq!(fixture.source.calls.load(Ordering::SeqCst), 0);
+    let ticket = fixture.prepare(1).await;
+    fixture.monitors.network_changed();
+    assert_eq!(fixture.source.hint_calls.load(Ordering::SeqCst), 0);
+    ticket.finish(&OperationOutcome::Accepted);
+    fixture.source.calls(2).await;
+    fixture.driver.agents(1).await;
+    let (release, gate) = oneshot::channel();
+    locked(&fixture.source.hint_steps).push_back(Step::Gate(gate));
+    fixture.monitors.network_changed();
+    fixture.source.hint_calls(1).await;
+    for _ in 0..1000 {
+        fixture.monitors.network_changed();
+    }
+    release
+        .send(Err(ReadFailure::Unavailable))
+        .unwrap_or_else(|_| panic!("hint was cancelled by another hint"));
+    fixture.source.hint_calls(2).await;
+    // The second failed hint would exhaust the regular failure budget.
+    assert_eq!(locked(&fixture.monitors.inner.registry).monitors.len(), 1);
+    assert_eq!(fixture.source.calls.load(Ordering::SeqCst), 2);
+    *locked(&fixture.source.hint_fallback) = Ok(sample(TaskStatus::Idle, 0, &[]));
+    for count in 3..=6 {
+        fixture.monitors.network_changed();
+        fixture.source.hint_calls(count).await;
+    }
+    assert_eq!(locked(&fixture.monitors.inner.registry).monitors.len(), 1);
+    fixture.driver.agents(1).await;
+    // A genuinely fresh complete turn remains authoritative, unlike stale Idle.
+    *locked(&fixture.source.hint_fallback) = Ok(sample(
+        TaskStatus::Completed,
+        2,
+        &[(1, TaskStatus::Running), (2, TaskStatus::Completed)],
+    ));
+    fixture.monitors.network_changed();
+    fixture.stopped().await;
+}
+
+#[tokio::test]
+async fn blocked_hint_yields_to_normal_deadline_before_its_read_budget_or_gate_release() {
+    let fixture = Fixture::with_policy(Policy {
+        interval: Duration::from_millis(30),
+        failures: 1,
+        ..network_policy()
+    });
+    fixture.prepare(1).await.finish(&OperationOutcome::Accepted);
+    fixture.source.calls(2).await;
+    let (release, gate) = oneshot::channel();
+    locked(&fixture.source.hint_steps).push_back(Step::Gate(gate));
+    fixture.monitors.network_changed();
+    fixture.source.hint_calls(1).await;
+    // policy.read is one second. The 30ms normal poll must cancel the blocked
+    // hint, not wait for its gate or charge its timeout to failures=1.
+    tokio::time::timeout(Duration::from_millis(500), fixture.source.calls(3))
+        .await
+        .expect("blocked hint postponed the scheduled normal poll");
+    assert!(release.is_closed());
+    assert_eq!(locked(&fixture.monitors.inner.registry).monitors.len(), 1);
+    assert!(release
+        .send(Ok(sample(TaskStatus::Completed, 2, &[])))
+        .is_err());
+    fixture.driver.agents(1).await;
+}
+
+#[tokio::test]
+async fn network_hints_do_not_postpone_periodic_reads_and_host_switch_cancels_hint_work() {
+    let fixture = Fixture::with_policy(Policy {
+        interval: Duration::from_millis(30),
+        ..network_policy()
+    });
+    fixture.prepare(1).await.finish(&OperationOutcome::Accepted);
+    fixture.source.calls(2).await;
+    let stop = CancellationToken::new();
+    let worker_stop = stop.clone();
+    let monitors = fixture.monitors.clone();
+    let pump = tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(Duration::from_millis(1));
+        loop {
+            tokio::select! {
+                _ = worker_stop.cancelled() => break,
+                _ = ticks.tick() => monitors.network_changed(),
+            }
+        }
+    });
+    fixture.source.calls(3).await;
+    stop.cancel();
+    pump.await.unwrap();
+    assert!(fixture.source.hint_calls.load(Ordering::SeqCst) > 0);
+    let count = fixture.source.hint_calls.load(Ordering::SeqCst) + 1;
+    let (mut release, gate) = oneshot::channel();
+    locked(&fixture.source.hint_steps).push_back(Step::Gate(gate));
+    fixture.monitors.network_changed();
+    fixture.source.hint_calls(count).await;
+    let mut other = session().workspace.host;
+    other.host_id = "host-b".into();
+    fixture.monitors.select_host(&other);
+    fixture.driver.agents(0).await;
+    tokio::time::timeout(Duration::from_secs(2), release.closed())
+        .await
+        .unwrap();
+    assert!(release.send(Err(ReadFailure::Unavailable)).is_err());
+    fixture.monitors.network_changed();
+    assert!(locked(&fixture.monitors.inner.registry).monitors.is_empty());
+    assert!(locked(&fixture.source.targets)
+        .iter()
+        .all(|target| target == &session()));
 }
 
 #[tokio::test]
