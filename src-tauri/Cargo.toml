@@ -28,6 +28,7 @@ desktop = [
   "dep:agent-client-protocol",
   "dep:axum",
   "dep:tauri",
+  "dep:tauri-runtime",
   "dep:tauri-plugin-deep-link",
   "dep:tauri-plugin-dialog",
   "dep:tauri-plugin-fs",
@@ -69,6 +70,8 @@ tempfile = { workspace = true }
 agentero-core = { path = "../crates/agentero-core" }
 agentero-mcp = { path = "../crates/agentero-mcp", optional = true }
 tauri = { version = "2", features = [], optional = true }
+# Public plugin hook types used by the iOS deep-link event filter.
+tauri-runtime = { version = "2", optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-agentero-mobile = { path = "plugins/agentero-mobile", optional = true }
 serde = { workspace = true }
@@ -165,6 +168,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # openssh / sendfd are Unix-only (ControlMaster fd passing). Remote vault SFTP
 # is therefore unavailable on Windows until a portable backend lands.
 [target.'cfg(unix)'.dependencies]
+# Anchored, no-follow opens for native iOS Inbox documents; no renderer path API.
+libc = "0.2"
 openssh = { version = "0.11.6", features = ["native-mux"] }
 openssh-sftp-client = { version = "0.15.7", features = ["openssh"] }
 

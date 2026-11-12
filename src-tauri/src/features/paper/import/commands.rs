@@ -248,8 +248,8 @@ pub async fn paper_import_native_pdfs(
     Ok(op.finish_result(result))
 }
 
-/// Import one pending Android-opened PDF into the foreground local Vault.
-/// Returns null when no native-owned document is pending, including other platforms.
+/// Import one pending Android or iOS native-owned PDF into the foreground local Vault.
+/// Returns null when no native-owned document is pending; desktop has no Inbox.
 #[tauri::command]
 #[specta::specta]
 pub async fn paper_import_opened_pdf(

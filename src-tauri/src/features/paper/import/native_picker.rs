@@ -167,21 +167,22 @@ pub(crate) async fn import_selected(
     })?
 }
 
-/// Import one Android-owned open-intent selection. No URI or file path is
-/// accepted from the renderer; other platforms have no pending selection.
+/// Import one native-owned Android selection or iOS Inbox descriptor. No URI
+/// or file path is accepted from the renderer; desktop has no pending selection.
 pub(crate) async fn import_opened(
     app: tauri::AppHandle,
     vault_path: String,
 ) -> Result<Option<ImportLocalPdfResult>, AppError> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, vault_path);
         Ok(None)
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let identity =
             VaultIdentity::capture(&crate::features::paper::mobile::vault(&app, &vault_path)?)?;
+        #[cfg(target_os = "android")]
         ensure_external_listener(&app).await?;
         let permit = admission(picker_gate())?;
         // Once admitted, the native claim, staging and commit retain their owner
@@ -228,7 +229,7 @@ async fn ensure_external_listener(app: &tauri::AppHandle) -> Result<(), AppError
         })
 }
 
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 async fn own_result<T: Send + 'static>(
     operation: impl Future<Output = Result<T, AppError>> + Send + 'static,
 ) -> Result<T, AppError> {
@@ -240,7 +241,8 @@ async fn own_result<T: Send + 'static>(
     })?
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios", all(test, unix)))]
+#[cfg_attr(test, allow(dead_code))]
 async fn import_opened_owned(
     app: tauri::AppHandle,
     raw_vault: String,
@@ -252,30 +254,39 @@ async fn import_opened_owned(
     let claim_vault = raw_vault.clone();
     let opened = tauri::async_runtime::spawn_blocking(move || {
         claim_identity.check_app(&claim_app, &claim_vault)?;
-        claim_app
-            .try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
-            .ok_or_else(|| {
-                failure(
-                    "paper_open_unavailable",
-                    "Native document access is unavailable",
-                )
-            })?
-            .take_external_pdf()
-            .map_err(|_| {
-                failure(
-                    "paper_open_failed",
-                    "Unable to open the PDF supplied by Android",
-                )
-            })
+        #[cfg(target_os = "android")]
+        {
+            claim_app
+                .try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
+                .ok_or_else(|| {
+                    failure(
+                        "paper_open_unavailable",
+                        "Native document access is unavailable",
+                    )
+                })?
+                .take_external_pdf()
+                .map(|opened| opened.map(|opened| (opened.file, opened.display_name)))
+                .map_err(|_| failure("paper_open_failed", "Unable to open the supplied PDF"))
+        }
+        #[cfg(all(not(target_os = "android"), any(target_os = "ios", all(test, unix))))]
+        {
+            claim_app
+                .try_state::<Arc<super::ios_inbox::IosInbox>>()
+                .ok_or_else(|| {
+                    failure(
+                        "paper_open_unavailable",
+                        "Native document access is unavailable",
+                    )
+                })?
+                .take()
+                .transpose()
+                .map(|opened| opened.map(|opened| (opened.file, opened.display_name)))
+                .map_err(|_| failure("paper_open_failed", "Unable to open the supplied PDF"))
+        }
     })
     .await
-    .map_err(|_| {
-        failure(
-            "paper_open_failed",
-            "Unable to open the PDF supplied by Android",
-        )
-    })??;
-    let Some(mut opened) = opened else {
+    .map_err(|_| failure("paper_open_failed", "Unable to open the supplied PDF"))??;
+    let Some((mut source, display_name)) = opened else {
         return Ok(None);
     };
     // Empty inbox reads never acquire background work or start foreground services.
@@ -294,29 +305,18 @@ async fn import_opened_owned(
     let staged = tauri::async_runtime::spawn_blocking(move || {
         stage_identity.check_app(&stage_app, &stage_vault)?;
         let mut batch = new_batch(&stage_app, permit)?;
-        let name = sanitized_name(opened.display_name.as_deref(), 0);
+        let name = sanitized_name(display_name.as_deref(), 0);
         let mut budget = Budget {
             read: 0,
             limits: LIMITS,
         };
-        let file = stage_reader(
-            &mut opened.file,
-            &name,
-            0,
-            batch._directory.path(),
-            &mut budget,
-        )
-        .map_err(|reason| failure("paper_open_failed", reason))?;
+        let file = stage_reader(&mut source, &name, 0, batch._directory.path(), &mut budget)
+            .map_err(|reason| failure("paper_open_failed", reason))?;
         batch.files.push(file);
         Ok::<_, AppError>(batch)
     })
     .await
-    .map_err(|_| {
-        failure(
-            "paper_open_failed",
-            "Unable to stage the PDF supplied by Android",
-        )
-    })??;
+    .map_err(|_| failure("paper_open_failed", "Unable to stage the supplied PDF"))??;
     commit_staged(app, raw_vault, identity, staged)
         .await
         .map(Some)
