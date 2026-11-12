@@ -32,6 +32,10 @@ pub trait RemoteAgentProvider: Send + Sync {
     async fn connect(&self, request: &ConnectRequest) -> Result<ConnectionInfo, AppError>;
     async fn disconnect(&self, connection: &ConnectionRef) -> Result<(), AppError>;
 
+    /// Advisory path change for existing transports only. Never connect an
+    /// account, refresh credentials, or replay a pending operation.
+    async fn network_changed(&self) {}
+
     /// Re-establish the transport only. Never replay pending mutations.
     async fn resume(&self, _connection: &ConnectionRef) -> Result<ConnectionInfo, AppError> {
         Err(unsupported(Capability::Resume))

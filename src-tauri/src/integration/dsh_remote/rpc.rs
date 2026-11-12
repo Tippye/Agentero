@@ -66,6 +66,46 @@ impl RpcClient {
             stopped,
         }
     }
+    /// Local shutdown fixture: the owner holds an admitted reply until close.
+    /// Call/close still exercise the real bounded queue, oneshot and watch APIs.
+    #[cfg(test)]
+    pub(crate) fn pending_test_client() -> (Self, oneshot::Receiver<()>) {
+        let (commands, mut receiver) = mpsc::channel::<Command>(MAX_PENDING);
+        let (events, _) = broadcast::channel(256);
+        let closed = Arc::new(AtomicBool::new(false));
+        let (shutdown, mut shutdown_receiver) = watch::channel(false);
+        let (stopped_sender, stopped) = watch::channel(false);
+        let (admitted, admission) = oneshot::channel();
+        let owner_closed = closed.clone();
+        tokio::spawn(async move {
+            let pending = tokio::select! { biased;
+                _ = shutdown_receiver.changed() => None,
+                command = receiver.recv() => command,
+            };
+            if pending.is_some() {
+                let _ = admitted.send(());
+                if !*shutdown_receiver.borrow() {
+                    let _ = shutdown_receiver.changed().await;
+                }
+            }
+            owner_closed.store(true, Ordering::Release);
+            // Dropped replies use call_with_id's real uncertainty mapping.
+            drop(pending);
+            drop(receiver);
+            let _ = stopped_sender.send(true);
+        });
+        (
+            Self {
+                commands,
+                events,
+                closed,
+                shutdown,
+                stopped,
+            },
+            admission,
+        )
+    }
+
     pub async fn close(&self) {
         let _ = self.shutdown.send(true);
         self.wait_closed().await;

@@ -13,6 +13,7 @@ pub(crate) mod events_contract;
 mod handlers;
 mod logging;
 pub mod menu;
+mod mobile_connectivity;
 pub(crate) mod remote_agent;
 pub mod vault_session;
 
@@ -115,6 +116,7 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
                 .clone(),
         ),
     ));
+    mobile_connectivity::install(app);
     app.manage(crate::features::web::html_preview::HtmlPreviewGrants::default());
 
     #[cfg(desktop)]
@@ -722,6 +724,7 @@ pub fn run() {
                 event,
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
+                mobile_connectivity::shutdown(app);
                 app.state::<Arc<remote_agent::background::RemoteBackgroundMonitors>>()
                     .shutdown();
                 let background = app

@@ -3,6 +3,9 @@ import WebKit
 
 /** Platform branches replace this fail-closed bridge with their native adapter. */
 class AgenteroMobilePlugin: Plugin {
+    @objc func connectivityState(_ invoke: Invoke) {
+        invoke.reject("iOS connectivity adapter is unavailable")
+    }
     @objc func stylusState(_ invoke: Invoke) {
         invoke.resolve(["adapters": [String](), "presence": [String]()])
     }
