@@ -299,6 +299,26 @@ mod stylus_channel_tests {
     }
 
     #[test]
+    fn stylus_squeeze_capability_defaults_off_and_does_not_claim_hardware_presence() {
+        let legacy = serde_json::json!({
+            "id": "android-input-device", "source": "nativeInputDevice", "actions": [],
+            "doubleTap": false, "barrelButton": true, "invertedPen": true,
+            "hardwarePresence": false
+        });
+        let adapter: StylusAdapterCapability = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(!adapter.squeeze && !adapter.hardware_presence);
+        let mut pencil = legacy;
+        pencil["id"] = "apple-pencil-interaction".into();
+        pencil["source"] = "nativePencilInteraction".into();
+        pencil["squeeze"] = true.into();
+        let adapter: StylusAdapterCapability = serde_json::from_value(pencil.clone()).unwrap();
+        assert!(adapter.squeeze && !adapter.hardware_presence);
+        assert_eq!(serde_json::to_value(adapter).unwrap()["squeeze"], true);
+        pencil["squeeze"] = "connected".into();
+        assert!(serde_json::from_value::<StylusAdapterCapability>(pencil).is_err());
+    }
+
+    #[test]
     fn native_channel_decodes_json_and_raw_action_and_presence() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let received = events.clone();
