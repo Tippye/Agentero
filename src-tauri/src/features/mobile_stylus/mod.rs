@@ -166,6 +166,49 @@ impl MobileStylusService {
         .await
     }
 
+    /// Fence a terminated renderer before its reload is attempted. Native cleanup
+    /// is owned independently of the SDK callback and cannot restore old routes.
+    #[cfg(any(target_os = "ios", all(test, target_os = "macos")))]
+    pub(crate) fn invalidate_window(self: &Arc<Self>, window: &str) -> Result<(), AppError> {
+        let payload = self
+            .target
+            .lock()
+            .map_err(|_| unavailable("Stylus target unavailable"))?
+            .invalidate_window(window, || {
+                GENERATION
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                        value.checked_add(1)
+                    })
+                    .map(|value| value + 1)
+                    .map_err(|_| unavailable("Stylus generation exhausted"))
+            })?;
+        let Some(payload) = payload else {
+            return Ok(());
+        };
+        let service = self.clone();
+        let native_payload = payload.clone();
+        drop(tauri::async_runtime::spawn(async move {
+            let _ = complete_update(
+                &service.target,
+                payload,
+                async {
+                    // A missing driver is not an ACK, including host test builds.
+                    let native = service
+                        .app
+                        .try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
+                        .ok_or_else(|| unavailable("Native stylus plugin is unavailable"))?;
+                    native
+                        .stylus_set_target(native_payload)
+                        .await
+                        .map_err(unavailable)
+                },
+                std::time::Duration::from_secs(5),
+            )
+            .await;
+        }));
+        Ok(())
+    }
+
     #[cfg(mobile)]
     fn route(&self, event: NativeStylusEvent) {
         let (label, token) = match &event {
