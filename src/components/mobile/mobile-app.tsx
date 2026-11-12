@@ -13,9 +13,11 @@ import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
+import { useMobileBackLayer } from "@/components/mobile/hooks/use-mobile-back-layer";
 import { useMobilePaperSync } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
 import { useMobileRoute } from "@/components/mobile/hooks/use-mobile-route";
+import { useMobileSystemBack } from "@/components/mobile/hooks/use-mobile-system-back";
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
@@ -51,6 +53,7 @@ import type { SessionRef } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
+import { dismissMobileBackLayer } from "@/lib/mobile/back";
 import {
 	type BackgroundState,
 	getMobileBackgroundState,
@@ -335,6 +338,89 @@ export default function MobileApp() {
 		[inkDirty, t, markInteraction],
 	);
 
+	const onSystemBack = useCallback(() => {
+		markInteraction();
+		if (dismissMobileBackLayer()) return;
+		if (paperInfoOpen) {
+			setPaperInfoOpen(false);
+			return;
+		}
+		if (paperImportOpen) {
+			setPaperImportOpen(false);
+			return;
+		}
+		if (backgroundOpen) {
+			setBackgroundOpen(false);
+			return;
+		}
+		if (syncOpen) {
+			setSyncOpen(false);
+			return;
+		}
+		if (pairingRequested) {
+			setPendingOffer(null);
+			setPairingRequested(false);
+			return;
+		}
+		if (sidebarOpen) {
+			setSidebarOpen(false);
+			return;
+		}
+		if (historyOpen && layout.agent) {
+			setHistoryOpen(false);
+			return;
+		}
+		if (tab !== "library") {
+			selectTab("library");
+			return;
+		}
+		if (selectedPaper && workspacePreset !== "read") {
+			selectPreset("read");
+			return;
+		}
+		if (selectedPaper) {
+			closeReader();
+			return;
+		}
+		if (notesDirty || inkDirty) canLeaveReader();
+	}, [
+		markInteraction,
+		paperInfoOpen,
+		paperImportOpen,
+		backgroundOpen,
+		syncOpen,
+		pairingRequested,
+		sidebarOpen,
+		historyOpen,
+		layout.agent,
+		tab,
+		selectTab,
+		selectedPaper,
+		workspacePreset,
+		selectPreset,
+		closeReader,
+		notesDirty,
+		inkDirty,
+		canLeaveReader,
+	]);
+	const ownsBack =
+		paperInfoOpen ||
+		paperImportOpen ||
+		backgroundOpen ||
+		syncOpen ||
+		pairingRequested ||
+		sidebarOpen ||
+		(historyOpen && layout.agent) ||
+		tab !== "library" ||
+		selectedPaper !== null ||
+		notesDirty ||
+		inkDirty;
+	const rootBackLayer = useMobileBackLayer(!ownsBack);
+	const androidSystemBack = useMobileSystemBack({
+		enabled: ownsBack || rootBackLayer,
+		onBack: onSystemBack,
+	});
+
 	const acceptRegionPrompt = useCallback(
 		(context: MobilePaperRegionContext) => {
 			const current = latestRegionTarget.current;
@@ -409,7 +495,8 @@ export default function MobileApp() {
 				selectTab("library");
 			}
 		},
-		inkMode ||
+		androidSystemBack ||
+			inkMode ||
 			inkDirty ||
 			pairingRequested ||
 			syncOpen ||
@@ -678,6 +765,7 @@ export default function MobileApp() {
 									<EdgeSwipeBack
 										onBack={closeReader}
 										disabled={
+											androidSystemBack ||
 											widthClass === "wide" ||
 											notesDirty ||
 											inkDirty ||
@@ -775,7 +863,10 @@ export default function MobileApp() {
 													agentProvider === "ds-harness-remote" &&
 													!pairingRequested &&
 													!syncOpen &&
-													!backgroundOpen
+													!backgroundOpen &&
+													!sidebarOpen &&
+													!paperImportOpen &&
+													!paperInfoOpen
 												}
 												selection={remoteSession}
 												onSelectionChange={setRemoteSession}
@@ -795,6 +886,16 @@ export default function MobileApp() {
 										>
 											{connected ? (
 												<MobileAgentPage
+													active={
+														layout.agent &&
+														agentProvider === "agentero-bridge" &&
+														!pairingRequested &&
+														!syncOpen &&
+														!backgroundOpen &&
+														!sidebarOpen &&
+														!paperImportOpen &&
+														!paperInfoOpen
+													}
 													key={selectedAgentId ?? "default"}
 													selectedAgentId={selectedAgentId}
 													sessionId={agentSessionId}
@@ -835,7 +936,13 @@ export default function MobileApp() {
 					/>
 				</div>
 			</main>
-			<Dialog open={pairingRequested} onOpenChange={setPairingRequested}>
+			<Dialog
+				open={pairingRequested}
+				onOpenChange={(open) => {
+					setPairingRequested(open);
+					if (!open) setPendingOffer(null);
+				}}
+			>
 				<DialogContent
 					showCloseButton={false}
 					aria-describedby={undefined}

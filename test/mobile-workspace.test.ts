@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { act, createElement, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { PdfViewerProps } from "@/components/viewer/pdf/types";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import type { MobileWindowRoute } from "@/lib/mobile/route";
@@ -18,12 +19,19 @@ const state = vi.hoisted(() => ({
 	agentMounts: 0,
 	pdf: null as PdfViewerProps | null,
 	restoreRoute: null as ((route: MobileWindowRoute) => void) | null,
+	systemBack: null as (() => void) | null,
+	systemBackEnabled: false,
+	android: false,
 	regionContext: null as MobilePaperRegionContext | null,
 	handleRegionContext: null as ((id: string) => void) | null,
 	load: vi.fn(),
 	error: vi.fn(),
 	refresh: vi.fn(async () => {}),
 	fetchMissing: vi.fn(async () => false),
+	importPdfs: vi.fn(async (_vault: string, _files: File[]) => ({
+		imported: 0,
+		errors: [] as string[],
+	})),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
 vi.mock("@/components/mobile/hooks/use-mobile-route", () => ({
@@ -34,6 +42,19 @@ vi.mock("@/components/mobile/hooks/use-mobile-route", () => ({
 	}) => {
 		state.restoreRoute = onRestore;
 		return { markInteraction: vi.fn() };
+	},
+}));
+vi.mock("@/components/mobile/hooks/use-mobile-system-back", () => ({
+	useMobileSystemBack: ({
+		enabled,
+		onBack,
+	}: {
+		enabled: boolean;
+		onBack: () => void;
+	}) => {
+		state.systemBack = onBack;
+		state.systemBackEnabled = enabled;
+		return state.android;
 	},
 }));
 vi.mock("@/components/mobile/mobile-paper-import", () => ({
@@ -90,7 +111,9 @@ vi.mock("@/components/mobile/hooks/use-pair-offer-links", () => ({
 	usePairOfferLinks: vi.fn(),
 }));
 vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
-vi.mock("@/lib/mobile/import-pdf", () => ({ importMobilePdfs: vi.fn() }));
+vi.mock("@/lib/mobile/import-pdf", () => ({
+	importMobilePdfs: state.importPdfs,
+}));
 vi.mock("@/lib/mobile/paper-files", () => ({
 	loadMobilePaperPdf: state.load,
 	mobilePaperPaths: (_vault: string, paper: PaperMetadata) => ({
@@ -467,6 +490,9 @@ beforeEach(async () => {
 	observers.clear();
 	vi.clearAllMocks();
 	state.papers = [paper("first"), paper("second")];
+	state.android = false;
+	state.systemBack = null;
+	state.systemBackEnabled = false;
 	state.pdf = null;
 	state.regionContext = null;
 	state.handleRegionContext = null;
@@ -496,7 +522,159 @@ afterEach(async () => {
 	observers.clear();
 });
 
+function LateRootLayer() {
+	const [open, setOpen] = useState(false);
+	return createElement(
+		"div",
+		null,
+		createElement(
+			"button",
+			{ type: "button", onClick: () => setOpen(true) },
+			"late-root-layer",
+		),
+		createElement(
+			Dialog,
+			{ open, onOpenChange: setOpen },
+			createElement(
+				DialogContent,
+				{ "aria-describedby": undefined },
+				createElement(DialogTitle, null, "Late root request"),
+			),
+		),
+	);
+}
+
 describe("stable tablet workspace DOM", () => {
+	it("leaves root system Back alone while a file import is pending", async () => {
+		let finish: (value: { imported: number; errors: string[] }) => void =
+			() => {};
+		state.importPdfs.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		state.android = true;
+		await act(() => root.render(createElement(MobileApp)));
+		const input =
+			container.querySelector<HTMLInputElement>('input[type="file"]');
+		expect(input).not.toBeNull();
+		Object.defineProperty(input, "files", {
+			configurable: true,
+			value: [new File(["fixture"], "paper.pdf", { type: "application/pdf" })],
+		});
+		await act(() =>
+			input?.dispatchEvent(new Event("change", { bubbles: true })),
+		);
+		expect(state.importPdfs).toHaveBeenCalledOnce();
+		expect(state.systemBackEnabled).toBe(false);
+		await act(async () => finish({ imported: 1, errors: [] }));
+		expect(state.refresh).toHaveBeenCalled();
+		expect(state.systemBackEnabled).toBe(false);
+	});
+	it("owns Back for a late portalled dialog even at an otherwise clean library root", async () => {
+		state.android = true;
+		await act(() =>
+			root.render(
+				createElement(
+					"div",
+					null,
+					createElement(MobileApp),
+					createElement(LateRootLayer),
+				),
+			),
+		);
+		expect(state.systemBackEnabled).toBe(false);
+		await click("late-root-layer");
+		await vi.waitFor(async () => {
+			await act(async () => {});
+			expect(state.systemBackEnabled).toBe(true);
+		});
+		await act(() => state.systemBack?.());
+		await vi.waitFor(async () => {
+			await act(async () => {});
+			expect(state.systemBackEnabled).toBe(false);
+		});
+		expect(
+			document.querySelector('[role="dialog"][data-state="open"]'),
+		).toBeNull();
+		expect(pane("library")?.hidden).toBe(false);
+	});
+	it("leaves Android touch edges to the system without cancelling native touch scrolling", async () => {
+		state.android = true;
+		await act(() => root.render(createElement(MobileApp)));
+		await click("Paper first");
+		await ready();
+		const reader = container.querySelector("[data-pdf-document]");
+		const edge = pane("reader")?.firstElementChild as HTMLElement;
+		const send = (type: string, x: number, held: boolean) => {
+			const event = new Event(type, { bubbles: true, cancelable: true });
+			Object.defineProperties(event, {
+				touches: { value: held ? [{ clientX: x, clientY: 20 }] : [] },
+				changedTouches: { value: [{ clientX: x, clientY: 20 }] },
+			});
+			edge.dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(false);
+		};
+		await act(() => {
+			send("touchstart", 2, true);
+			send("touchmove", 130, true);
+			send("touchend", 130, false);
+		});
+		expect(container.querySelector("[data-pdf-document]")).toBe(reader);
+		expect(pane("reader")?.hidden).toBe(false);
+	});
+	it("handles Android Back through owned surfaces and dirty ink before restoring the clean root default", async () => {
+		state.android = true;
+		await act(() => root.render(createElement(MobileApp)));
+		await resize(840);
+		expect(state.systemBackEnabled).toBe(false);
+		const back = async () => {
+			await act(() => state.systemBack?.());
+			await resize(width);
+		};
+		await click("Paper first");
+		await ready();
+		const reader = container.querySelector("[data-pdf-document]");
+		expect(state.systemBackEnabled).toBe(true);
+		await click("workspace.discuss");
+		await back();
+		expect(pane("agent")?.hidden).toBe(true);
+		expect(pane("reader")?.hidden).toBe(false);
+		await click("settings.menu");
+		expect(state.pdf?.isActive).toBe(false);
+		await back();
+		expect(state.pdf?.isActive).toBe(true);
+		await act(() => state.pdf?.onInkDirtyChange?.(true));
+		await back();
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		expect(container.querySelector("[data-pdf-document]")).toBe(reader);
+		expect(state.systemBackEnabled).toBe(true);
+		await act(() => state.pdf?.onInkDirtyChange?.(false));
+		await back();
+		expect(pane("reader")?.hidden).toBe(true);
+		expect(state.systemBackEnabled).toBe(false);
+		await click("tabs.plaza");
+		expect(state.systemBackEnabled).toBe(true);
+		await back();
+		expect(pane("library")?.hidden).toBe(false);
+		expect(state.systemBackEnabled).toBe(false);
+	});
+	it("keeps a failed or pending notes draft mounted when system Back is refused", async () => {
+		await click("Paper first");
+		await ready();
+		await fill("test-notes", "pending native back draft");
+		const reader = container.querySelector("[data-pdf-document]");
+		await act(() => state.systemBack?.());
+		await resize(width);
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		expect(container.querySelector("[data-pdf-document]")).toBe(reader);
+		expect(
+			container.querySelector<HTMLTextAreaElement>('[aria-label="test-notes"]')
+				?.value,
+		).toBe("pending native back draft");
+		expect(state.systemBackEnabled).toBe(true);
+	});
 	it("opens the left navigation while reading on a narrow screen", async () => {
 		await click("Paper first");
 		await ready();
