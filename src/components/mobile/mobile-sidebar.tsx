@@ -1,4 +1,5 @@
 import {
+	BatteryCharging,
 	Check,
 	ChevronDown,
 	Circle,
@@ -33,6 +34,7 @@ export function MobileSidebar({
 	onDisconnect,
 	onPairAnother,
 	onSync,
+	onBackground,
 	syncDisabled = false,
 	navigation,
 }: {
@@ -43,6 +45,7 @@ export function MobileSidebar({
 	onDisconnect: () => Promise<void>;
 	onPairAnother: () => void;
 	onSync: () => void;
+	onBackground?: () => void;
 	syncDisabled?: boolean;
 	navigation?: ReactNode;
 }) {
@@ -153,6 +156,20 @@ export function MobileSidebar({
 						<Cloud className="size-5 text-muted-foreground" />
 						{t("sync.title")}
 					</Button>
+					{onBackground ? (
+						<Button
+							type="button"
+							variant="outline"
+							className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
+							onClick={() => {
+								onBackground();
+								onClose();
+							}}
+						>
+							<BatteryCharging className="size-5 text-muted-foreground" />
+							{t("background.title")}
+						</Button>
+					) : null}
 					{status.paired ? (
 						<section className="rounded-xl border bg-background shadow-raised">
 							<button

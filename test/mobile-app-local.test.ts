@@ -228,7 +228,8 @@ vi.mock("@/components/mobile/mobile-reader-page", () => ({
 		return createElement("div", { "data-reader": true }, "local-reader");
 	},
 }));
-vi.mock("@/components/ui/dialog", () => ({
+vi.mock("@/components/ui/dialog", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/components/ui/dialog")>()),
 	Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
 		open ? children : null,
 	DialogContent: ({ children }: { children: ReactNode }) =>

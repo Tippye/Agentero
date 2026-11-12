@@ -23,6 +23,14 @@ export const commands = {
 	/**  Read this device's journal without refreshing credentials or contacting a Host. */
 	remoteAgentLocalOperations: (connection: ConnectionRef) => typedError<ApiResult<JournalEntry[]>, string>(__TAURI_INVOKE("remote_agent_local_operations", { connection })),
 	remoteAgentUpload: (session: SessionRef, path: string, operationId: OperationId) => typedError<ApiResult<OperationOutcome>, string>(__TAURI_INVOKE("remote_agent_upload", { session, path, operationId })),
+	/**  Read OS background capabilities and observations without requesting permission. */
+	mobileBackgroundGetState: () => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_get_state")),
+	/**  Change the user's Android background preference; unsupported platforms refuse enabling. */
+	mobileBackgroundConfigure: (enabled: boolean) => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_configure", { enabled })),
+	/**  Explicit foreground notification request; never called during application load. */
+	mobileBackgroundRequestNotifications: () => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_request_notifications")),
+	/**  Open a system settings page after an explicit user action. */
+	mobileBackgroundOpenSettings: (target: BackgroundSettingsTarget) => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_open_settings", { target })),
 	bridgeClientConnect: (args: BridgeConnectArgs) => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_connect", { args })),
 	bridgeClientResume: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_resume")),
 	bridgeClientResetIdentity: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_reset_identity")),
@@ -2128,6 +2136,27 @@ export type BackfillPreview = {
 	downloadSource: number,
 	parseBody: number,
 	repairState: number,
+};
+
+export type BackgroundPlatform = "desktop" | "android" | "ios";
+
+export type BackgroundSettingsTarget = "battery" | "notifications" | "app";
+
+/**  OS capability and observed state; permission does not imply a running service. */
+export type BackgroundState = {
+	platform: BackgroundPlatform,
+	persistentConnection: boolean,
+	finiteTasks: boolean,
+	backgroundTransfer: boolean,
+	enabled: boolean,
+	foreground: boolean,
+	notificationPermission: NotificationPermission,
+	notificationsEnabled: boolean,
+	batteryOptimizationIgnored: boolean | null,
+	agentActive: boolean,
+	syncActive: boolean,
+	finiteTaskActive: boolean,
+	finiteTaskExpired: boolean,
 };
 
 export type BacklinksResponse = BacklinksResponse_Serialize | BacklinksResponse_Deserialize;
@@ -4503,6 +4532,8 @@ export type NodeInstallResult_Serialize = {
 export type NotesTemplateSeedResult = {
 	created: boolean,
 };
+
+export type NotificationPermission = "prompt" | "granted" | "denied";
 
 export type OpenInTerminalResult = {
 	/**  Absolute directory opened as the terminal cwd. */
