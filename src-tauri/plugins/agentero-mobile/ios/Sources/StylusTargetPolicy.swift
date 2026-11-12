@@ -26,6 +26,48 @@ struct StylusTargetPolicy {
     }
 }
 
+/** The binding is independent of unrelated stale target-cleanup generations. */
+struct StylusGestureTarget: Equatable {
+    let token: String
+    let window: String
+    let view: ObjectIdentifier
+}
+
+struct StylusSqueezePolicy {
+    enum Phase { case began, changed, ended, cancelled, unknown }
+    enum Result { case ignore, emit, renewInteraction }
+    private var pending: StylusGestureTarget?
+    private var lastTerminalTimestamp: TimeInterval?
+
+    mutating func reset() { pending = nil; lastTerminalTimestamp = nil }
+
+    mutating func consume(_ phase: Phase, timestamp: TimeInterval, target: StylusGestureTarget?) -> Result {
+        guard timestamp.isFinite, timestamp >= 0, let target = target else {
+            reset()
+            return .renewInteraction
+        }
+        switch phase {
+        case .began:
+            pending = target
+            return .ignore
+        case .changed:
+            guard pending == target else { reset(); return .renewInteraction }
+            return .ignore
+        case .ended:
+            guard pending == nil || pending == target else { reset(); return .renewInteraction }
+            pending = nil
+            guard lastTerminalTimestamp != timestamp else { return .ignore }
+            lastTerminalTimestamp = timestamp
+            return .emit
+        case .cancelled, .unknown:
+            reset()
+            // Retire the interaction identity: clearing pending alone would turn a
+            // late continuous end into a seemingly valid discrete squeeze.
+            return .renewInteraction
+        }
+    }
+}
+
 #if STYLUS_POLICY_TESTS
 @main
 struct StylusPolicyChecks {

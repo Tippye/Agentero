@@ -8,6 +8,7 @@ struct StylusNativeCapability: Encodable {
     let source = "nativePencilInteraction"
     let actions = ["toggleEraser", "previousTool", "showColorPalette"]
     let doubleTap = true
+    let squeeze = true
     let barrelButton = false
     let invertedPen = false
     let hardwarePresence = false
@@ -40,7 +41,7 @@ private struct StylusNativeMessage: Encodable {
 private protocol StylusNativeAdapter: AnyObject {
     var capability: StylusNativeCapability { get }
     var observed: Bool { get }
-    func attach(_ view: WKWebView, action: @escaping (String?) -> Void)
+    func attach(_ view: WKWebView, target: @escaping () -> StylusGestureTarget?, action: @escaping (String?) -> Void)
     func dispose()
 }
 
@@ -50,30 +51,111 @@ private final class ApplePencilStylusAdapter: NSObject, StylusNativeAdapter, UIP
     private weak var view: WKWebView?
     private var interaction: UIPencilInteraction?
     private var action: ((String?) -> Void)?
-    func attach(_ view: WKWebView, action: @escaping (String?) -> Void) {
+    private var target: (() -> StylusGestureTarget?)?
+    private var squeezePolicy = StylusSqueezePolicy()
+    private var observers: [NSObjectProtocol] = []
+    private var binding = UUID()
+
+    func attach(_ view: WKWebView, target: @escaping () -> StylusGestureTarget?, action: @escaping (String?) -> Void) {
+        precondition(Thread.isMainThread)
         dispose()
-        self.view = view; self.action = action
+        self.view = view; self.target = target; self.action = action
+        let center = NotificationCenter.default
+        for name in [UIApplication.willResignActiveNotification, UIWindow.didResignKeyNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+                guard let self = self else { return }
+                precondition(Thread.isMainThread)
+                if name == UIApplication.willResignActiveNotification || (note.object as? UIWindow) === self.view?.window {
+                    self.suspendInteraction()
+                }
+            })
+        }
+        for name in [UIApplication.didBecomeActiveNotification, UIWindow.didBecomeKeyNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+                guard let self = self else { return }
+                precondition(Thread.isMainThread)
+                if name == UIApplication.didBecomeActiveNotification || (note.object as? UIWindow) === self.view?.window {
+                    self.restoreInteraction()
+                }
+            })
+        }
+        restoreInteraction()
+    }
+
+    private func suspendInteraction() {
+        if let interaction = interaction {
+            interaction.delegate = nil
+            view?.removeInteraction(interaction)
+        }
+        interaction = nil
+        squeezePolicy.reset()
+    }
+
+    private func restoreInteraction() {
+        guard interaction == nil, let view = view, target?() != nil else { return }
         let interaction = UIPencilInteraction()
         interaction.delegate = self
         view.addInteraction(interaction)
         self.interaction = interaction
+        squeezePolicy.reset()
     }
+
+    private func renewInteraction() {
+        suspendInteraction()
+        // Retire synchronously so queued old callbacks fail identity checks. Delay
+        // adding the replacement until UIKit finishes delivering this callback.
+        guard let boundView = view else { return }
+        let currentBinding = binding
+        DispatchQueue.main.async { [weak self, weak boundView] in
+            guard let self = self, let boundView = boundView, self.view === boundView,
+                  self.binding == currentBinding else { return }
+            self.restoreInteraction()
+        }
+    }
+
     func dispose() {
-        if let interaction = interaction { view?.removeInteraction(interaction) }
-        interaction = nil; action = nil; view = nil
+        precondition(Thread.isMainThread)
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.removeAll()
+        suspendInteraction()
+        action = nil; target = nil; view = nil
+        binding = UUID()
     }
-    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        precondition(Thread.isMainThread)
+        guard interaction === self.interaction, target?() != nil else { return }
+        observed = true
+        action?(Self.preferredAction(UIPencilInteraction.preferredTapAction))
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
         precondition(Thread.isMainThread)
         guard interaction === self.interaction else { return }
-        observed = true
-        let preference: String
-        switch UIPencilInteraction.preferredTapAction {
-        case .switchEraser: preference = "switchEraser"
-        case .switchPrevious: preference = "switchPrevious"
-        case .showColorPalette: preference = "showColorPalette"
-        default: preference = "ignore"
+        let phase: StylusSqueezePolicy.Phase
+        switch squeeze.phase {
+        case .began: phase = .began
+        case .changed: phase = .changed
+        case .ended: phase = .ended
+        case .cancelled: phase = .cancelled
+        @unknown default: phase = .unknown
         }
-        action?(StylusTargetPolicy.tapAction(preference))
+        switch squeezePolicy.consume(phase, timestamp: squeeze.timestamp, target: target?()) {
+        case .ignore: break
+        case .renewInteraction: renewInteraction()
+        case .emit:
+            observed = true
+            action?(Self.preferredAction(UIPencilInteraction.preferredSqueezeAction))
+        }
+    }
+
+    private static func preferredAction(_ preference: UIPencilPreferredAction) -> String? {
+        switch preference {
+        case .switchEraser: return StylusTargetPolicy.tapAction("switchEraser")
+        case .switchPrevious: return StylusTargetPolicy.tapAction("switchPrevious")
+        case .showColorPalette: return StylusTargetPolicy.tapAction("showColorPalette")
+        default: return nil
+        }
     }
 }
 
@@ -112,7 +194,15 @@ final class MobileStylusController {
             adapters.forEach { $0.dispose() }
             targetView = candidates[0]
             for adapter in adapters {
-                adapter.attach(candidates[0]) { [weak self, weak adapter] action in
+                let boundView = candidates[0]
+                adapter.attach(boundView, target: { [weak self, weak boundView] in
+                    guard let self = self, let boundView = boundView,
+                          self.targetView === boundView, Self.isVisible(boundView),
+                          self.gate.token == args.targetToken, self.gate.window == args.windowLabel else { return nil }
+                    // An unrelated stale inactive cleanup may advance generation
+                    // while preserving this current token/window binding.
+                    return StylusGestureTarget(token: args.targetToken, window: args.windowLabel, view: ObjectIdentifier(boundView))
+                }) { [weak self, weak adapter] action in
                     guard let self = self, let adapter = adapter else { return }
                     self.emit(adapter: adapter, action: action)
                 }

@@ -4,7 +4,7 @@
 > 两端共用部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`ios` 基于 `mobile`，这里只写 iOS / iPadOS 特有工作；文中 S0–S9 指共享篇工作项。
 > 已落地的首批平台配置：Tauri 与 XcodeGen 模板最低系统同步为 18.2，发布预检检查两处一致。I5 有限后台窗口已有 Swift 适配与纯策略测试，UIKit 集成仍须完整 SDK 与设备验收；不声明常驻、系统调度或后台传输能力。多场景、原生导入仍待实现和设备验收。当前环境缺少完整 Xcode/iPhoneOS SDK。
 
-当前补齐：共享四边安全区域与默认阅读布局已接入，原生 Apple Pencil 双击按系统偏好映射工具/颜色动作，并校验前台 key window、文档 token 与单调代次；不在多 WebView 身份不明时广播。共享笔手分流、长按选择与生命周期取消已有回归；UIKit 适配叶文件通过语法解析，纯 Swift 目标策略已编译执行。完整 iPhoneOS SDK 与真实 Pencil/系统窗口仍未验证，Pencil Pro 挤压手势尚未接入。移动 PDF 暂存改用 Core 私有 cache 根；不在本轮改变既有 Library 数据根、配置多 Scene 或申请新的后台模式。
+当前补齐：共享四边安全区域与默认阅读布局已接入，原生 Apple Pencil 双击按系统偏好映射工具/颜色动作，并校验前台 key window、文档 token 与单调代次；不在多 WebView 身份不明时广播。共享笔手分流、长按选择与生命周期取消已有回归；UIKit 适配叶文件通过语法解析，纯 Swift 目标策略已编译执行。Pencil Pro 挤压已接入公开的现代 delegate、系统偏好动作与离散/连续阶段策略；取消、失焦、后台和换文档通过交互对象身份隔离。完整 iPhoneOS SDK 与真实 Pencil/系统窗口仍未验证。移动 PDF 暂存改用 Core 私有 cache 根；不在本轮改变既有 Library 数据根、配置多 Scene 或申请新的后台模式。
 
 ## 1. 结论
 
@@ -132,7 +132,7 @@
 
 无论哪条路线都要做的原生部分（放在本地插件里）：
 
-- Pencil 双击和挤压手势，转成前端事件切换工具。双击需要第二代或 Pro；挤压只有 Pro 支持；第一代没有这些手势。
+- Pencil 双击与 Pro 挤压已接入 `UIPencilInteraction` 的 iOS 17.5 现代回调，按各自系统偏好映射橡皮、上个工具和调色板；不伪造未实现的属性/上下文面板或代执行系统快捷指令。离散 `.ended` 无需前置 `.began`，连续事件在当前 token/窗口/视图上结束才提交；取消、后台与 key window 失焦撤销旧交互对象，恢复只绑定仍获授权的同一视图。双击需要第二代或 Pro；挤压只有 Pro 支持；第一代没有这些手势。`squeeze` 是路由能力而非实体连接证明，完整 SDK 与设备验收仍待完成。详见[手写笔适配](../backend/mobile-stylus.md#pencil-pro-挤压)。
 - 在可编辑区域之外的书写模式下，避免系统的手写输入（随手写）截获笔迹。
 
 硬件差异要在界面上体现：Apple Pencil（USB-C）没有压感，笔迹用固定宽度；悬停只在部分机型可用，只作增强，不作前提。
