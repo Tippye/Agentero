@@ -36,7 +36,7 @@ internal class GenericInputDeviceStylusAdapter(activity: Activity) : StylusAdapt
     private var changed: (() -> Unit)? = null
     override fun probe() = JSObject().apply {
         put("id", id); put("source", "nativeInputDevice"); put("actions", JSONArray())
-        put("doubleTap", false); put("barrelButton", true); put("invertedPen", true)
+        put("doubleTap", false); put("squeeze", false); put("barrelButton", true); put("invertedPen", true)
         // InputDevice sources describe registered digitizers, not physical pen attachment.
         put("hardwarePresence", false)
     }
