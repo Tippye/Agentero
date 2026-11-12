@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import {
 	ArrowLeft,
 	Info,
@@ -8,7 +9,14 @@ import {
 	Search,
 	WandSparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
@@ -58,7 +66,10 @@ import {
 	type BackgroundState,
 	getMobileBackgroundState,
 } from "@/lib/mobile/background";
-import { importMobilePdfs } from "@/lib/mobile/import-pdf";
+import {
+	importMobilePdfs,
+	pickAndImportMobilePdfs,
+} from "@/lib/mobile/import-pdf";
 import { filterMobilePapers } from "@/lib/mobile/navigation";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import type { MobileWindowRoute } from "@/lib/mobile/route";
@@ -160,6 +171,21 @@ export default function MobileApp() {
 		loading: papersLoading,
 		refresh,
 	} = useMobilePapers({ vaultPath });
+	const importAdmission = useRef(false);
+	const importTarget = useRef({ mounted: false, vaultPath, epoch: 0, refresh });
+	useLayoutEffect(() => {
+		const target = importTarget.current;
+		target.mounted = true;
+		target.vaultPath = vaultPath;
+		target.epoch++;
+		return () => {
+			target.mounted = false;
+			target.epoch++;
+		};
+	}, [vaultPath]);
+	useLayoutEffect(() => {
+		importTarget.current.refresh = refresh;
+	}, [refresh]);
 	const visiblePapers = useMemo(
 		() => filterMobilePapers(papers, libraryQuery, selectedTag),
 		[papers, libraryQuery, selectedTag],
@@ -454,17 +480,47 @@ export default function MobileApp() {
 		setRegionContext(null);
 	}, []);
 
-	const importFiles = async (files: File[]) => {
-		if (!vaultPath || importing || !files.length) return;
+	const importFiles = async (files?: File[]) => {
+		const target = importTarget.current;
+		if (
+			!target.mounted ||
+			!target.vaultPath ||
+			importAdmission.current ||
+			files?.length === 0
+		)
+			return;
+		const importingVault = target.vaultPath;
+		const epoch = target.epoch;
+		const current = () =>
+			target.mounted &&
+			target.epoch === epoch &&
+			target.vaultPath === importingVault;
+		// React state alone cannot reject a second click in the same event turn.
+		importAdmission.current = true;
 		setImporting(true);
+		let reported = false;
+		const report = (message: string) => {
+			if (!reported && current()) {
+				reported = true;
+				notifyError(message);
+			}
+		};
 		try {
-			const result = await importMobilePdfs(vaultPath, files);
-			if (result.errors.length) notifyError(result.errors.join("\n"));
+			const result = await (files
+				? importMobilePdfs(importingVault, files)
+				: pickAndImportMobilePdfs(importingVault));
+			if (result.errors.length) report(result.errors.join("\n"));
 		} catch (error) {
-			notifyError(errorText(error));
+			report(errorText(error));
 		} finally {
-			await refresh();
-			setImporting(false);
+			try {
+				if (current()) await target.refresh();
+			} catch (error) {
+				report(errorText(error));
+			} finally {
+				importAdmission.current = false;
+				if (target.mounted) setImporting(false);
+			}
 		}
 	};
 
@@ -645,7 +701,10 @@ export default function MobileApp() {
 									className="size-12"
 									disabled={!vaultPath || importing}
 									aria-label={t("library.importPdf")}
-									onClick={() => fileInput.current?.click()}
+									onClick={() => {
+										if (isTauri()) void importFiles();
+										else fileInput.current?.click();
+									}}
 								>
 									{importing ? (
 										<LoaderCircle className="size-4 animate-spin" />

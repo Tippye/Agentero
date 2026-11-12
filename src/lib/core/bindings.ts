@@ -336,6 +336,8 @@ export const commands = {
 	skillDiscard: (discoveryId: string) => __TAURI_INVOKE<ApiResult<null>>("skill_discard", { discoveryId }),
 	/**  Import local PDF file(s) into the vault as paper folders (copy + catalog + liteparse). */
 	paperImportLocalPdf: (args: ImportLocalPdfArgs) => typedError<ApiResult<ImportLocalPdfResult_Serialize>, string>(__TAURI_INVOKE("paper_import_local_pdf", { args })),
+	/**  Select PDF files with the native picker and import private streamed copies. */
+	paperImportNativePdfs: (vaultPath: string) => typedError<ApiResult<ImportLocalPdfResult_Serialize>, string>(__TAURI_INVOKE("paper_import_native_pdfs", { vaultPath })),
 	/**
 	 *  Resolve an identifier (DOI/arXiv) to metadata without importing — backs
 	 *  Edit Metadata's identifier refresh. Identifier lookup first (so a DOI /

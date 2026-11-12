@@ -19,6 +19,7 @@ class AgenteroMobilePlugin(activity: Activity) : Plugin(activity) {
         put("agentActive", false); put("syncActive", false)
         put("finiteTaskActive", false); put("finiteTaskExpired", false)
     }
+    @Command fun openImportFile(invoke: Invoke) { invoke.reject("Android document adapter is unavailable") }
     @Command fun connectivityState(invoke: Invoke) { invoke.reject("Android connectivity adapter is unavailable") }
     @Command fun stylusState(invoke: Invoke) { invoke.resolve(JSObject().apply {
         put("adapters", org.json.JSONArray()); put("presence", org.json.JSONArray())

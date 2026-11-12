@@ -7,6 +7,14 @@ import {
 } from "@/lib/vault/fs";
 import { joinVaultPath } from "@/lib/vault/path";
 
+/** The native picker streams provider files inside Rust, without WebView PDF buffers. */
+export async function pickAndImportMobilePdfs(vaultPath: string) {
+	const result = await callApiResult(() =>
+		commands.paperImportNativePdfs(vaultPath),
+	);
+	return { imported: result.papers.length, errors: result.errors };
+}
+
 /** Stage browser-selected files privately, then let the existing Host importer
  * own paper naming, metadata, deduplication and catalog writes. */
 export async function importMobilePdfs(vaultPath: string, files: File[]) {

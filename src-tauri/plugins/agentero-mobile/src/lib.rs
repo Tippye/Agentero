@@ -32,7 +32,39 @@ pub struct MobileBackground<R: Runtime> {
     #[cfg(desktop)]
     runtime: std::marker::PhantomData<fn() -> R>,
 }
+/// An owned picker-authorized descriptor and optional untrusted display metadata.
+#[cfg(target_os = "android")]
+pub struct NativeImportFile {
+    pub file: std::fs::File,
+    pub display_name: Option<String>,
+}
 impl<R: Runtime> MobileBackground<R> {
+    /// Open a picker-authorized whole content document on a blocking worker.
+    #[cfg(target_os = "android")]
+    pub fn open_import_file(&self, uri: String) -> Result<NativeImportFile, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Descriptor {
+            fd: i32,
+            #[serde(default)]
+            display_name: Option<String>,
+        }
+        let descriptor = self
+            .handle
+            .run_mobile_plugin::<Descriptor>("openImportFile", serde_json::json!({ "uri": uri }))
+            .map_err(|_| "Selected document is unavailable".to_string())?;
+        if descriptor.fd < 0 {
+            return Err("Selected document is unavailable".into());
+        }
+        // The private native adapter detaches this owned descriptor exactly once.
+        // It uses openFileDescriptor, which rejects sliced asset descriptors.
+        use std::os::fd::FromRawFd;
+        Ok(NativeImportFile {
+            file: unsafe { std::fs::File::from_raw_fd(descriptor.fd) },
+            display_name: descriptor.display_name,
+        })
+    }
+
     async fn call(
         &self,
         name: &str,
