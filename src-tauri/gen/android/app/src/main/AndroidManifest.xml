@@ -36,6 +36,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" android:mimeType="application/pdf" />
             </intent-filter>
+            <!-- Share streams normally have no Intent.data, so match MIME only.
+                 The native receiver still requires a granted content URI. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
             <intent-filter >
                 <action android:name="android.intent.action.VIEW" />

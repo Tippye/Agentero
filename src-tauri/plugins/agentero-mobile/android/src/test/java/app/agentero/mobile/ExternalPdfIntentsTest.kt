@@ -25,7 +25,7 @@ class ExternalPdfIntentsTest {
         assertTrue(accepts(clips = listOf(uri)))
     }
 
-    @Test fun onlyExactViewPdfRoutingCanReachTheNativeMailbox() {
+    @Test fun unsupportedActionsAndUnqualifiedSendRequestsCannotReachTheNativeMailbox() {
         for (action in listOf(null, "android.intent.action.SEND", "android.intent.action.SEND_MULTIPLE", "org.chromium.arc.intent.action.VIEW")) {
             assertFalse(accepts(action = action))
         }
@@ -61,6 +61,38 @@ class ExternalPdfIntentsTest {
         assertFalse(accepts(text = true))
         assertFalse(accepts(stream = true))
         assertFalse(accepts(text = true, stream = true))
+    }
+
+    @Test fun singlePdfShareUsesItsDecodedStreamAndAllowsOnlyAbsentOrMatchingData() {
+        val action = "android.intent.action.SEND"
+        assertEquals(uri, ExternalPdfIntentPolicy.selectedUri(action, null, uri, true))
+        assertEquals(uri, ExternalPdfIntentPolicy.selectedUri(action, uri, uri, true))
+        assertTrue(accepts(action = action, stream = true))
+        assertTrue(accepts(action = action, stream = true, clips = listOf(uri)))
+        assertEquals(uri, ExternalPdfIntentPolicy.selectedUri("android.intent.action.VIEW", uri, null, false))
+    }
+
+    @Test fun missingDecodedStreamsAndConflictingDataNeverFallBackToViewOrMultiplePayloads() {
+        val action = "android.intent.action.SEND"
+        // A missing, wrong-type or undecodable Parcelable becomes a null stream.
+        assertNull(ExternalPdfIntentPolicy.selectedUri(action, uri, null, true))
+        assertNull(ExternalPdfIntentPolicy.selectedUri(action, null, uri, false))
+        assertNull(ExternalPdfIntentPolicy.selectedUri(action, "content://other/document", uri, true))
+        assertNull(ExternalPdfIntentPolicy.selectedUri("android.intent.action.SEND_MULTIPLE", null, uri, true))
+        assertNull(ExternalPdfIntentPolicy.selectedUri("android.intent.action.VIEW", uri, uri, true))
+        assertNull(ExternalPdfIntentPolicy.selectedUri("android.intent.action.VIEW", null, null, false))
+    }
+
+    @Test fun sharingDoesNotBypassPdfUriGrantOrAdditionalPayloadChecks() {
+        val action = "android.intent.action.SEND"
+        assertFalse(accepts(action = action, stream = true, mime = "text/plain"))
+        assertFalse(accepts(action = action, stream = true, selected = "file:///private/a.pdf"))
+        assertFalse(accepts(action = action, stream = true, authority = "7@document.provider"))
+        assertFalse(accepts(action = action, stream = true, flag = false))
+        assertFalse(accepts(action = action, stream = true, grant = false))
+        assertFalse(accepts(action = action, stream = true, text = true))
+        assertFalse(accepts(action = action, stream = true, clips = listOf("content://other/document")))
+        assertFalse(accepts(action = action, stream = true, clips = listOf(uri, uri)))
     }
 
     @Test fun oneSlotFirstWinsAndClaimReleasesExactlyOnce() {
