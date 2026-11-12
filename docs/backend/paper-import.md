@@ -8,12 +8,25 @@
 |---|---|---|
 | 魔棒 | Translator HTTP + 直连兜底链（arXiv→S2→alphaXiv、DOI→Crossref→S2→OpenAlex、PMID→PubMed） | `lookup_import_batch` |
 | 本地 PDF | 用户确认 / 文件名启发式 | `paper_import_local_pdf` |
+| 平板原生选择 PDF | 系统选择器 / 文件名启发式 | `paper_import_native_pdfs` → 私有流式暂存 → 同一 PDF commit |
 | Connector | 浏览器扩展 items JSON | `features/connector` → commit |
 | Zotero 迁移 | `zotero.sqlite` + storage | `zotero_scan` / `zotero_migrate` |
 | Library 导入 | Bib/RIS 等 | `paper_import` |
 | CLI | 同库函数 | `agentero import` / `paper …` |
 
 路径分配：`import::allocate_paper_path`（盘 + catalog 双查，撞名改写 id）。
+
+## 平板原生 PDF 选择
+
+Tauri 内的平板 PDF 按钮调用 Rust 所有的原生选择流程；真实浏览器预览保留 File 输入。`paper_import_native_pdfs` 只接收目标 Vault，不接收调用方提供的 URI、源路径、标题或字节。宿主校验规范 Vault 后打开选择器，直接从选择结果取得文件描述符或文件 URL，用固定大小缓冲复制到独立私有 cache 暂存目录，再进入原有 `import_local_pdfs` / `paper_commit`。外部文件不会经 `File.arrayBuffer()`、base64 或 IPC 传到 WebView，也不会因为 Rust 选择器而自动扩张 renderer 的文件权限。
+
+一次选择至多 32 个文件，私有暂存按实际读取量限制单文件 256 MiB、批次 1 GiB；不依赖提供器报告的长度或 Seek；读取达到上限且尚未证明 EOF 时保守拒绝，因此恰好等于上限的未知长度流也可能被拒绝。流内容必须包含 PDF 文件头，不能只信扩展名或系统过滤器。已失败文件的读取量仍计入批次，部分成功保留对应错误。文件名只作不可信显示/元数据来源，用每个文件自己的暂存子目录隔离同名；Android 的 `content://` 文档标识不是文件名；私有整文件适配器可从同一已授权 URI 读取受限的 `DISPLAY_NAME` 作为不可信名称，读取失败或名称不合格时使用安全 PDF 占位名。条目保持 `title: None`，避免把文件名误当手工确认元数据而禁用后续识别；Host 准备计划继续按既有能力调度。
+
+原生 picker 有单一准入所有权：前端快速重复点击和宿主并发调用都不能重叠打开。没有选择时返回空结果；固定版本 SDK 将取消与部分原生错误都映射为无选择，不能据此宣称已精确区分取消原因。等待调用方离开或 WebView 重建不等于取消已开始的本地入库；picker 回调、阻塞复制和实际入库完成前，资源与准入仍由宿主持有。结果不会打开论文、切换当前 Vault 或覆盖阅读草稿；界面只刷新仍属同一轮 Vault 的列表。
+
+平台复用 `tauri-plugin-dialog` 2.7.2 与 `tauri-plugin-fs` 2.5.1 的公开 Rust API：Android 使用 `ACTION_GET_CONTENT` 的临时授权，应立即把整批选中内容复制完成再异步入库，不持久保存 URI。iOS 使用 Copy 模式；文件 URL 的 security scope 在打开前建立清理 guard，文件句柄先关闭，再平衡停止访问，包括打开/复制失败。只删除本次拥有的暂存目录，不删除用户原件或 SDK / 系统创建的副本。
+
+这些上限约束 Agentero 自身的流式暂存；iOS 可能在选择回调前就完成提供器下载与系统复制，无法用 Rust 上限约束那一步。固定版本 Android 文件系统插件对于空 descriptor 有上游已修复的 panic，且会丢失 asset descriptor 的切片 offset/length。因此此入口的 Android `content://` 流改用 Rust 私有平台命令调用 `ContentResolver.openFileDescriptor(..., "r")`：接收完整文件或 pipe，拒绝只能提供 asset 子区间的来源；不把 backing file 的选区外数据带进入库，也不扩展 WebView 权限。空 descriptor 返回错误；提供器打开在单一有界原生工作线程执行，不阻塞 Activity 主线程。整文件限制遵循 [Android ContentResolver 契约](https://developer.android.com/reference/android/content/ContentResolver#openFileDescriptor(android.net.Uri,%20java.lang.String))，不回退到丢失区间信息的 asset 路径。虚拟/云提供器、系统挂起和大文件仍需真机验收。系统分享扩展、外部“打开方式”和文档提供器不属于此入口。
 
 ## Skill 导入
 

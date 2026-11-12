@@ -235,6 +235,19 @@ pub async fn paper_import_local_pdf(
     }))
 }
 
+/// Select PDF files with the native picker and import private streamed copies.
+#[tauri::command]
+#[specta::specta]
+pub async fn paper_import_native_pdfs(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    vault_path: String,
+) -> Result<ApiResult<ImportLocalPdfResult>, String> {
+    let op = OpTimer::start("paper_import_native_pdfs");
+    let result = super::native_picker::import_selected(app, window, vault_path).await;
+    Ok(op.finish_result(result))
+}
+
 /// Stage a path-less OS drop (File bytes as base64) into `~/.agentero/import-tmp/`.
 #[tauri::command]
 #[specta::specta]

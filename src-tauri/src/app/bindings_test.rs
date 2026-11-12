@@ -147,6 +147,7 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::paper::import::commands::skill_install,
             crate::features::paper::import::commands::skill_discard,
             crate::features::paper::import::commands::paper_import_local_pdf,
+            crate::features::paper::import::commands::paper_import_native_pdfs,
             crate::features::paper::import::commands::paper_resolve_identifier,
             crate::features::paper::import::commands::paper_stage_import_file,
             crate::features::paper::import::commands::notes_template_seed,

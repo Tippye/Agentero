@@ -17,6 +17,8 @@ pub mod job_runners;
 #[cfg(feature = "desktop")]
 pub(crate) mod native;
 #[cfg(feature = "desktop")]
+pub(crate) mod native_picker;
+#[cfg(feature = "desktop")]
 pub mod recognize;
 #[cfg(feature = "desktop")]
 pub mod remote_ops;

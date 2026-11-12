@@ -8,6 +8,7 @@ fn mobile_registers_native_import_and_plaza_without_renderer_or_local_process_co
         .last()
         .expect("mobile handler branch");
     for command in [
+        "paper_import_native_pdfs",
         "job_import_enqueue",
         "job_list",
         "job_cancel",
