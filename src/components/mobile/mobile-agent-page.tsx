@@ -69,12 +69,15 @@ function phaseStatusLabel(
 }
 
 export function MobileAgentPage({
+	active = true,
 	selectedAgentId,
 	sessionId,
 	onSessionId,
 	historyOpen,
 	onHistoryOpenChange,
 }: {
+	/** Hidden mounted readers retain their session, but must not own global dialogs. */
+	active?: boolean;
 	selectedAgentId: string | null;
 	sessionId: string | null;
 	onSessionId: (sessionId: string | null) => void;
@@ -175,10 +178,12 @@ export function MobileAgentPage({
 				</PromptInput>
 			</section>
 			<MobilePermissionDialog
+				active={active}
 				permission={permission}
 				onRespond={respondToPermission}
 			/>
 			<MobileAgentHistoryDialog
+				active={active}
 				open={historyOpen}
 				agentId={selectedAgentId}
 				currentSessionId={sessionId}
@@ -232,6 +237,7 @@ function MobileChatLine({
 }
 
 function MobileAgentHistoryDialog({
+	active,
 	open,
 	agentId,
 	currentSessionId,
@@ -239,6 +245,7 @@ function MobileAgentHistoryDialog({
 	onPick,
 	onCurrentDeleted,
 }: {
+	active: boolean;
 	open: boolean;
 	agentId: string | null;
 	currentSessionId: string | null;
@@ -254,15 +261,15 @@ function MobileAgentHistoryDialog({
 	const hiddenIds = useRef(new Set<string>());
 
 	useEffect(() => {
-		if (!open) return;
-		let active = true;
+		if (!active || !open) return;
+		let current = true;
 		setLoading(true);
 		setResult(null);
 		void bridgeRpc<AcpListSessionsResult>("agent_list_sessions", {
 			agentId: agentId ?? undefined,
 		})
 			.then((next) => {
-				if (!active) return;
+				if (!current) return;
 				setResult({
 					...next,
 					sessions: next.sessions.filter(
@@ -270,12 +277,12 @@ function MobileAgentHistoryDialog({
 					),
 				});
 			})
-			.catch(() => active && setResult({ sessions: [], supported: false }))
-			.finally(() => active && setLoading(false));
+			.catch(() => current && setResult({ sessions: [], supported: false }))
+			.finally(() => current && setLoading(false));
 		return () => {
-			active = false;
+			current = false;
 		};
-	}, [agentId, open]);
+	}, [active, agentId, open]);
 
 	const confirmDelete = async () => {
 		if (!deleteTarget || deleting) return;
@@ -316,167 +323,173 @@ function MobileAgentHistoryDialog({
 
 	return (
 		<Dialog
-			open={open}
+			open={active && open}
 			onOpenChange={(next) => {
-				if (!next) onClose();
+				if (active && !next) onClose();
 			}}
 		>
-			<DialogContent className="max-w-md rounded-lg">
-				<DialogHeader>
-					<DialogTitle>{t("agent.history")}</DialogTitle>
-				</DialogHeader>
-				{loading ? (
-					<div className="grid place-items-center py-6">
-						<LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-					</div>
-				) : result && !result.supported ? (
-					<p className="py-2 text-muted-foreground text-sm">
-						{t("agent.historyUnsupported")}
-					</p>
-				) : result && result.sessions.length === 0 ? (
-					<p className="py-2 text-muted-foreground text-sm">
-						{t("agent.historyEmpty")}
-					</p>
-				) : (
-					<ul className="agentero-scroll max-h-80 divide-y">
-						{result?.sessions.map((session) => (
-							<li key={session.sessionId}>
-								<div className="flex items-stretch">
-									<button
-										type="button"
-										className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-3 text-left"
-										onClick={() => onPick(session.sessionId)}
-									>
-										<span className="line-clamp-2 text-sm">
-											{displayHistoryTitle(
-												session.title ?? "",
-												session.sessionId.slice(0, 8),
-											)}
-										</span>
-										{session.updatedAt ? (
-											<span className="text-muted-foreground text-xs">
-												{session.updatedAt}
+			{active ? (
+				<DialogContent className="max-w-md rounded-lg">
+					<DialogHeader>
+						<DialogTitle>{t("agent.history")}</DialogTitle>
+					</DialogHeader>
+					{loading ? (
+						<div className="grid place-items-center py-6">
+							<LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+						</div>
+					) : result && !result.supported ? (
+						<p className="py-2 text-muted-foreground text-sm">
+							{t("agent.historyUnsupported")}
+						</p>
+					) : result && result.sessions.length === 0 ? (
+						<p className="py-2 text-muted-foreground text-sm">
+							{t("agent.historyEmpty")}
+						</p>
+					) : (
+						<ul className="agentero-scroll max-h-80 divide-y">
+							{result?.sessions.map((session) => (
+								<li key={session.sessionId}>
+									<div className="flex items-stretch">
+										<button
+											type="button"
+											className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-3 text-left"
+											onClick={() => onPick(session.sessionId)}
+										>
+											<span className="line-clamp-2 text-sm">
+												{displayHistoryTitle(
+													session.title ?? "",
+													session.sessionId.slice(0, 8),
+												)}
 											</span>
-										) : null}
-									</button>
-									<button
-										type="button"
-										className={cn(
-											"my-auto mr-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
-											deleteTarget === session.sessionId &&
-												"bg-destructive/10 text-destructive",
-										)}
-										aria-label={t("agent.historyDelete")}
-										aria-expanded={deleteTarget === session.sessionId}
-										disabled={deleting}
-										onClick={() =>
-											setDeleteTarget((current) =>
-												current === session.sessionId
-													? null
-													: session.sessionId,
-											)
-										}
-									>
-										<Trash2 className="size-4" aria-hidden />
-									</button>
-								</div>
-								{deleteTarget === session.sessionId ? (
-									<div className="flex justify-end px-1 pb-2">
-										<div className="flex w-44 flex-col gap-2 rounded-lg bg-muted/40 p-2.5">
-											<p className="font-medium text-sm leading-snug">
-												{t("agent.historyDeleteTitle")}
-											</p>
-											<div className="flex justify-end gap-1">
-												<Button
-													type="button"
-													size="xs"
-													variant="ghost"
-													disabled={deleting}
-													onClick={() => setDeleteTarget(null)}
-												>
-													{t("common:cancel")}
-												</Button>
-												<Button
-													type="button"
-													size="xs"
-													variant="destructive"
-													disabled={deleting}
-													onClick={() => void confirmDelete()}
-												>
-													{t("agent.historyDelete")}
-												</Button>
+											{session.updatedAt ? (
+												<span className="text-muted-foreground text-xs">
+													{session.updatedAt}
+												</span>
+											) : null}
+										</button>
+										<button
+											type="button"
+											className={cn(
+												"my-auto mr-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+												deleteTarget === session.sessionId &&
+													"bg-destructive/10 text-destructive",
+											)}
+											aria-label={t("agent.historyDelete")}
+											aria-expanded={deleteTarget === session.sessionId}
+											disabled={deleting}
+											onClick={() =>
+												setDeleteTarget((current) =>
+													current === session.sessionId
+														? null
+														: session.sessionId,
+												)
+											}
+										>
+											<Trash2 className="size-4" aria-hidden />
+										</button>
+									</div>
+									{deleteTarget === session.sessionId ? (
+										<div className="flex justify-end px-1 pb-2">
+											<div className="flex w-44 flex-col gap-2 rounded-lg bg-muted/40 p-2.5">
+												<p className="font-medium text-sm leading-snug">
+													{t("agent.historyDeleteTitle")}
+												</p>
+												<div className="flex justify-end gap-1">
+													<Button
+														type="button"
+														size="xs"
+														variant="ghost"
+														disabled={deleting}
+														onClick={() => setDeleteTarget(null)}
+													>
+														{t("common:cancel")}
+													</Button>
+													<Button
+														type="button"
+														size="xs"
+														variant="destructive"
+														disabled={deleting}
+														onClick={() => void confirmDelete()}
+													>
+														{t("agent.historyDelete")}
+													</Button>
+												</div>
 											</div>
 										</div>
-									</div>
-								) : null}
-							</li>
-						))}
-					</ul>
-				)}
-			</DialogContent>
+									) : null}
+								</li>
+							))}
+						</ul>
+					)}
+				</DialogContent>
+			) : null}
 		</Dialog>
 	);
 }
 
 function MobilePermissionDialog({
+	active,
 	permission,
 	onRespond,
 }: {
+	active: boolean;
 	permission: AgentPermissionRequest | null;
 	onRespond: (optionId: string | null) => void;
 }) {
 	const { t } = useTranslation("agent");
 	return (
 		<Dialog
-			open={permission !== null}
+			open={active && permission !== null}
 			onOpenChange={(open) => {
-				if (!open) onRespond(null);
+				if (active && !open) onRespond(null);
 			}}
 		>
-			<DialogContent showCloseButton={false} className="max-w-md rounded-lg">
-				{permission ? (
-					<>
-						<DialogHeader>
-							<DialogTitle>{t("permission.title")}</DialogTitle>
-							<DialogDescription>{permission.title}</DialogDescription>
-						</DialogHeader>
-						{permission.host ? (
-							<p className="text-xs text-muted-foreground">
-								{t("permission.remoteHost", { host: permission.host })}
-							</p>
-						) : null}
-						{permission.paths.length ? (
-							<div className="space-y-1">
-								{permission.paths.map((path) => (
-									<code
-										key={path}
-										className="block truncate bg-muted px-2 py-1 text-xs"
-										title={path}
+			{active ? (
+				<DialogContent showCloseButton={false} className="max-w-md rounded-lg">
+					{permission ? (
+						<>
+							<DialogHeader>
+								<DialogTitle>{t("permission.title")}</DialogTitle>
+								<DialogDescription>{permission.title}</DialogDescription>
+							</DialogHeader>
+							{permission.host ? (
+								<p className="text-xs text-muted-foreground">
+									{t("permission.remoteHost", { host: permission.host })}
+								</p>
+							) : null}
+							{permission.paths.length ? (
+								<div className="space-y-1">
+									{permission.paths.map((path) => (
+										<code
+											key={path}
+											className="block truncate bg-muted px-2 py-1 text-xs"
+											title={path}
+										>
+											{path}
+										</code>
+									))}
+								</div>
+							) : null}
+							<DialogFooter className="sm:flex-col">
+								{permission.options.map((option) => (
+									<Button
+										key={option.optionId}
+										variant={
+											option.kind.startsWith("allow") ? "default" : "outline"
+										}
+										onClick={() => onRespond(option.optionId)}
 									>
-										{path}
-									</code>
+										{option.name || option.kind}
+									</Button>
 								))}
-							</div>
-						) : null}
-						<DialogFooter className="sm:flex-col">
-							{permission.options.map((option) => (
-								<Button
-									key={option.optionId}
-									variant={
-										option.kind.startsWith("allow") ? "default" : "outline"
-									}
-									onClick={() => onRespond(option.optionId)}
-								>
-									{option.name || option.kind}
+								<Button variant="ghost" onClick={() => onRespond(null)}>
+									{t("permission.deny")}
 								</Button>
-							))}
-							<Button variant="ghost" onClick={() => onRespond(null)}>
-								{t("permission.deny")}
-							</Button>
-						</DialogFooter>
-					</>
-				) : null}
-			</DialogContent>
+							</DialogFooter>
+						</>
+					) : null}
+				</DialogContent>
+			) : null}
 		</Dialog>
 	);
 }

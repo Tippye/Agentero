@@ -320,6 +320,8 @@ type SelectionCardProps = {
 	ariaLabel?: string;
 	/** Announce body updates (e.g. streaming translation). */
 	ariaLive?: "polite" | "off";
+	/** Public state for cards that own dismissal outside the Radix wrapper. */
+	"data-state"?: "open" | "closed";
 	/** Dismiss this card on Escape or pointer interaction outside it. */
 	onDismiss?: () => void;
 	onPointerEnter?: () => void;
@@ -361,6 +363,7 @@ export function SelectionCard({
 	actions,
 	ariaLabel,
 	ariaLive = "off",
+	"data-state": dataState,
 	onDismiss,
 	onPointerEnter,
 	onPointerLeave,
@@ -658,6 +661,7 @@ export function SelectionCard({
 					: null),
 			}}
 			role="dialog"
+			{...(dataState === undefined ? {} : { "data-state": dataState })}
 			aria-label={ariaLabel ?? title}
 			aria-modal="false"
 			onMouseDown={(e) => e.stopPropagation()}

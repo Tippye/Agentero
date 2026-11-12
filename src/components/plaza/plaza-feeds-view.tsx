@@ -157,6 +157,7 @@ function FeedSubMenu({
 
 	return (
 		<FloatingMenu
+			data-state="open"
 			floatingRef={menuRef}
 			point={{ x: menu.x, y: menu.y }}
 			className="z-[2000] min-w-44"

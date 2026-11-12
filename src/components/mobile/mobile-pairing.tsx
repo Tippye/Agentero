@@ -1,6 +1,12 @@
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import { Camera, Keyboard, Laptop, LoaderCircle, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import agenteroLogo from "@/assets/agentero-logo.svg";
@@ -284,67 +290,105 @@ function MobileQrScanner({
 	onScan: (value: string) => void;
 }) {
 	const { t } = useTranslation("mobile");
-	const videoRef = useRef<HTMLVideoElement>(null);
-	const controlsRef = useRef<IScannerControls | null>(null);
+	const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+	const latestScan = useRef(onScan);
 	const [failed, setFailed] = useState(false);
-
-	useEffect(() => {
-		const video = videoRef.current;
-		if (!video) return;
-		let active = true;
-		const reader = new BrowserQRCodeReader();
-		void reader
-			.decodeFromConstraints(
-				{ audio: false, video: { facingMode: { ideal: "environment" } } },
-				video,
-				(result, _error, controls) => {
-					controlsRef.current = controls;
-					if (!result || !active) return;
-					controls.stop();
-					onScan(result.getText());
-				},
-			)
-			.then((controls) => {
-				controlsRef.current = controls;
-			})
-			.catch(() => active && setFailed(true));
-		return () => {
-			active = false;
-			controlsRef.current?.stop();
-		};
+	useLayoutEffect(() => {
+		latestScan.current = onScan;
 	}, [onScan]);
 
+	useEffect(() => {
+		if (!video) return;
+		let active = true;
+		let controls: IScannerControls | null = null;
+		let stream: MediaStream | null = null;
+		const stopStream = () => {
+			const owned = stream;
+			stream = null;
+			for (const track of owned?.getTracks() ?? []) track.stop();
+		};
+		const reader = new BrowserQRCodeReader();
+		void (async () => {
+			const acquired = await navigator.mediaDevices.getUserMedia({
+				audio: false,
+				video: { facingMode: { ideal: "environment" } },
+			});
+			if (!active) {
+				for (const track of acquired.getTracks()) track.stop();
+				return;
+			}
+			// Own the stream before ZXing awaits video.play()/returns controls.
+			stream = acquired;
+			const next = await reader.decodeFromStream(
+				acquired,
+				video,
+				(result, _error, current) => {
+					if (!active) {
+						current.stop();
+						return;
+					}
+					controls = current;
+					if (!result) return;
+					current.stop();
+					stopStream();
+					latestScan.current(result.getText());
+				},
+			);
+			if (!active) next.stop();
+			else controls = next;
+		})().catch(() => {
+			stopStream();
+			if (active) setFailed(true);
+		});
+		return () => {
+			active = false;
+			controls?.stop();
+			stopStream();
+			video.pause();
+			video.srcObject = null;
+		};
+	}, [video]);
+
 	return (
-		<div
-			className="mobile-safe-area fixed inset-0 z-50 flex flex-col bg-background [--mobile-safe-gutter-top:1.5rem] [--mobile-safe-gutter-bottom:1.5rem] [--mobile-safe-gutter-left:1.25rem] [--mobile-safe-gutter-right:1.25rem]"
-			role="dialog"
-			aria-modal="true"
-			aria-label={t("connect.camera")}
+		<Dialog
+			open
+			onOpenChange={(open) => {
+				if (!open) onClose();
+			}}
 		>
-			<div className="flex items-center justify-between">
-				<p className="font-medium text-sm">{t("connect.camera")}</p>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("connect.cancel")}
-					onClick={onClose}
-				>
-					<X className="size-4" />
-				</Button>
-			</div>
-			<div className="relative my-auto aspect-square overflow-hidden border bg-black">
-				<video
-					ref={videoRef}
-					className="size-full object-cover"
-					muted
-					playsInline
-				/>
-				<div className="pointer-events-none absolute inset-[15%] border-2 border-white/90" />
-			</div>
-			<p className="mt-5 text-center text-muted-foreground text-sm">
-				{failed ? t("connect.cameraUnavailable") : t("connect.cameraHint")}
-			</p>
-		</div>
+			<DialogContent
+				className="mobile-safe-area fixed top-0 left-0 z-50 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col rounded-none bg-background p-0 sm:max-w-none [--mobile-safe-gutter-top:1.5rem] [--mobile-safe-gutter-bottom:1.5rem] [--mobile-safe-gutter-left:1.25rem] [--mobile-safe-gutter-right:1.25rem]"
+				showCloseButton={false}
+				aria-describedby={undefined}
+				aria-label={t("connect.camera")}
+			>
+				<div className="flex items-center justify-between">
+					<DialogTitle className="font-medium text-sm">
+						{t("connect.camera")}
+					</DialogTitle>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("connect.cancel")}
+						onClick={onClose}
+					>
+						<X className="size-4" />
+					</Button>
+				</div>
+				<div className="relative my-auto aspect-square overflow-hidden border bg-black">
+					<video
+						ref={setVideo}
+						className="size-full object-cover"
+						muted
+						playsInline
+					/>
+					<div className="pointer-events-none absolute inset-[15%] border-2 border-white/90" />
+				</div>
+				<p className="mt-5 text-center text-muted-foreground text-sm">
+					{failed ? t("connect.cameraUnavailable") : t("connect.cameraHint")}
+				</p>
+			</DialogContent>
+		</Dialog>
 	);
 }
