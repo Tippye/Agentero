@@ -4,6 +4,8 @@
 > 两端共用部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`ios` 基于 `mobile`，这里只写 iOS / iPadOS 特有工作；文中 S0–S9 指共享篇工作项。
 > 已落地的首批平台配置：Tauri 与 XcodeGen 模板最低系统同步为 18.2，发布预检检查两处一致。I5 有限后台窗口已有 Swift 适配与纯策略测试，UIKit 集成仍须完整 SDK 与设备验收；不声明常驻、系统调度或后台传输能力。多场景、原生导入仍待实现和设备验收。当前环境缺少完整 Xcode/iPhoneOS SDK。
 
+当前补齐：共享四边安全区域与默认阅读布局已接入，原生 Apple Pencil 双击按系统偏好映射工具/颜色动作，并校验前台 key window、文档 token 与单调代次；不在多 WebView 身份不明时广播。共享笔手分流、长按选择与生命周期取消已有回归；UIKit 适配叶文件通过语法解析，纯 Swift 目标策略已编译执行。完整 iPhoneOS SDK 与真实 Pencil/系统窗口仍未验证，Pencil Pro 挤压手势尚未接入。移动 PDF 暂存改用 Core 私有 cache 根；不在本轮改变既有 Library 数据根、配置多 Scene 或申请新的后台模式。
+
 ## 1. 结论
 
 - iPad 是主要目标；同一个安装包继续在 iPhone 上运行，iPhone 只用窄档布局，不做多窗口和手写。
@@ -11,7 +13,7 @@
 - 分屏的前提已经满足：工程没有设置 `UIRequiresFullScreen`，iPad 四个方向都支持。真正的多窗口要在 Info.plist 里打开多场景，并做一次技术验证（I6）。
 - 手写先验证 WebView 路线，延迟不达标再上原生书写层（I7）。
 
-## 2. 现状
+## 2. 基线定位（`66ecc126`，不代表当前实现）
 
 | 项 | 现状 | 位置 |
 |---|---|---|
