@@ -1,4 +1,40 @@
 {
+	"navigation": {
+		"import": "Import papers",
+		"tags": "Tags",
+		"allPapers": "All papers",
+		"paperInfo": "Paper information for {{title}}"
+	},
+	"plaza": {
+		"source": "Discovery source",
+		"openBrowser": "Open in browser",
+		"reload": "Reload preview",
+		"embedFallback": "If the preview is unavailable, open this site in your browser.",
+		"embedUnavailable": "Preview unavailable.",
+		"openFailed": "Could not open this link.",
+		"loading": "Loading Plaza…"
+	},
+	"paperImport": {
+		"placeholder": "DOI, arXiv, PMID, paper title, or paper URL…",
+		"description": "Separate papers with new lines, commas, or semicolons. Choose a match for title searches.",
+		"noMatches": "No matching papers. Try a DOI or arXiv ID.",
+		"pdfSaved": "PDF saved",
+		"pdfMissing": "PDF not saved",
+		"unsupportedSkill": "Use a paper identifier or title here.",
+		"invalidResult": "The import result does not match this vault. Refresh the library to check the task."
+	},
+	"paperInfo": {
+		"isbn": "ISBN",
+		"issn": "ISSN",
+		"pmid": "PMID",
+		"language": "Language",
+		"place": "Place",
+		"series": "Series",
+		"bibtexKey": "BibTeX key",
+		"citations": "Citations",
+		"source": "Source",
+		"year": "Year"
+	},
 	"route": {
 		"restoreFailed": "Could not restore the reading position.",
 		"saveFailed": "Could not save the reading position."
@@ -65,6 +101,7 @@
 	"tabs": {
 		"navigation": "Main navigation",
 		"library": "Library",
+		"plaza": "Plaza",
 		"agent": "Agent",
 		"settings": "Settings"
 	},

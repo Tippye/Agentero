@@ -14,8 +14,9 @@ export function openMobileVault(locale: string): Promise<string> {
 		if (!(await exists(path))) {
 			await callApi(() => commands.vaultCreate(path, locale));
 		}
-		await callApi(() => commands.vaultEnsure(path, locale));
-		return path;
+		const opened = await callApi(() => commands.vaultEnsure(path, locale));
+		// Native facts and jobs use the canonical identity returned by ensure.
+		return opened.path;
 	})();
 	opening = attempt;
 	const settled = () => {

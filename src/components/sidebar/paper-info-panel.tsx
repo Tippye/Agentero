@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
 	BookOpen,
 	Calendar,
@@ -72,6 +73,8 @@ import { buildZhihuQuestionDraft, ZHIHU_HOME_URL } from "@/lib/zhihu";
 type PaperInfoPanelProps = {
 	meta: PaperMetadata | null;
 	className?: string;
+	/** Natural-height touch layout, without desktop edit or writing actions. */
+	mobile?: boolean;
 	/** Persist tags to catalog. Required for editing. */
 	onTagsChange?: (tags: PaperTag[]) => Promise<void> | void;
 };
@@ -142,11 +145,15 @@ function LinkChip({
 	label: string;
 	icon?: ReactNode;
 }) {
+	const url = openreviewHref(href);
+	if (!url) return null;
 	return (
 		<a
-			href={href}
-			target="_blank"
-			rel="noreferrer"
+			href={url}
+			onClick={(event) => {
+				event.preventDefault();
+				void openUrl(url).catch((error) => notifyError(errorText(error)));
+			}}
 			aria-label={label}
 			title={label}
 			className={cn(
@@ -225,11 +232,15 @@ function ServiceLinkChip({
 	label: string;
 	icon: ReactNode;
 }) {
+	const url = openreviewHref(href);
+	if (!url) return null;
 	return (
 		<a
-			href={href}
-			target="_blank"
-			rel="noreferrer"
+			href={url}
+			onClick={(event) => {
+				event.preventDefault();
+				void openUrl(url).catch((error) => notifyError(errorText(error)));
+			}}
 			aria-label={label}
 			title={label}
 			className={cn(
@@ -473,6 +484,7 @@ function loadStoredHeight(): number {
 export function PaperInfoPanel({
 	meta,
 	className,
+	mobile = false,
 	onTagsChange,
 }: PaperInfoPanelProps) {
 	const { t } = useTranslation("sidebar");
@@ -553,10 +565,10 @@ export function PaperInfoPanel({
 		setOpen(true);
 	}, [meta]);
 
-	const resizable = open && Boolean(meta);
+	const resizable = !mobile && open && Boolean(meta);
 	const vaultPath = getVaultPath();
 	const canEditMeta =
-		Boolean(meta) && !!vaultPath && !isRemoteVaultHandle(vaultPath);
+		!mobile && Boolean(meta) && !!vaultPath && !isRemoteVaultHandle(vaultPath);
 	const arxivId = meta?.arxiv_id ? arxivUrls(meta.arxiv_id)?.id : null;
 	const modelScopeUrl = arxivId
 		? `https://modelscope.cn/papers/${arxivId}/overview`
@@ -630,10 +642,17 @@ export function PaperInfoPanel({
 				"relative flex min-h-0 shrink-0 flex-col overflow-hidden border-t",
 				// Match rail collapse: 200ms ease-out. Skip while resizing.
 				!isDragging &&
+					!mobile &&
 					"transition-[height] duration-200 ease-[cubic-bezier(0.25,1,0.5,1)]",
+				mobile &&
+					"overflow-visible border-t-0 [&_a]:min-h-11 [&_input]:min-h-11",
 				className,
 			)}
-			style={{ height: open ? contentHeight + HEADER_HEIGHT : HEADER_HEIGHT }}
+			style={
+				mobile
+					? undefined
+					: { height: open ? contentHeight + HEADER_HEIGHT : HEADER_HEIGHT }
+			}
 		>
 			{resizable ? (
 				// biome-ignore lint/a11y/useSemanticElements: a focusable drag separator cannot be a native <hr>
@@ -664,12 +683,13 @@ export function PaperInfoPanel({
 				/>
 			) : null}
 			<Collapsible
-				open={open}
-				onOpenChange={setOpen}
+				open={mobile || open}
+				onOpenChange={mobile ? undefined : setOpen}
 				className="flex min-h-0 flex-1 flex-col"
 			>
 				<div className="flex h-8 min-h-8 shrink-0 items-center pr-1.5">
 					<CollapsibleTrigger
+						disabled={mobile}
 						className={cn(
 							"flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left outline-none",
 							"text-muted-foreground text-sm font-medium",
@@ -713,9 +733,9 @@ export function PaperInfoPanel({
 					forceMount
 					className={cn(
 						"flex min-h-0 flex-1 flex-col",
-						!open && "pointer-events-none",
+						!mobile && !open && "pointer-events-none",
 					)}
-					aria-hidden={!open}
+					aria-hidden={!mobile && !open}
 				>
 					{!meta ? (
 						<p className="px-3 pb-3 text-muted-foreground text-xs leading-snug">
@@ -827,63 +847,65 @@ export function PaperInfoPanel({
 											}
 										/>
 									) : null}
-									<Popover
-										open={zhihuDraftOpen && Boolean(zhihuDraft)}
-										onOpenChange={setZhihuDraftOpen}
-									>
-										<PopoverTrigger asChild>
-											<ServiceActionChip
-												label={t("paperInfo.zhihu")}
-												title={t("paperInfo.zhihuAskHint")}
-												onClick={() => void askOnZhihu()}
-												disabled={zhihuBusy}
-												icon={
-													zhihuBusy ? (
-														<Loader2
-															className="size-3.5 shrink-0 animate-spin"
-															aria-hidden
-														/>
-													) : (
-														<SiZhihu
-															className="size-3.5 shrink-0 text-[#0084FF]"
-															aria-hidden
-														/>
-													)
-												}
-											/>
-										</PopoverTrigger>
-										<PopoverContent
-											side="top"
-											align="start"
-											className="w-80 gap-2 p-3"
+									{!mobile ? (
+										<Popover
+											open={zhihuDraftOpen && Boolean(zhihuDraft)}
+											onOpenChange={setZhihuDraftOpen}
 										>
-											{zhihuDraft ? (
-												<div className="flex flex-col gap-2">
-													<div className="text-xs font-medium text-muted-foreground">
-														{t("paperInfo.zhihuDraftHeading")}
-													</div>
-													<div className="rounded-md border bg-muted/40 p-2">
-														<div className="break-words font-medium text-foreground text-xs">
-															{zhihuDraft.title}
+											<PopoverTrigger asChild>
+												<ServiceActionChip
+													label={t("paperInfo.zhihu")}
+													title={t("paperInfo.zhihuAskHint")}
+													onClick={() => void askOnZhihu()}
+													disabled={zhihuBusy}
+													icon={
+														zhihuBusy ? (
+															<Loader2
+																className="size-3.5 shrink-0 animate-spin"
+																aria-hidden
+															/>
+														) : (
+															<SiZhihu
+																className="size-3.5 shrink-0 text-[#0084FF]"
+																aria-hidden
+															/>
+														)
+													}
+												/>
+											</PopoverTrigger>
+											<PopoverContent
+												side="top"
+												align="start"
+												className="w-80 gap-2 p-3"
+											>
+												{zhihuDraft ? (
+													<div className="flex flex-col gap-2">
+														<div className="text-xs font-medium text-muted-foreground">
+															{t("paperInfo.zhihuDraftHeading")}
 														</div>
-														<div className="agentero-scroll mt-1.5 max-h-52 overflow-y-auto whitespace-pre-wrap break-words text-caption text-muted-foreground">
-															{zhihuDraft.body}
+														<div className="rounded-md border bg-muted/40 p-2">
+															<div className="break-words font-medium text-foreground text-xs">
+																{zhihuDraft.title}
+															</div>
+															<div className="agentero-scroll mt-1.5 max-h-52 overflow-y-auto whitespace-pre-wrap break-words text-caption text-muted-foreground">
+																{zhihuDraft.body}
+															</div>
+														</div>
+														<div>
+															<Button
+																type="button"
+																variant="outline"
+																size="xs"
+																onClick={() => void copyZhihuDraft(zhihuDraft)}
+															>
+																{t("paperInfo.zhihuDraftCopy")}
+															</Button>
 														</div>
 													</div>
-													<div>
-														<Button
-															type="button"
-															variant="outline"
-															size="xs"
-															onClick={() => void copyZhihuDraft(zhihuDraft)}
-														>
-															{t("paperInfo.zhihuDraftCopy")}
-														</Button>
-													</div>
-												</div>
-											) : null}
-										</PopoverContent>
-									</Popover>
+												) : null}
+											</PopoverContent>
+										</Popover>
+									) : null}
 								</div>
 								{codeRepo || huggingFaceUrl || openreviewUrl ? (
 									<div className="flex flex-nowrap items-center gap-1.5 overflow-hidden">

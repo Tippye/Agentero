@@ -14,7 +14,7 @@ import {
 	Undo2,
 	X,
 } from "lucide-react";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +58,9 @@ export function PdfInkToolbar({
 		editor.controller.getOverview,
 	);
 	const [open, setOpen] = useState(false);
+	useEffect(() => {
+		if (state.paletteRequest > 0) setOpen(true);
+	}, [state.paletteRequest]);
 	const [exporting, setExporting] = useState(false);
 	const [asking, setAsking] = useState(false);
 	const askingRef = useRef(false);

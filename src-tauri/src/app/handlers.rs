@@ -1,6 +1,10 @@
 //! Platform command registration. Mobile uses an explicit allowlist and does
 //! not inherit the desktop Agent, process, TeX or local-server surface.
 
+#[cfg(test)]
+#[path = "mobile_capabilities_tests.rs"]
+mod mobile_capabilities_tests;
+
 /// Commands available in the desktop application.
 /// Desktop-only extras are appended by the caller; `$extra` stays a raw token
 /// stream so individual entries can carry `#[cfg(...)]` (e.g. features that
@@ -193,6 +197,8 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::features::mobile_background::commands::mobile_background_open_settings,
             crate::features::mobile_route::commands::mobile_route_read,
             crate::features::mobile_route::commands::mobile_route_save,
+            crate::features::mobile_stylus::commands::mobile_stylus_get_state,
+            crate::features::mobile_stylus::commands::mobile_stylus_set_target,
             crate::integration::bridge::client_commands::bridge_client_connect,
             crate::integration::bridge::client_commands::bridge_client_resume,
             crate::integration::bridge::client_commands::bridge_client_reset_identity,
@@ -403,6 +409,8 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::features::mobile_background::commands::mobile_background_open_settings,
             crate::features::mobile_route::commands::mobile_route_read,
             crate::features::mobile_route::commands::mobile_route_save,
+            crate::features::mobile_stylus::commands::mobile_stylus_get_state,
+            crate::features::mobile_stylus::commands::mobile_stylus_set_target,
             crate::features::system::settings::commands::settings_get,
             crate::features::system::settings::commands::settings_set,
             crate::features::system::builtin::builtin_provider_status,
@@ -451,6 +459,27 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::core::usage::commands::activity_record_events,
             crate::core::usage::commands::usage_clear,
             crate::app::logging::logs_clear,
+            // Native paper imports own their jobs; no renderer report/claim or
+            // arbitrary job kinds are admitted by the mobile surface.
+            crate::features::jobs::commands::job_import_enqueue,
+            crate::features::jobs::commands::job_list,
+            crate::features::jobs::commands::job_cancel,
+            crate::features::paper::import::commands::chat_import_extract,
+            crate::features::paper::catalog::commands::paper_sync_publication,
+            crate::features::system::settings::commands::easy_scholar_probe,
+            crate::features::paper::discovery::feeds::commands::feeds_list,
+            crate::features::paper::discovery::feeds::commands::feeds_add,
+            crate::features::paper::discovery::feeds::commands::feeds_remove,
+            crate::features::paper::discovery::feeds::commands::feeds_rename,
+            crate::features::paper::discovery::feeds::commands::feeds_refresh,
+            crate::features::paper::discovery::feeds::commands::feeds_items,
+            crate::features::paper::discovery::feeds::commands::feeds_mark_imported,
+            crate::features::paper::discovery::feeds::commands::feeds_set_pinned,
+            crate::features::paper::discovery::feeds::commands::feeds_set_read,
+            crate::features::paper::discovery::feeds::commands::feeds_resolve_body,
+            crate::features::paper::discovery::recommend::commands::recommend_arxiv,
+            crate::features::paper::discovery::recommend::commands::recommend_arxiv_last,
+            crate::features::paper::discovery::recommend::commands::probe_embedding,
             crate::integration::bridge::client_commands::bridge_client_connect,
             crate::integration::bridge::client_commands::bridge_client_resume,
             crate::integration::bridge::client_commands::bridge_client_reset_identity,

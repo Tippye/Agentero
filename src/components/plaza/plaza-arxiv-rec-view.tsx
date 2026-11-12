@@ -50,6 +50,10 @@ import { notifyError } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { readJsonStorage, writeJsonStorage } from "@/lib/core/storage";
 import { cn } from "@/lib/core/utils";
+import {
+	type MobilePlazaActions,
+	mobilePaperImportReference,
+} from "@/lib/mobile/navigation";
 import { lookupSubmit } from "@/lib/paper/import-actions";
 import { ARXIV_ALL_CATEGORIES, ARXIV_FEED_CHIPS } from "@/lib/plaza/feeds";
 import {
@@ -101,7 +105,14 @@ function readEmbeddingKey(): string {
 	return embeddingProbeKey(loadSettings().embedding);
 }
 
-export function PlazaArxivRecView({ className }: { className?: string }) {
+export function PlazaArxivRecView({
+	className,
+	mobile,
+}: {
+	className?: string;
+	mobile?: MobilePlazaActions;
+}) {
+	const mobileVaultPath = mobile?.vaultPath;
 	const { t } = useTranslation("sidebar");
 	const [items, setItems] = useState<RecommendItem[]>([]);
 	const [categories, setCategories] = useState<string[]>(loadCategories);
@@ -173,7 +184,8 @@ export function PlazaArxivRecView({ className }: { className?: string }) {
 
 	/** After a successful probe, pull the same-day stored run. */
 	const loadStored = useCallback(async () => {
-		const vaultPath = getVaultPath();
+		const vaultPath =
+			mobileVaultPath === undefined ? getVaultPath() : mobileVaultPath;
 		if (!vaultPath) return;
 		try {
 			const stored = await recommendArxivLast(vaultPath);
@@ -183,11 +195,12 @@ export function PlazaArxivRecView({ className }: { className?: string }) {
 		} catch {
 			/* no stored run yet — the user can refresh */
 		}
-	}, []);
+	}, [mobileVaultPath]);
 
 	const run = useCallback(
 		async (nextCategories: string[]) => {
-			const vaultPath = getVaultPath();
+			const vaultPath =
+				mobileVaultPath === undefined ? getVaultPath() : mobileVaultPath;
 			if (!vaultPath) return;
 			setBusy(true);
 			setEmptyReason(null);
@@ -208,7 +221,7 @@ export function PlazaArxivRecView({ className }: { className?: string }) {
 				setBusy(false);
 			}
 		},
-		[handleError, runProbe],
+		[handleError, runProbe, mobileVaultPath],
 	);
 
 	// First mount: probe → load stored. The vault-open prewarm keeps it current.
@@ -395,6 +408,7 @@ export function PlazaArxivRecView({ className }: { className?: string }) {
 			<div className="agentero-scroll min-h-0 flex-1 overflow-y-auto p-2.5">
 				{showEmpty ? (
 					<EmptyState
+						mobile={mobile}
 						reason={emptyReason}
 						busy={busy}
 						probePending={probePending}
@@ -405,6 +419,7 @@ export function PlazaArxivRecView({ className }: { className?: string }) {
 					<div className="grid gap-2">
 						{items.map((item) => (
 							<RecommendCard
+								mobile={mobile}
 								key={item.arxivId}
 								item={item}
 								translation={translations[item.arxivId]}
@@ -423,12 +438,14 @@ function EmptyState({
 	probePending,
 	probeError,
 	onRetry,
+	mobile,
 }: {
 	reason: EmptyReason;
 	busy: boolean;
 	probePending: boolean;
 	probeError: string | null;
 	onRetry: () => void;
+	mobile?: MobilePlazaActions;
 }) {
 	const { t } = useTranslation("sidebar");
 	if (busy || probePending) {
@@ -451,9 +468,15 @@ function EmptyState({
 					type="button"
 					variant="outline"
 					size="sm"
-					onClick={() => openSettingsWindow("agent")}
+					onClick={() =>
+						mobile
+							? mobile.onOpenUrl("https://arxiv.org/")
+							: openSettingsWindow("agent")
+					}
 				>
-					{t("plaza.arxivRec.openSettings")}
+					{mobile
+						? t("plaza.openBrowser", { ns: "mobile" })
+						: t("plaza.arxivRec.openSettings")}
 				</Button>
 			</div>
 		);
@@ -478,9 +501,15 @@ function EmptyState({
 						type="button"
 						variant="ghost"
 						size="sm"
-						onClick={() => openSettingsWindow("agent")}
+						onClick={() =>
+							mobile
+								? mobile.onOpenUrl("https://arxiv.org/")
+								: openSettingsWindow("agent")
+						}
 					>
-						{t("plaza.arxivRec.openSettings")}
+						{mobile
+							? t("plaza.openBrowser", { ns: "mobile" })
+							: t("plaza.arxivRec.openSettings")}
 					</Button>
 				</div>
 			</div>
@@ -502,9 +531,11 @@ function EmptyState({
 function RecommendCard({
 	item,
 	translation,
+	mobile,
 }: {
 	item: RecommendItem;
 	translation?: string;
+	mobile?: MobilePlazaActions;
 }) {
 	const { t } = useTranslation("sidebar");
 	const [busy, setBusy] = useState(false);
@@ -512,6 +543,10 @@ function RecommendCard({
 
 	const importPaper = useCallback(async () => {
 		if (busy || imported) return;
+		if (mobile) {
+			mobile.onImportPaper(mobilePaperImportReference(item));
+			return;
+		}
 		setBusy(true);
 		try {
 			await lookupSubmit([item.url], {
@@ -531,10 +566,15 @@ function RecommendCard({
 			notifyError(errorText(error));
 			setBusy(false);
 		}
-	}, [busy, imported, item.url]);
+	}, [busy, imported, item, mobile]);
 
 	return (
-		<div className="group relative rounded-lg border bg-background p-2.5 pr-16 transition-colors hover:border-foreground/20 hover:bg-muted/50">
+		<div
+			className={cn(
+				"group relative rounded-lg border bg-background transition-colors hover:border-foreground/20 hover:bg-muted/50",
+				mobile ? "p-3 pb-16" : "p-2.5 pr-16",
+			)}
+		>
 			<div className="flex items-baseline gap-2">
 				<span
 					className="line-clamp-2 min-w-0 flex-1 font-medium text-sm leading-snug"
@@ -555,7 +595,12 @@ function RecommendCard({
 			>
 				{translation ?? item.abstract}
 			</SelectionSurface>
-			<div className="absolute top-2 right-2 flex items-center gap-0.5">
+			<div
+				className={cn(
+					"absolute right-2 flex items-center gap-0.5",
+					mobile ? "bottom-2" : "top-2",
+				)}
+			>
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button
@@ -563,7 +608,9 @@ function RecommendCard({
 							variant="ghost"
 							size="icon-sm"
 							aria-label={t("plaza.arxivRec.read")}
-							onClick={() => openRemoteArxivPaper(item)}
+							onClick={() =>
+								mobile ? mobile.onOpenUrl(item.url) : openRemoteArxivPaper(item)
+							}
 						>
 							<BookOpen className="size-3.5" aria-hidden />
 						</Button>
@@ -577,7 +624,7 @@ function RecommendCard({
 							variant="ghost"
 							size="icon-sm"
 							aria-label={t("plaza.feeds.openOriginal")}
-							onClick={() => openExternalUrl(item.url)}
+							onClick={() => (mobile?.onOpenUrl ?? openExternalUrl)(item.url)}
 						>
 							<ExternalLink className="size-3.5" aria-hidden />
 						</Button>

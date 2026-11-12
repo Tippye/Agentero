@@ -32,6 +32,14 @@
 #![allow(dead_code)]
 
 #[derive(specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "mobile:stylus-action")]
+pub struct MobileStylusActionEvt(pub tauri_plugin_agentero_mobile::StylusActionEvent);
+
+#[derive(specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "mobile:stylus-presence")]
+pub struct MobileStylusPresenceEvt(pub tauri_plugin_agentero_mobile::StylusPresenceEvent);
+
+#[derive(specta::Type, tauri_specta::Event)]
 #[tauri_specta(event_name = "job:offer")]
 pub struct JobOfferEvent(pub crate::features::jobs::JobOfferPayload);
 
@@ -459,6 +467,8 @@ use std::path::{Path, PathBuf};
 fn registered_event_names() -> BTreeSet<String> {
     use tauri_specta::Event as _;
     let mut names: Vec<&str> = vec![
+        MobileStylusActionEvt::NAME,
+        MobileStylusPresenceEvt::NAME,
         JobOfferEvent::NAME,
         JobChangedEvent::NAME,
         JobCompletedEvent::NAME,

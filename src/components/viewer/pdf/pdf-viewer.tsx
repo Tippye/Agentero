@@ -2683,7 +2683,9 @@ function PdfViewerInner({
 				<InkInputBridge
 					editor={inkEditor}
 					documentId={docId}
-					enabled={inkEditable && isActive && !visualCropPending}
+					enabled={
+						inkEditable && isActive && !visualCropPending && !regionSelecting
+					}
 					docCapRef={docCapRef}
 				/>
 				<WheelZoomHandler docId={docId} />

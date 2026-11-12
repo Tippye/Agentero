@@ -86,3 +86,94 @@ pub enum BackgroundSettingsTarget {
     Notifications,
     App,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum StylusAction {
+    ToggleEraser,
+    PreviousTool,
+    NextColor,
+    ShowColorPalette,
+    Select,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum StylusSource {
+    NativeInputDevice,
+    NativePencilInteraction,
+    Pointer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusAdapterCapability {
+    pub id: String,
+    pub source: StylusSource,
+    pub actions: Vec<StylusAction>,
+    pub double_tap: bool,
+    pub barrel_button: bool,
+    pub inverted_pen: bool,
+    pub hardware_presence: bool,
+}
+
+/// Observation provenance matters: a registered input source is not a connected-pen list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusPresence {
+    pub available: bool,
+    pub proximity: Option<bool>,
+    pub source: StylusSource,
+    pub adapter_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusState {
+    pub adapters: Vec<StylusAdapterCapability>,
+    pub presence: Vec<StylusPresence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusActionEvent {
+    pub action: StylusAction,
+    pub source: StylusSource,
+    pub adapter_id: String,
+    pub target_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusPresenceEvent {
+    pub target_token: String,
+    pub presence: StylusPresence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StylusTarget {
+    pub generation: String,
+    pub window_label: String,
+    pub target_token: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum NativeStylusEvent {
+    Action {
+        window_label: String,
+        event: StylusActionEvent,
+    },
+    Presence {
+        window_label: String,
+        target_token: String,
+        presence: StylusPresence,
+    },
+}

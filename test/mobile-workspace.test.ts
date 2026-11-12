@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PdfViewerProps } from "@/components/viewer/pdf/types";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
+import type { MobileWindowRoute } from "@/lib/mobile/route";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 const state = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const state = vi.hoisted(() => ({
 	notesMounts: 0,
 	agentMounts: 0,
 	pdf: null as PdfViewerProps | null,
+	restoreRoute: null as ((route: MobileWindowRoute) => void) | null,
 	regionContext: null as MobilePaperRegionContext | null,
 	handleRegionContext: null as ((id: string) => void) | null,
 	load: vi.fn(),
@@ -24,6 +26,25 @@ const state = vi.hoisted(() => ({
 	fetchMissing: vi.fn(async () => false),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+vi.mock("@/components/mobile/hooks/use-mobile-route", () => ({
+	useMobileRoute: ({
+		onRestore,
+	}: {
+		onRestore: (route: MobileWindowRoute) => void;
+	}) => {
+		state.restoreRoute = onRestore;
+		return { markInteraction: vi.fn() };
+	},
+}));
+vi.mock("@/components/mobile/mobile-paper-import", () => ({
+	MobilePaperImport: () => null,
+}));
+vi.mock("@/components/mobile/mobile-paper-info", () => ({
+	MobilePaperInfo: () => null,
+}));
+vi.mock("@/components/mobile/mobile-plaza-page", () => ({
+	MobilePlazaPage: () => null,
+}));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
 	useMobileVault: () => ({
 		vaultPath: "/private/Vault",
@@ -476,6 +497,60 @@ afterEach(async () => {
 });
 
 describe("stable tablet workspace DOM", () => {
+	it("opens the left navigation while reading on a narrow screen", async () => {
+		await click("Paper first");
+		await ready();
+		const reader = container.querySelector("[data-pdf-document]");
+		await click("settings.menu");
+		expect(state.pdf?.isActive).toBe(false);
+		await click("Paper first");
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(state.pdf?.isActive).toBe(true);
+		expect(container.querySelector("[data-pdf-document]")).toBe(reader);
+	});
+	it("opens the current paper from Plaza without replacing its reader", async () => {
+		await resize(1000);
+		await click("Paper first");
+		await ready();
+		const reader = container.querySelector("[data-pdf-document]");
+		await click("tabs.plaza");
+		expect(pane("plaza")?.hidden).toBe(false);
+		await click("settings.menu");
+		await click("Paper first");
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(pane("plaza")?.hidden).toBe(true);
+		expect(pane("agent")?.hidden).toBe(true);
+		expect(container.querySelector("[data-pdf-document]")).toBe(reader);
+	});
+	it("restores and opens papers without reopening auxiliary panes", async () => {
+		await resize(1000);
+		await act(() =>
+			state.restoreRoute?.({
+				paperId: "first",
+				tab: "agent",
+				readerMode: "pdf",
+				preset: "discuss",
+				pdf: { page: 7, zoom: 1.75 },
+			}),
+		);
+		await resize(1000);
+		await ready();
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(pane("agent")?.hidden).toBe(true);
+		expect(state.pdf?.initialReadingSnapshot).toEqual({ page: 7, zoom: 1.75 });
+		await click("workspace.discuss");
+		expect(pane("agent")?.hidden).toBe(false);
+		await click("Paper second");
+		await ready();
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(pane("agent")?.hidden).toBe(true);
+		await click("workspace.discuss");
+		expect(pane("agent")?.hidden).toBe(false);
+		await click("tabs.agent");
+		await click("tabs.library");
+		expect(pane("agent")?.hidden).toBe(true);
+		expect(pane("reader")?.hidden).toBe(false);
+	});
 	it("hands a captured source to the existing composer without replacing drafts, and fences pending or stale captures", async () => {
 		await resize(840);
 		await click("Paper first");

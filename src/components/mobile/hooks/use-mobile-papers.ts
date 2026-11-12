@@ -85,5 +85,33 @@ export function useMobilePapers({ vaultPath }: { vaultPath: string | null }) {
 		};
 	}, [vaultPath, refresh]);
 
+	useEffect(() => {
+		if (!vaultPath) return;
+		let active = true;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const disposers: (() => void)[] = [];
+		for (const event of [events.paperImported, events.paperAssetsReady]) {
+			void event
+				.listen(({ payload }) => {
+					if (!active || payload.vaultId !== vaultPath) return;
+					if (timer !== undefined) clearTimeout(timer);
+					timer = setTimeout(() => {
+						timer = undefined;
+						if (active) void refresh();
+					}, 150);
+				})
+				.then((off) => {
+					if (active) disposers.push(off);
+					else off();
+				})
+				.catch(() => undefined);
+		}
+		return () => {
+			active = false;
+			if (timer !== undefined) clearTimeout(timer);
+			for (const off of disposers) off();
+		};
+	}, [vaultPath, refresh]);
+
 	return { papers, loading, refresh };
 }

@@ -1,16 +1,30 @@
 import type { InkEditor, InkInputPage } from "./editor";
-import { inkPointerSample, inkPointFromClient } from "./geometry";
+import {
+	type InkPosition,
+	inkPointerSample,
+	inkPointFromClient,
+} from "./geometry";
 
 export type InkViewport = {
 	getMetrics(): { scrollLeft: number; scrollTop: number };
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
-/** Native pointer boundary; touch samples are never converted into ink. */
+export const INK_LONG_PRESS_MS = 500;
+const HOLD_SLOP_PX = 8;
+/** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {
 	target: HTMLElement;
 	editor: InkEditor;
 	pageAt(target: EventTarget | null): InkInputPage | null;
 	viewport(): InkViewport | null;
+	automaticPen?: boolean;
+	onPenDetected?: () => void;
+	onLongPress?: (
+		page: InkInputPage,
+		point: InkPosition,
+		event: PointerEvent,
+		current: () => boolean,
+	) => void;
 }) {
 	const { target, editor } = options;
 	let stroke: {
@@ -26,29 +40,48 @@ export function bindInkInput(options: {
 		y: number;
 		left: number;
 		top: number;
+		moved: boolean;
 	} | null = null;
-	let palm = false;
+	let hold: {
+		id: number;
+		page: InkInputPage;
+		x: number;
+		y: number;
+		event: PointerEvent;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
+	let held: number | null = null;
+	let epoch = 0,
+		suppressMouseUntil = 0;
+	let palm = false,
+		disposed = false,
+		selecting = false;
 	let queued: PointerEvent[] = [];
 	let frame = 0;
 	const originalTouchAction = target.style.touchAction;
 	const editing = () => editor.getState().mode !== "read";
+	const managed = () => options.automaticPen || editing();
 	const capture = (id: number) => {
 		try {
 			target.setPointerCapture(id);
 		} catch {
-			/* Global release listeners still end the gesture. */
+			/* Document release listeners are the fallback. */
 		}
 	};
 	const release = (id: number) => {
 		try {
 			if (target.hasPointerCapture(id)) target.releasePointerCapture(id);
 		} catch {
-			/* Already cancelled by the webview. */
+			/* Webview already cancelled. */
 		}
 	};
 	const consume = (event: Event) => {
 		event.preventDefault();
 		event.stopImmediatePropagation();
+	};
+	const clearHold = () => {
+		if (hold) clearTimeout(hold.timer);
+		hold = null;
 	};
 	const flush = () => {
 		if (frame) cancelAnimationFrame(frame);
@@ -57,13 +90,14 @@ export function bindInkInput(options: {
 			queued = [];
 			return;
 		}
-		const current = stroke;
-		const rect = current.page.element.getBoundingClientRect();
-		const samples = queued
-			.filter((event) => event.timeStamp >= current.lastTime)
-			.map((event) => {
-				current.lastTime = event.timeStamp;
-				return inkPointerSample(
+		const current = stroke,
+			rect = current.page.element.getBoundingClientRect();
+		const samples = [];
+		for (const event of queued.sort((a, b) => a.timeStamp - b.timeStamp)) {
+			if (event.timeStamp < current.lastTime) continue;
+			current.lastTime = event.timeStamp;
+			samples.push(
+				inkPointerSample(
 					event,
 					inkPointFromClient(
 						{ x: event.clientX, y: event.clientY },
@@ -71,12 +105,16 @@ export function bindInkInput(options: {
 						current.page,
 					),
 					current.started,
-				);
-			});
+				),
+			);
+		}
 		queued = [];
 		editor.append(samples);
 	};
 	const cancel = () => {
+		epoch++;
+		clearHold();
+		held = null;
 		const active = stroke;
 		stroke = null;
 		queued = [];
@@ -86,28 +124,110 @@ export function bindInkInput(options: {
 		if (active) release(active.id);
 		pan = null;
 	};
+	let mode = editor.getState().mode;
 	const updateTouchAction = () => {
-		target.style.touchAction = editing() ? "none" : originalTouchAction;
-		if (!editing()) cancel();
+		const next = editor.getState().mode;
+		if (next !== mode) {
+			mode = next;
+			if (!selecting) cancel();
+		}
+		const action = managed() ? "none" : originalTouchAction;
+		if (target.style.touchAction !== action) target.style.touchAction = action;
 	};
 	const unsubscribe = editor.subscribe(updateTouchAction);
 	updateTouchAction();
-	const excluded = (event: PointerEvent) =>
+	const excluded = (event: Event) =>
 		event.target instanceof Element &&
 		!!event.target.closest(
 			"[data-pdf-chrome],button,input,textarea,[contenteditable='true'],[role='dialog']",
 		);
+	const armHold = (event: PointerEvent, page: InkInputPage) => {
+		clearHold();
+		const generation = ++epoch;
+		hold = {
+			id: event.pointerId,
+			page,
+			x: event.clientX,
+			y: event.clientY,
+			event,
+			timer: setTimeout(() => {
+				const pending = hold;
+				if (
+					!pending ||
+					disposed ||
+					generation !== epoch ||
+					palm ||
+					touches.size > 1 ||
+					!target.contains(page.element)
+				)
+					return;
+				hold = null;
+				const active = stroke;
+				stroke = null;
+				queued = [];
+				if (frame) cancelAnimationFrame(frame);
+				frame = 0;
+				editor.cancel();
+				if (active) release(active.id);
+				pan = null;
+				held = event.pointerId;
+				suppressMouseUntil = Date.now() + 1000;
+				const point = inkPointFromClient(
+					{ x: pending.x, y: pending.y },
+					page.element.getBoundingClientRect(),
+					page,
+				);
+				// Mode updates during the selection callback are expected, not cancellation.
+				const current = () =>
+					!disposed && generation === epoch && target.contains(page.element);
+				selecting = true;
+				try {
+					if (options.onLongPress)
+						options.onLongPress(page, point, event, current);
+					else editor.selectAt(page, point);
+				} finally {
+					selecting = false;
+				}
+			}, INK_LONG_PRESS_MS),
+		};
+	};
+	const moveHold = (event: PointerEvent) => {
+		if (
+			hold?.id === event.pointerId &&
+			Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > HOLD_SLOP_PX
+		)
+			clearHold();
+	};
 	const down = (event: PointerEvent) => {
-		if (!editing() || excluded(event)) return;
+		if (excluded(event)) return;
+		if (event.pointerType === "pen") {
+			options.onPenDetected?.();
+			if (options.automaticPen && !editing()) editor.setMode("pen");
+		}
+		if (!managed()) return;
+		const page = options.pageAt(event.target);
+		if (!page) return;
+		epoch++;
+		clearHold();
+		held = null;
 		if (event.pointerType === "touch") {
 			touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
 			if (stroke || palm) {
+				clearHold();
 				palm = true;
 				consume(event);
 				return;
 			}
+			if (touches.size > 1) {
+				clearHold();
+				epoch++;
+				pan = null;
+				held = null;
+				consume(event);
+				return;
+			}
 			const viewport = options.viewport();
-			if (touches.size === 1 && viewport) {
+			if (viewport) {
 				const metrics = viewport.getMetrics();
 				pan = {
 					id: event.pointerId,
@@ -115,48 +235,61 @@ export function bindInkInput(options: {
 					y: event.clientY,
 					left: metrics.scrollLeft,
 					top: metrics.scrollTop,
+					moved: false,
 				};
 				capture(event.pointerId);
-			} else pan = null;
-			// Two-finger touch events still reach the existing ZoomGestureWrapper.
+			}
+			armHold(event, page);
+			suppressMouseUntil = Date.now() + 1000;
 			consume(event);
 			return;
 		}
 		if (
 			(event.pointerType !== "pen" && event.pointerType !== "mouse") ||
 			stroke ||
-			(event.button !== 0 && event.button !== 5)
+			(event.button !== 0 &&
+				event.button !== 5 &&
+				!(event.pointerType === "pen" && event.button === 2))
 		)
 			return;
-		const page = options.pageAt(event.target);
-		if (!page) return;
 		const point = inkPointFromClient(
 			{ x: event.clientX, y: event.clientY },
 			page.element.getBoundingClientRect(),
 			page,
 		);
-		const sample = inkPointerSample(event, point, event.timeStamp);
+		const eraser =
+			event.button === 5 ||
+			(event.buttons & 32) !== 0 ||
+			(event.pointerType === "pen" && (event.buttons & 2) !== 0);
 		if (
 			!editor.begin(
 				page,
-				sample,
-				event.button === 5 || (event.buttons & 32) !== 0,
+				inkPointerSample(event, point, event.timeStamp),
+				eraser,
 			)
 		)
 			return;
 		pan = null;
 		palm = touches.size > 0;
+		held = null;
 		stroke = {
 			id: event.pointerId,
 			page,
 			started: event.timeStamp,
 			lastTime: event.timeStamp,
 		};
+		if (event.pointerType === "pen" && !eraser) armHold(event, page);
 		capture(event.pointerId);
+		suppressMouseUntil = Date.now() + 1000;
 		consume(event);
 	};
 	const move = (event: PointerEvent) => {
-		if (!editing()) return;
+		if (!managed()) return;
+		moveHold(event);
+		if (held === event.pointerId) {
+			consume(event);
+			return;
+		}
 		if (event.pointerType === "touch" && touches.has(event.pointerId)) {
 			touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
 			if (
@@ -165,11 +298,17 @@ export function bindInkInput(options: {
 				!stroke &&
 				!palm
 			) {
-				options.viewport()?.scrollTo({
-					x: pan.left - (event.clientX - pan.x),
-					y: pan.top - (event.clientY - pan.y),
-					behavior: "instant",
-				});
+				if (
+					Math.hypot(event.clientX - pan.x, event.clientY - pan.y) >
+					HOLD_SLOP_PX
+				)
+					pan.moved = true;
+				if (pan.moved)
+					options.viewport()?.scrollTo({
+						x: pan.left - (event.clientX - pan.x),
+						y: pan.top - (event.clientY - pan.y),
+						behavior: "instant",
+					});
 			}
 			consume(event);
 			return;
@@ -179,23 +318,40 @@ export function bindInkInput(options: {
 			typeof event.getCoalescedEvents === "function"
 				? event.getCoalescedEvents()
 				: [];
+		for (const sample of coalesced) moveHold(sample);
 		queued.push(...(coalesced.length ? coalesced : [event]));
 		if (!frame) frame = requestAnimationFrame(flush);
 		consume(event);
 	};
 	const end = (event: PointerEvent) => {
-		if (touches.delete(event.pointerId)) {
-			pan = null;
-			if (!touches.size && !stroke) palm = false;
-			if (editing()) consume(event);
-			return;
-		}
-		if (stroke?.id !== event.pointerId) return;
-		if (event.type === "pointercancel") {
+		if (hold?.id === event.pointerId) clearHold();
+		if (
+			event.type === "pointercancel" &&
+			(stroke?.id === event.pointerId ||
+				held === event.pointerId ||
+				pan?.id === event.pointerId)
+		) {
 			cancel();
+			touches.delete(event.pointerId);
 			consume(event);
 			return;
 		}
+		if (held === event.pointerId) {
+			held = null;
+			touches.delete(event.pointerId);
+			release(event.pointerId);
+			suppressMouseUntil = Date.now() + 1000;
+			consume(event);
+			return;
+		}
+		if (touches.delete(event.pointerId)) {
+			pan = null;
+			release(event.pointerId);
+			if (!touches.size && !stroke) palm = false;
+			if (managed()) consume(event);
+			return;
+		}
+		if (stroke?.id !== event.pointerId) return;
 		queued.push(event);
 		flush();
 		const id = stroke.id;
@@ -203,22 +359,28 @@ export function bindInkInput(options: {
 		editor.finish();
 		release(id);
 		if (!touches.size) palm = false;
+		suppressMouseUntil = Date.now() + 1000;
 		consume(event);
 	};
 	const mouse = (event: MouseEvent) => {
+		if (excluded(event)) return;
 		if (
-			editing() &&
-			(stroke ||
-				(event.target instanceof Element &&
-					!!event.target.closest("[data-annotation-page]")))
+			(editing() || Date.now() < suppressMouseUntil) &&
+			event.target instanceof Element &&
+			event.target.closest("[data-annotation-page]")
 		)
 			consume(event);
 	};
 	const touch = (event: TouchEvent) => {
-		if (editing() && (stroke || palm)) consume(event);
+		if (managed() && (stroke || palm || held !== null)) consume(event);
 	};
 	const lostCapture = (event: PointerEvent) => {
-		if (stroke?.id === event.pointerId) cancel();
+		if (
+			stroke?.id === event.pointerId ||
+			hold?.id === event.pointerId ||
+			pan?.id === event.pointerId
+		)
+			cancel();
 	};
 	const blur = () => {
 		cancel();
@@ -230,12 +392,12 @@ export function bindInkInput(options: {
 	};
 	target.addEventListener("pointerdown", down, true);
 	target.addEventListener("pointermove", move, true);
-	// A pen release outside the viewport still finishes, even without capture.
 	document.addEventListener("pointerup", end, true);
 	document.addEventListener("pointercancel", end, true);
 	target.addEventListener("lostpointercapture", lostCapture);
 	target.addEventListener("mousedown", mouse, true);
 	target.addEventListener("click", mouse, true);
+	target.addEventListener("contextmenu", mouse, true);
 	target.addEventListener("touchstart", touch, {
 		capture: true,
 		passive: false,
@@ -249,6 +411,7 @@ export function bindInkInput(options: {
 	return {
 		cancel,
 		dispose() {
+			disposed = true;
 			cancel();
 			unsubscribe();
 			target.style.touchAction = originalTouchAction;
@@ -259,6 +422,7 @@ export function bindInkInput(options: {
 			target.removeEventListener("lostpointercapture", lostCapture);
 			target.removeEventListener("mousedown", mouse, true);
 			target.removeEventListener("click", mouse, true);
+			target.removeEventListener("contextmenu", mouse, true);
 			target.removeEventListener("touchstart", touch, true);
 			target.removeEventListener("touchmove", touch, true);
 			window.removeEventListener("blur", blur);

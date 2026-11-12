@@ -1,10 +1,11 @@
-import { Library } from "lucide-react";
+import { Landmark, Library } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AgentLogo } from "@/components/agent/agent-logo";
 import type { AgentTemplate } from "@/lib/agent";
 import { cn } from "@/lib/core/utils";
+import type { MobileNavigationTarget } from "@/lib/mobile/navigation";
 
-export type MobileTab = "library" | "agent";
+export type MobileTab = MobileNavigationTarget;
 
 const TAB_GAP = "0.25rem";
 
@@ -21,7 +22,7 @@ export function MobileNav({
 }) {
 	const { t } = useTranslation("mobile");
 	const sidebar = variant === "sidebar";
-	const tabs: MobileTab[] = ["library", "agent"];
+	const tabs: MobileTab[] = ["library", "plaza", "agent"];
 	const activeIndex = Math.max(0, tabs.indexOf(tab));
 
 	return (
@@ -45,6 +46,13 @@ export function MobileNav({
 			<TabButton
 				id="library"
 				icon={Library}
+				tab={tab}
+				onTab={onTab}
+				sidebar={sidebar}
+			/>
+			<TabButton
+				id="plaza"
+				icon={Landmark}
 				tab={tab}
 				onTab={onTab}
 				sidebar={sidebar}
@@ -87,7 +95,7 @@ function TabButton({
 				"relative flex items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 				sidebar
 					? "h-12 w-full gap-3 px-3 text-base"
-					: "size-10 justify-center px-0",
+					: "size-11 justify-center px-0",
 				active
 					? "font-medium text-foreground"
 					: "text-muted-foreground hover:bg-muted/60 hover:text-foreground",

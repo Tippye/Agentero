@@ -1,4 +1,40 @@
 {
+	"navigation": {
+		"import": "导入论文",
+		"tags": "标签",
+		"allPapers": "全部论文",
+		"paperInfo": "《{{title}}》的论文信息"
+	},
+	"plaza": {
+		"source": "发现来源",
+		"openBrowser": "在浏览器中打开",
+		"reload": "重新加载预览",
+		"embedFallback": "若预览不可用，可在浏览器中打开此网站。",
+		"embedUnavailable": "预览不可用。",
+		"openFailed": "无法打开此链接。",
+		"loading": "正在加载广场…"
+	},
+	"paperImport": {
+		"placeholder": "DOI、arXiv、PMID、论文标题或论文链接…",
+		"description": "用换行、逗号或分号分隔论文。按标题搜索后选择匹配项。",
+		"noMatches": "未找到匹配论文，请尝试 DOI 或 arXiv ID。",
+		"pdfSaved": "PDF 已保存",
+		"pdfMissing": "PDF 未保存",
+		"unsupportedSkill": "请在此输入论文标识符或标题。",
+		"invalidResult": "导入结果与当前库不匹配，请刷新文献库查看任务结果。"
+	},
+	"paperInfo": {
+		"isbn": "ISBN",
+		"issn": "ISSN",
+		"pmid": "PMID",
+		"language": "语言",
+		"place": "出版地",
+		"series": "丛书",
+		"bibtexKey": "BibTeX 引用键",
+		"citations": "被引次数",
+		"source": "来源",
+		"year": "年份"
+	},
 	"route": {
 		"restoreFailed": "无法恢复阅读位置。",
 		"saveFailed": "无法保存阅读位置。"
@@ -65,6 +101,7 @@
 	"tabs": {
 		"navigation": "主导航",
 		"library": "论文库",
+		"plaza": "广场",
 		"agent": "Agent",
 		"settings": "设置"
 	},
