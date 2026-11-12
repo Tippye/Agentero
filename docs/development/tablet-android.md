@@ -2,7 +2,7 @@
 
 > 状态：**开发中，尚未完成真机验收**。现状分析与行号基于 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2）。
 > 两端共用的部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`android` 基于 `mobile`，这里只写 Android 特有工作；文中 S0–S9 指共享篇工作项。
-> 已落地的首批平台配置：Tauri 与 Gradle 最低 API 同步为 33；Activity 显式允许自由调整窗口，并接收密度、字体和布局方向变化。后台服务、权限引导、原生导入与多窗口仍待实现和设备验收。
+> 已落地的平台配置：Tauri 与 Gradle 最低 API 同步为 33；Activity 显式允许自由调整窗口，并接收密度、字体和布局方向变化。A1 已选择性更新 Kotlin 2.2.10 与编译 DSL；A5 本轮加入默认关闭的原生权限/状态适配器和两类前台服务，已通过 SDK 36 Kotlin 编译与 10 项 JVM 策略测试。后台实际保活、原生导入与多窗口仍需设备验收，不能以编译结果代替。
 
 DSH 账户安全存储接入共享 Rust 凭据接口；平台固定 Android native keyring 1.0.0 的局部补丁：新命名空间显式生成 AES-256/GCM 密钥，磁盘提交失败返回错误，失败后的缓存读取隔离，缺失记录的删除重试仍确认落盘，损坏编码不当作空账号。原始许可证、来源及补丁边界见 [后端补丁说明](../../vendor/android-native-keyring-store/AGENTERO_PATCHES.md)。云备份和设备迁移排除此密文 preferences 文件与过渡期 Bridge 凭据目录。两项后端主机测试和 Android ARM64 编译已通过；设备硬件密钥、掉电和后台生命周期仍未验收。Bridge 身份与同步凭据迁移尚待完成。
 
@@ -19,13 +19,13 @@ DSH 账户安全存储接入共享 Rust 凭据接口；平台固定 Android nati
 | 项 | 现状 | 位置 |
 |---|---|---|
 | 工程 | 生成的 Android 工程在仓库里（与 iOS 不同），清单和 Gradle 直接改这里 | `src-tauri/gen/android/` |
-| 版本 | minSdk 24，targetSdk / compileSdk 36；AGP 8.11.0、Kotlin 1.9.25、Gradle 8.14.3 | `src-tauri/gen/android/app/build.gradle.kts:31`、`src-tauri/gen/android/build.gradle.kts` |
-| 清单 | 权限只有联网和相机；单个 Activity，`singleTask`；已声明处理屏幕尺寸等配置变化；`agentero://` 链接 | `src-tauri/gen/android/app/src/main/AndroidManifest.xml` |
+| 版本 | minSdk 33，targetSdk / compileSdk 36；AGP 8.11.0、Kotlin 2.2.10、Gradle 8.14.3（本轮仅选择性合并 Kotlin/Java 编译 DSL） | `src-tauri/gen/android/app/build.gradle.kts:31`、`src-tauri/gen/android/build.gradle.kts` |
+| 清单 | 保留联网、可选相机、`singleTask` 主 Activity、窗口配置变化与 `agentero://`；本轮由插件合入 5 项后台权限、2 个非导出服务与 Stop 接收者 | [应用清单](../../src-tauri/gen/android/app/src/main/AndroidManifest.xml)、[插件清单](../../src-tauri/plugins/agentero-mobile/android/src/main/AndroidManifest.xml) |
 | Activity | 只开启了全面屏 | `src-tauri/gen/android/app/src/main/java/com/poco_ai/agentero/MainActivity.kt` |
 | 命令 | 走 `not(ios)` 分支，注册的是 Bridge Host 命令；前端调用的客户端命令未注册 | `src-tauri/src/app/handlers.rs:173`、`:196`、`:333` |
 | 目录 | 落到 `$HOME/.config`、`.cache`、`.local/share`，没有用应用私有目录 | `crates/agentero-core/src/paths.rs:27` |
 | 密钥 | Bridge 身份是权限 0600 的 JSON 文件 | `src-tauri/src/integration/bridge/identity.rs:285`–`:305` |
-| 备份规则 | 未设置 | 清单 |
+| 备份规则 | 云备份与设备迁移均排除设备绑定密钥密文 preferences 和过渡期 Bridge 凭据目录；本轮保持不变 | [备份规则](../../src-tauri/gen/android/app/src/main/res/xml/data_extraction_rules.xml) |
 | 文件共享 | `FileProvider` 暴露了整个外部存储根目录和缓存目录 | `src-tauri/gen/android/app/src/main/res/xml/file_paths.xml` |
 | 返回键 | 移动壳没有处理返回 | `src/components/mobile/` |
 | CI 与发布 | PR 上检查 `aarch64-linux-android` 的 Rust 编译；发版时构建签名 APK 放进 GitHub Release 草稿 | `.github/workflows/ci.yml:82`、`.github/workflows/release.yml:253` |
@@ -37,14 +37,14 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 ### A1 工程与配置
 
 - **命令与状态**：按共享篇 S0 收敛。Android 当前比 iOS 多一层问题——除了命令注册错，`app/mod.rs:170` 还初始化了文件监听、连接器、Word、MCP、SSH 远程这些桌面状态。
-- **更新工程模板**。Tauri 2.12 的模板已升到 Kotlin 2.2 和新版 Gradle 插件，仓库里还是 Kotlin 1.9.25。在加入 Kotlin 代码和 Jetpack 库之前，先用 `tauri android init` 更新模板并合并已有改动（签名配置、相机权限、`MainActivity`）。
+- **按固定版本选择性合并工程模板**。本轮核对安装的 CLI 2.12.4 与 Rust Tauri 2.12.5：实际使用的 `tauri-android` 库是 SDK 36，并使用 `kotlin.compilerOptions` DSL；应用从 Kotlin 1.9.25 更新至 2.2.10，显式统一 Java/Kotlin 字节码目标为 1.8。GitHub 上 [CLI 2.12.4 的模板](https://github.com/tauri-apps/tauri/tree/tauri-cli-v2.12.4/crates/tauri-cli/templates/mobile/android)已采用 SDK 37 / AGP 9.3.1，故不直接运行初始化覆盖现有工程。保留本轮目标 SDK 36、AGP 8.11、Gradle 8.14.3，以及原 applicationId、签名、相机、MainActivity、私有目录和备份规则；不为后台适配器引入 Compose 或额外引擎。
 - **最低版本定为 Android 13（API 33）**，以体验与功能优先，不承担旧系统适配。Android 13 的 `MotionEvent.FLAG_CANCELED` 可识别掌触取消，配合已有多窗口能力形成手写与布局基线。这个选择是产品支持范围，不能说 Ink 库强制要求 Android 13：已核对 Ink authoring 1.0.0 的 minSdk 为 23、graphics-core 1.0.4 为 21。实施时同步更新 Gradle minSdk、Tauri Android 配置、CI 的 NDK 编译 API（当前 `.github/workflows/ci.yml:109` 是 24）和发布检查；target/compileSdk 与最低版本分开管理。
 - Android 14 的用户发起传输、`specialUse` 服务类型以及 Android 15+ 的超时规则按版本分支处理；Android 13 用其适用的前台服务声明和启动方式。系统版本达标也必须检查 WebView、手写笔及设备性能。
 - **清单改动汇总**：
 
   | 改动 | 用途 | 归属 |
   |---|---|---|
-  | 权限：`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE`、`FOREGROUND_SERVICE_DATA_SYNC`、`POST_NOTIFICATIONS`、`WAKE_LOCK`、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | 后台保活 | A5 |
+  | 权限：`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE`、`FOREGROUND_SERVICE_DATA_SYNC`、`POST_NOTIFICATIONS`、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | 后台保活 | A5 |
   | 权限：`ACCESS_NETWORK_STATE` | 网络变化后立即重连 | A9 |
   | 保活服务声明（带类型和用途说明） | 后台保活 | A5 |
   | 意图过滤器：打开 PDF、接收分享的 PDF / 文本 / 图片 | 导入 | A4 |
@@ -117,6 +117,26 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 - 如果以后上架 Google Play：`specialUse` 类型要在上架时说明用途并接受审核；直接弹出电池优化豁免请求只允许用于核心功能确实受影响的应用。目前是侧载 APK，不受这两条约束（D-And-3）。
 
 **技术验证（M0）**：主 Activity 被销毁而服务还在时，Rust 运行时和连接是否存活；重新进入时会不会重复初始化。结论决定「划掉即停止」是策略选择还是硬性限制。
+
+#### 本轮原生适配器边界
+
+`agentero-mobile` 的 Android 适配器使用系统 Service、通知渠道和 Tauri 公开权限回调。对比了 [通用 background-tasks 插件](https://github.com/guillemcordoba/tauri-plugin-background-tasks)的 WorkManager 定期执行方案，以及 [Holochain foreground-service 插件](https://github.com/mattyg/tauri-plugin-holochain-foreground-service)的本机引擎用途；它们不提供本轮所需的双服务租约、实际启动确认和异步代次隔离，故不新增依赖或复制其代码。DSH 远程服务只参考生命周期设计，不采用其 `remoteMessaging` 类型、无界唤醒锁或带任务内容的锁屏通知。
+
+- 默认关闭，仅持久化独立 preferences 中的 `enabled` 布尔值。通知权限由 Android 与 Tauri 的标准权限状态负责，不保存任务名称、提示词、Host 信息或凭据。
+- 显式开启要求应用可见、`POST_NOTIFICATIONS` 获准且两个后台渠道可用。查询状态不请求权限；申请通知和打开电池/通知/应用设置只能由前台显式操作触发，设置不可用时退回应用详情。
+- 可见性按已 started 的 Activity 集合计算，不依赖窗口焦点或 resumed 状态。分屏中一个 Activity 停止不会把另一个仍可见的窗口算作后台；集合和事件接收者不强持有 Activity。
+- Rust 事件中继与 Activity 可见性分开管理。已核对 SDK 2.12.5：`PluginManager.onDestroy` 移除 Activity 的结果启动器，但保留进程级 PluginHandle、插件监听器和 Rust channel。因此 Activity 销毁时不能注销唯一的弱事件中继，否则仍存活的 dataSync 服务超时后无法通知 Rust 做检查点。Application 的 `onActivityDestroyed` 仍独立清理可见性弱集合；同一插件的 load/resume 由弱集合去重，新插件替换后的旧中继随引用释放自然清理。这里只保留对插件的弱引用，不增加 Activity 强持有；实际无界面超时仍需设备验收。
+- Agent 使用独立 `specialUse` 服务（API 34+）；API 33 使用正常前台服务调用。同步和传输合用独立 `dataSync` 服务，不与 Agent 的计数混合。`agentActive` / `syncActive` 只在系统 `startForeground` 成功后置为真，排队启动不算活动；启动确认最多等待 4 秒，失败向 Rust 返回错误。
+- Rust 发送无任务内容的聚合计数及规范十进制字符串 `generation`（u64）。原生只接受更大的代次；迟到或重复的 apply 返回实际状态，不覆盖新计数。后台可更新已经运行的服务，不能新启动；计数归零、关闭设置或失去权限则停止对应服务。
+- 两个服务均 `START_NOT_STICKY`、`stopWithTask=true`，无开机接收者、自动重启、WakeLock、悬浮层或本机引擎。清理不依赖 `onDestroy` 一定被调用：没有需要跨进程释放的锁，进程结束也不会自动复活服务。划掉任务会停止载体，保留用户偏好；通知中的「停止后台活动」额外关闭偏好并停止两种服务，不取消远端 Host 任务。
+- Android 15+ `dataSync.onTimeout` 先停止服务，再发 `background-expired` 的 `{kind:"sync",reason:"timeout"}`，供 Rust 中止/检查点本地同步及传输；Agent 不受该超时影响。原生在 Rust 清空这两类计数前不重启超时载体。
+- 通知的正文、渠道和按钮使用 Android en / zh-CN 资源，仅显示泛化文案，锁屏 private/public 版本均无论文、提示词或 Host 内容。各渠道独立检查；关闭同步渠道不应停止仍获准的 Agent 载体。
+
+验证：使用 JDK 17.0.21、Gradle 8.14.3、Kotlin 2.2.10、SDK/Build Tools 36，运行 `:tauri-plugin-agentero-mobile:compileDebugKotlin` 与 `:tauri-plugin-agentero-mobile:testDebugUnitTest`。10 项 JVM 用例全部通过，覆盖多窗口 started 计数、默认关闭、显式授权门控、后台只更新已启动载体、排队启动去重/取消、聚合租约归零、u32 边界、通知撤销、同步超时隔离及 u64 代次晚到/重复/非法输入。任务图仅包含本插件与 `tauri-android`，没有执行应用 Rust/Cargo 构建；依赖项目构建产物重定向到 Android 工程的忽略目录，未修改共享 SDK 源码。上游 SDK 的旧生命周期方法/Kotlin DSL 警告及受限环境中的 analytics 写入警告不影响通过结果。
+
+另外通过 `:tauri-plugin-agentero-mobile:assembleDebug` 和 `:app:processArm64DebugMainManifest`，仅生成 Android AAR 与合并清单，没有构建 APK。AAR 中包含插件、双服务、Stop 接收者和控制器；合并清单确认 `specialUse` / `dataSync` 类型、非导出、`stopWithTask=true`、5 项必要权限与真实 specialUse 用途声明，未引入 WakeLock 或开机权限。应用 ID `com.poco_ai.agentero`、API 33/36、可选相机、`singleTask`、可缩放窗口和备份规则仍保留；签名配置与 MainActivity 未改变。
+
+该层不实现后台定期调度、UIDT 下载、网络切换重连或完成通知。未连接真实 Host，尚不能据编译/JVM 测试宣称息屏、划任务、系统超时、厂商保活或 Activity 销毁后的 Rust 生命周期已通过设备验收。
 
 ### A6 分屏与多窗口
 
