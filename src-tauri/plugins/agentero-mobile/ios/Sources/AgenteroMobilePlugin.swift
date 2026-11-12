@@ -4,9 +4,13 @@ import WebKit
 
 class AgenteroMobilePlugin: Plugin {
     private lazy var background = MobileBackgroundController(plugin: self)
+    private lazy var stylus = MobileStylusController(plugin: self)
 
     override func load(webview: WKWebView) {
-        DispatchQueue.main.async { [weak self] in _ = self?.background }
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.background
+            self?.stylus.attach(webview)
+        }
     }
 
     private func onMain(_ invoke: Invoke, _ operation: @escaping (MobileBackgroundController) throws -> Void) {
@@ -20,6 +24,26 @@ class AgenteroMobilePlugin: Plugin {
         }
         if Thread.isMainThread { work() }
         else { DispatchQueue.main.async(execute: work) }
+    }
+
+    private func withStylus(_ invoke: Invoke, _ operation: @escaping (MobileStylusController) throws -> Void) {
+        let work = { [weak self] in
+            guard let self = self else { invoke.reject("Stylus adapter unavailable", code: "stylus_unavailable"); return }
+            do { try operation(self.stylus) }
+            catch { invoke.reject("Stylus target unavailable or invalid", code: "stylus_unavailable") }
+        }
+        if Thread.isMainThread { work() }
+        else { DispatchQueue.main.async(execute: work) }
+    }
+
+    @objc func stylusState(_ invoke: Invoke) {
+        withStylus(invoke) { invoke.resolve($0.state()) }
+    }
+
+    @objc func stylusSetTarget(_ invoke: Invoke) {
+        withStylus(invoke) { controller in
+            invoke.resolve(try controller.setTarget(invoke.parseArgs(StylusNativeTargetArgs.self)))
+        }
     }
 
     @objc func readState(_ invoke: Invoke) {
