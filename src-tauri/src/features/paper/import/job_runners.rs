@@ -16,6 +16,9 @@ use tauri::Manager;
 
 /// Register the import job runners with the JobCenter.
 pub fn register_job_runners(center: &JobCenter) {
+    // Explicit native imports also serve the mobile layout on desktop. The
+    // dispatcher preserves the existing renderer executor for ordinary imports.
+    center.register_runner(JobKind::Import, Arc::new(super::native::import_runner));
     center.register_runner(JobKind::ParseBody, Arc::new(parse_body_runner));
     center.register_runner(JobKind::DownloadAssets, Arc::new(download_assets_runner));
     center.register_runner(

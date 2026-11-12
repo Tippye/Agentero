@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { cn } from "@/lib/core/utils";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 import { importPlazaSkillRepo } from "@/lib/plaza/import";
 import {
 	SKILL_THEMES,
@@ -28,20 +29,30 @@ function formatStars(n: number): string {
 	return String(n);
 }
 
-function RepoCard({ repo }: { repo: SkillRepo }) {
+function RepoCard({
+	repo,
+	mobile,
+}: {
+	repo: SkillRepo;
+	mobile?: MobilePlazaActions;
+}) {
 	const { t } = useTranslation("sidebar");
 	const [busy, setBusy] = useState(false);
 	const fullName = `${repo.owner}/${repo.repo}`;
 
 	const importRepo = useCallback(async () => {
 		if (busy) return;
+		if (mobile) {
+			mobile.onOpenUrl(repo.url);
+			return;
+		}
 		setBusy(true);
 		try {
 			await importPlazaSkillRepo(repo.url);
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, repo.url]);
+	}, [busy, repo.url, mobile]);
 
 	return (
 		<div
@@ -72,7 +83,9 @@ function RepoCard({ repo }: { repo: SkillRepo }) {
 					<button
 						type="button"
 						disabled={busy}
-						aria-label={t("plaza.skills.import", { name: fullName })}
+						aria-label={
+							mobile ? undefined : t("plaza.skills.import", { name: fullName })
+						}
 						onClick={() => void importRepo()}
 						className={cn(
 							"min-w-0 truncate text-left font-medium text-sm",
@@ -97,7 +110,11 @@ function RepoCard({ repo }: { repo: SkillRepo }) {
 									"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 								)}
 								aria-label={t("plaza.skills.openGithub")}
-								onClick={() => openExternalUrl(repo.url)}
+								onClick={() =>
+									mobile
+										? mobile.onOpenUrl(repo.url)
+										: openExternalUrl(repo.url)
+								}
 							>
 								<Star
 									className="size-3 fill-current group-hover:hidden"
@@ -131,7 +148,13 @@ function RepoCard({ repo }: { repo: SkillRepo }) {
 	);
 }
 
-export function PlazaSkillsView({ className }: { className?: string }) {
+export function PlazaSkillsView({
+	className,
+	mobile,
+}: {
+	className?: string;
+	mobile?: MobilePlazaActions;
+}) {
 	const { t } = useTranslation("sidebar");
 	return (
 		<div
@@ -147,9 +170,16 @@ export function PlazaSkillsView({ className }: { className?: string }) {
 						<h2 className="mb-2 font-medium text-muted-foreground text-xs">
 							{t(`plaza.skills.themes.${theme.id as SkillThemeId}`)}
 						</h2>
-						<div className="grid grid-cols-3 items-start gap-2">
+						<div
+							className={cn(
+								"grid items-start gap-2",
+								mobile
+									? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+									: "grid-cols-3",
+							)}
+						>
 							{theme.repos.map((repo) => (
-								<RepoCard key={repo.url} repo={repo} />
+								<RepoCard key={repo.url} repo={repo} mobile={mobile} />
 							))}
 						</div>
 					</section>

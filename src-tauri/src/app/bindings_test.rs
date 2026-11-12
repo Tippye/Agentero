@@ -41,6 +41,8 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::mobile_background::commands::mobile_background_open_settings,
             crate::features::mobile_route::commands::mobile_route_read,
             crate::features::mobile_route::commands::mobile_route_save,
+            crate::features::mobile_stylus::commands::mobile_stylus_get_state,
+            crate::features::mobile_stylus::commands::mobile_stylus_set_target,
             crate::integration::bridge::client_commands::bridge_client_connect,
             crate::integration::bridge::client_commands::bridge_client_resume,
             crate::integration::bridge::client_commands::bridge_client_reset_identity,
@@ -342,6 +344,8 @@ pub(crate) fn export_typescript_bindings() {
         // carry `event_name` matching each literal so `events.*` in
         // bindings.ts listens on the same wire names.
         .events(tauri_specta::collect_events![
+            crate::app::events_contract::MobileStylusActionEvt,
+            crate::app::events_contract::MobileStylusPresenceEvt,
             crate::app::events_contract::JobOfferEvent,
             crate::app::events_contract::JobChangedEvent,
             crate::app::events_contract::JobCompletedEvent,

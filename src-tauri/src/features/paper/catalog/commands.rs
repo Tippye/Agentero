@@ -34,9 +34,12 @@ pub struct PaperGetArgs {
 /// Get one paper's metadata from catalog.sqlite.
 #[tauri::command]
 #[specta::specta]
-pub async fn paper_get(args: PaperGetArgs) -> ApiResult<PaperRecord> {
+pub async fn paper_get(app: tauri::AppHandle, args: PaperGetArgs) -> ApiResult<PaperRecord> {
     run_blocking(move || {
-        let vault = try_vault!(&args.vault_path);
+        let vault = match crate::features::paper::mobile::vault(&app, &args.vault_path) {
+            Ok(vault) => vault,
+            Err(error) => return map_err(error),
+        };
         service::get_paper(&vault, args.path.as_deref(), args.id.as_deref())
     })
     .await
@@ -201,9 +204,15 @@ pub struct PaperUpdateMetaArgs {
 /// empty strings clear). Marks the row `meta_source = "manual"`.
 #[tauri::command]
 #[specta::specta]
-pub async fn paper_update_meta(args: PaperUpdateMetaArgs) -> ApiResult<PaperRecord> {
+pub async fn paper_update_meta(
+    app: tauri::AppHandle,
+    args: PaperUpdateMetaArgs,
+) -> ApiResult<PaperRecord> {
     run_blocking(move || {
-        let vault = try_vault!(&args.vault_path);
+        let vault = match crate::features::paper::mobile::vault(&app, &args.vault_path) {
+            Ok(vault) => vault,
+            Err(error) => return map_err(error),
+        };
         match service::normalize_paper_path(&args.path)
             .and_then(|path| papers::update_meta(&vault, &path, &args.patch))
         {
@@ -334,9 +343,15 @@ pub struct PaperSetTagsArgs {
 /// Replace catalog tags for a paper (syncs metadata.json projection).
 #[tauri::command]
 #[specta::specta]
-pub async fn paper_set_tags(args: PaperSetTagsArgs) -> ApiResult<PaperRecord> {
+pub async fn paper_set_tags(
+    app: tauri::AppHandle,
+    args: PaperSetTagsArgs,
+) -> ApiResult<PaperRecord> {
     run_blocking(move || {
-        let vault = try_vault!(&args.vault_path);
+        let vault = match crate::features::paper::mobile::vault(&app, &args.vault_path) {
+            Ok(vault) => vault,
+            Err(error) => return map_err(error),
+        };
         service::set_tags(&vault, &args.path, &args.tags)
     })
     .await
@@ -360,11 +375,19 @@ pub async fn paper_sync_publication(
     args: PaperSyncPublicationArgs,
 ) -> ApiResult<crate::features::paper::venue::VenueSyncReport> {
     use tauri::Manager;
-    let vault = try_vault!(&args.vault_path);
+    let vault = match crate::features::paper::mobile::vault(&app, &args.vault_path) {
+        Ok(vault) => vault,
+        Err(error) => return map_err(error),
+    };
     let key = app
         .state::<crate::features::system::settings::AppSettingsStore>()
         .easy_scholar_key();
-    match crate::features::paper::venue::sync_publication(&vault, &args.paths, key.as_deref()).await
+    match crate::features::mobile_background::with_work(
+        &app,
+        crate::features::mobile_background::BackgroundReason::Transfer,
+        crate::features::paper::venue::sync_publication(&vault, &args.paths, key.as_deref()),
+    )
+    .await
     {
         Ok(report) => ApiResult::ok(report),
         Err(e) => map_err(e),

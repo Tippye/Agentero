@@ -135,7 +135,7 @@ export function MobilePairing({
 	}, [initialOffer]);
 
 	return (
-		<div className="mobile-shell flex h-dvh min-h-0 w-full select-none flex-col overflow-hidden bg-background px-5 pt-[max(2rem,env(safe-area-inset-top))] pb-8 sm:px-8 md:mx-auto md:max-w-md">
+		<div className="mobile-shell mobile-safe-area flex h-dvh min-h-0 w-full select-none flex-col overflow-hidden bg-background [--mobile-safe-gutter-top:2rem] [--mobile-safe-gutter-bottom:2rem] [--mobile-safe-gutter-left:1.25rem] [--mobile-safe-gutter-right:1.25rem] sm:[--mobile-safe-gutter-left:2rem] sm:[--mobile-safe-gutter-right:2rem] md:mx-auto md:max-w-md">
 			<div className="flex justify-end">
 				<Button
 					type="button"
@@ -316,7 +316,7 @@ function MobileQrScanner({
 
 	return (
 		<div
-			className="fixed inset-0 z-50 flex flex-col bg-background px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+			className="mobile-safe-area fixed inset-0 z-50 flex flex-col bg-background [--mobile-safe-gutter-top:1.5rem] [--mobile-safe-gutter-bottom:1.5rem] [--mobile-safe-gutter-left:1.25rem] [--mobile-safe-gutter-right:1.25rem]"
 			role="dialog"
 			aria-modal="true"
 			aria-label={t("connect.camera")}

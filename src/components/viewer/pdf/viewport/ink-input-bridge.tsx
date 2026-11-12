@@ -1,4 +1,6 @@
 import type { useDocumentManagerCapability } from "@embedpdf/plugin-document-manager/react";
+import { useInteractionManagerCapability } from "@embedpdf/plugin-interaction-manager/react";
+import { useSelectionCapability } from "@embedpdf/plugin-selection/react";
 import {
 	useViewportCapability,
 	useViewportElement,
@@ -6,8 +8,16 @@ import {
 import { useZoomCapability } from "@embedpdf/plugin-zoom/react";
 import { type RefObject, useEffect } from "react";
 import { pdfPageRenderRotation } from "@/components/viewer/pdf/layers/agentero-render-layer";
+import {
+	activateStylusTarget,
+	isStylusTarget,
+	observeStylusPointerPresence,
+	subscribeStylusActions,
+	subscribeStylusPresence,
+} from "@/lib/mobile/stylus";
 import type { InkEditor } from "@/lib/pdf/ink/editor";
 import { bindInkInput } from "@/lib/pdf/ink/input";
+import { createInkLongPressSelection } from "@/lib/pdf/ink/selection";
 
 /** Public viewport scrolling plus the enclosing ZoomGestureWrapper handle fingers. */
 export function InkInputBridge({
@@ -26,12 +36,43 @@ export function InkInputBridge({
 	const viewportRef = useViewportElement();
 	const { provides: viewport } = useViewportCapability();
 	const { provides: zoom } = useZoomCapability();
+	const { provides: selection } = useSelectionCapability();
+	const { provides: interaction } = useInteractionManagerCapability();
 	useEffect(() => {
 		const target = viewportRef?.current;
 		if (!enabled || !editor || !target || !viewport) return;
+		let disposed = false,
+			observed = false;
+		const document = docCapRef.current?.getDocument(documentId);
+		const selector =
+			selection && interaction
+				? createInkLongPressSelection({
+						documentId,
+						editor,
+						selection,
+						interaction,
+						isCurrent: () =>
+							!disposed &&
+							docCapRef.current?.getDocument(documentId) === document,
+					})
+				: null;
+		let deactivate = () => {};
+		let visible = false,
+			intersecting = false;
 		const binding = bindInkInput({
 			target,
 			editor,
+			automaticPen: true,
+			onPenDetected: () => {
+				if (!observed && isStylusTarget(documentId)) {
+					observed = true;
+					observeStylusPointerPresence(true);
+				}
+			},
+			onLongPress: (page, point, event, current) => {
+				if (selector) selector.select(page, point, event, current);
+				else editor.selectAt(page, point);
+			},
 			viewport: () => viewport.forDocument(documentId),
 			pageAt: (eventTarget) => {
 				const element =
@@ -53,14 +94,70 @@ export function InkInputBridge({
 				};
 			},
 		});
+		const updateVisibility = () => {
+			const next =
+				intersecting && target.ownerDocument.visibilityState !== "hidden";
+			if (next === visible) return;
+			visible = next;
+			deactivate();
+			deactivate = next ? activateStylusTarget(documentId) : () => {};
+			if (!next) binding.cancel();
+		};
+		const visibility =
+			typeof IntersectionObserver !== "undefined"
+				? new IntersectionObserver((entries) => {
+						intersecting = entries.some((entry) => entry.isIntersecting);
+						updateVisibility();
+					})
+				: null;
+		if (visibility) visibility.observe(target);
+		else {
+			intersecting = true;
+			updateVisibility();
+		}
+		target.ownerDocument.addEventListener("visibilitychange", updateVisibility);
+		const offActions = subscribeStylusActions((event) => {
+			if (!disposed && visible && isStylusTarget(documentId)) {
+				binding.cancel();
+				editor.applyStylusAction(event.action);
+			}
+		});
+		const offPresence = subscribeStylusPresence((presence) => {
+			if (!disposed) {
+				target.dataset.stylusSource = presence.source;
+				target.dataset.stylusAvailable = String(presence.available);
+			}
+		});
 		// Keyboard or external zoom during a stroke cancels its old geometry.
 		const offZoom = zoom
 			?.forDocument(documentId)
 			.onZoomChange(() => binding.cancel());
 		return () => {
+			disposed = true;
+			visibility?.disconnect();
+			target.ownerDocument.removeEventListener(
+				"visibilitychange",
+				updateVisibility,
+			);
+			offActions();
+			offPresence();
+			deactivate();
+			selector?.dispose();
 			offZoom?.();
 			binding.dispose();
+			delete target.dataset.stylusSource;
+			delete target.dataset.stylusAvailable;
 		};
-	}, [editor, documentId, enabled, viewportRef, viewport, zoom, docCapRef]);
+	}, [
+		editor,
+		documentId,
+		enabled,
+		viewportRef,
+		viewport,
+		zoom,
+		docCapRef,
+		selection,
+		interaction,
+	]);
 	return null;
 }

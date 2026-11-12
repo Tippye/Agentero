@@ -29,10 +29,10 @@ export function MobileSyncPanel({
 			<DialogContent
 				showCloseButton={false}
 				aria-describedby={undefined}
-				className="flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 rounded-none p-0 sm:h-[min(90dvh,56rem)] sm:max-w-3xl sm:rounded-xl"
+				className="mobile-safe-area flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 rounded-none p-0 sm:h-[min(90dvh,56rem)] sm:max-w-3xl sm:rounded-xl"
 			>
 				<DialogTitle className="sr-only">{t("sync.title")}</DialogTitle>
-				<div className="flex shrink-0 justify-end px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
+				<div className="flex shrink-0 justify-end px-4 pt-2">
 					<Button
 						type="button"
 						variant="ghost"
@@ -44,7 +44,7 @@ export function MobileSyncPanel({
 						<X className="size-5" />
 					</Button>
 				</div>
-				<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
+				<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 sm:px-6">
 					<Suspense
 						fallback={
 							<div

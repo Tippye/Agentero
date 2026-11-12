@@ -31,6 +31,10 @@ pub async fn lookup_import_batch(
 ) -> Result<ApiResult<LookupImportBatchResult>, String> {
     let n = args.texts.len();
     let op = OpTimer::start_with("lookup_import_batch", format!("count={n}"));
+    #[cfg(mobile)]
+    if let Err(error) = crate::features::paper::mobile::vault(&app, &args.vault_path) {
+        return Ok(crate::core::error::map_err(error));
+    }
     let note_mode = crate::features::paper::import::note_mode_from_app(&app);
     let host_app = crate::features::host_hooks::wrap(&app);
     if let Some(session_id) = parse_remote_handle(&args.vault_path).map(str::to_owned) {
@@ -187,6 +191,10 @@ pub async fn paper_import_local_pdf(
 ) -> Result<ApiResult<ImportLocalPdfResult>, String> {
     let n = args.file_paths.len();
     let op = OpTimer::start_with("paper_import_local_pdf", format!("count={n}"));
+    #[cfg(mobile)]
+    if let Err(error) = crate::features::paper::mobile::vault(&app, &args.vault_path) {
+        return Ok(crate::core::error::map_err(error));
+    }
     let note_mode = crate::features::paper::import::note_mode_from_app(&app);
     let host_app = crate::features::host_hooks::wrap(&app);
     let result = if let Some(session_id) = parse_remote_handle(&args.vault_path).map(str::to_owned)

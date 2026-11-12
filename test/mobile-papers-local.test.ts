@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SyncStateEvent } from "@/lib/core/bindings";
+import type { PaperFactPayload, SyncStateEvent } from "@/lib/core/bindings";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 const io = vi.hoisted(() => ({
@@ -14,6 +14,10 @@ const io = vi.hoisted(() => ({
 	error: vi.fn(),
 	sync: null as ((event: { payload: SyncStateEvent }) => void) | null,
 	off: vi.fn(),
+	imported: null as ((event: { payload: PaperFactPayload }) => void) | null,
+	assets: null as ((event: { payload: PaperFactPayload }) => void) | null,
+	importOff: vi.fn(),
+	assetsOff: vi.fn(),
 }));
 vi.mock("@/lib/paper/api", () => ({
 	listPapers: io.list,
@@ -22,6 +26,18 @@ vi.mock("@/lib/paper/api", () => ({
 vi.mock("@/lib/core/notify", () => ({ notifyError: io.error }));
 vi.mock("@/lib/core/bindings", () => ({
 	events: {
+		paperImported: {
+			listen: async (callback: typeof io.imported) => {
+				io.imported = callback;
+				return io.importOff;
+			},
+		},
+		paperAssetsReady: {
+			listen: async (callback: typeof io.assets) => {
+				io.assets = callback;
+				return io.assetsOff;
+			},
+		},
 		syncState: {
 			listen: async (callback: typeof io.sync) => {
 				io.sync = callback;
@@ -57,9 +73,44 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(() => root.unmount());
 	vi.unstubAllGlobals();
+	vi.useRealTimers();
 });
 
 describe("local mobile catalog refresh", () => {
+	it("refreshes committed imports without an open dialog and fences old Vault events", async () => {
+		vi.useFakeTimers();
+		await render("/private/Vault");
+		const oldImported = io.imported;
+		const fact = (vaultId: string) => ({
+			payload: { vaultId, paperId: "new", path: "papers/new", timestamp: 1 },
+		});
+		const before = io.list.mock.calls.length;
+		await act(async () => {
+			io.imported?.(fact("/other"));
+			await vi.advanceTimersByTimeAsync(200);
+		});
+		expect(io.list).toHaveBeenCalledTimes(before);
+		io.list.mockResolvedValue([
+			{ id: "imported", path: "papers/imported" },
+		] as PaperMetadata[]);
+		await act(async () => {
+			io.imported?.(fact("/private/Vault"));
+			io.assets?.(fact("/private/Vault"));
+			await vi.advanceTimersByTimeAsync(200);
+		});
+		expect(io.list).toHaveBeenCalledTimes(before + 1);
+		expect(io.rescan).toHaveBeenCalledTimes(1);
+		expect(snapshot.papers[0]?.id).toBe("imported");
+		await render("/private/new");
+		const changed = io.list.mock.calls.length;
+		await act(async () => {
+			oldImported?.(fact("/private/Vault"));
+			await vi.advanceTimersByTimeAsync(200);
+		});
+		expect(io.list).toHaveBeenCalledTimes(changed);
+		expect(io.importOff).toHaveBeenCalledTimes(1);
+		expect(io.assetsOff).toHaveBeenCalledTimes(1);
+	});
 	it("rescans on open, foreground, and this Vault's completed sync before listing papers", async () => {
 		await render(null);
 		expect(io.list).not.toHaveBeenCalled();

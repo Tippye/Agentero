@@ -27,11 +27,14 @@ export function EasyScholarSettingsBlock({
 	keyDraft,
 	onKeyDraftChange,
 	onCommitKey,
+	onOpenKeyPage,
 }: {
 	savedKey: string;
 	keyDraft: string;
 	onKeyDraftChange: (value: string) => void;
 	onCommitKey: (value: string) => Promise<void>;
+	/** Mobile may supply its guarded native opener without a WebView fallback. */
+	onOpenKeyPage?: () => void;
 }) {
 	const { t } = useTranslation("settings");
 	const [status, setStatus] = useState<EasyScholarProbeStatus>("idle");
@@ -104,11 +107,13 @@ export function EasyScholarSettingsBlock({
 								variant="link"
 								size="xs"
 								className="-ml-1.5 h-auto shrink-0 px-1.5 text-primary"
-								onClick={() =>
-									void openExternalUrl(
-										"https://www.easyscholar.cc/console/user/open",
-									)
-								}
+								onClick={() => {
+									if (onOpenKeyPage) onOpenKeyPage();
+									else
+										openExternalUrl(
+											"https://www.easyscholar.cc/console/user/open",
+										);
+								}}
 							>
 								<ExternalLink data-icon="inline-start" className="size-3" />
 								{t("general.easyScholar.openKeyPage")}

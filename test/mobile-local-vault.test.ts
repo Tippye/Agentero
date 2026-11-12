@@ -4,7 +4,10 @@ const native = vi.hoisted(() => ({
 	appDataDir: vi.fn(async () => "/private/app-data/"),
 	exists: vi.fn(async () => false),
 	create: vi.fn(async () => ({ ok: true, data: {} })),
-	ensure: vi.fn(async () => ({ ok: true, data: {} })),
+	ensure: vi.fn(async () => ({
+		ok: true,
+		data: { path: "/private/app-data/Vault" },
+	})),
 }));
 vi.mock("@tauri-apps/api/path", () => ({ appDataDir: native.appDataDir }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ exists: native.exists }));
@@ -19,10 +22,28 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	native.exists.mockResolvedValue(false);
 	native.create.mockResolvedValue({ ok: true, data: {} });
-	native.ensure.mockResolvedValue({ ok: true, data: {} });
+	native.ensure.mockResolvedValue({
+		ok: true,
+		data: { path: "/private/app-data/Vault" },
+	});
 });
 
 describe("mobile app-private Vault", () => {
+	it("uses the native canonical Vault identity for jobs and paper facts", async () => {
+		native.appDataDir.mockResolvedValueOnce("/var/containers/app");
+		native.exists.mockResolvedValueOnce(true);
+		native.ensure.mockResolvedValueOnce({
+			ok: true,
+			data: { path: "/private/var/containers/app/Vault" },
+		});
+		expect(await openMobileVault("en")).toBe(
+			"/private/var/containers/app/Vault",
+		);
+		expect(native.ensure).toHaveBeenCalledWith(
+			"/var/containers/app/Vault",
+			"en",
+		);
+	});
 	it("creates under appDataDir and ensures the scaffold before opening", async () => {
 		expect(await openMobileVault("zh-CN")).toBe("/private/app-data/Vault");
 		expect(native.create).toHaveBeenCalledWith(

@@ -1,4 +1,5 @@
 import { SelectionSurface } from "@/components/selection/selection-surface";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 /**
  * Feed timeline card + in-panel detail. Import is available from the card
  * context menu and detail toolbar. Detail body supports selection Ask /
@@ -49,6 +50,7 @@ export function PlazaFeedItemRow({
 	onToggleRead,
 	onImport,
 	importing,
+	mobile,
 }: {
 	item: FeedItem;
 	hideSource: boolean;
@@ -56,6 +58,7 @@ export function PlazaFeedItemRow({
 	onToggleRead: (item: FeedItem) => void;
 	onImport: (item: FeedItem) => void;
 	importing: boolean;
+	mobile?: MobilePlazaActions;
 }) {
 	const { t, i18n } = useTranslation("sidebar");
 	const when = formatFeedWhen(item.publishedAt, i18n.language);
@@ -66,7 +69,7 @@ export function PlazaFeedItemRow({
 		<ContextMenu>
 			<ContextMenuTrigger asChild>
 				<article
-					draggable
+					draggable={!mobile}
 					onDragStart={(event) => beginFeedItemDrag(event.dataTransfer, item)}
 					className={cn(
 						"group relative flex items-start gap-2 rounded-xl p-3",
@@ -140,11 +143,16 @@ export function PlazaFeedItemRow({
 										type="button"
 										variant="ghost"
 										size="icon-sm"
-										className="opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 focus-visible:opacity-100"
+										className={cn(
+											"transition-opacity duration-150 ease-out",
+											mobile
+												? "opacity-100"
+												: "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+										)}
 										aria-label={t("plaza.feeds.openOriginal")}
 										onClick={(event) => {
 											event.stopPropagation();
-											openExternalUrl(href);
+											(mobile?.onOpenUrl ?? openExternalUrl)(href);
 										}}
 									>
 										<ExternalLink className="size-3.5" aria-hidden />
@@ -157,12 +165,19 @@ export function PlazaFeedItemRow({
 				</article>
 			</ContextMenuTrigger>
 			<ContextMenuContent>
-				<ContextMenuItem onSelect={() => addFeedItemToChat(item)}>
-					<MessageSquarePlus aria-hidden />
-					{t("plaza.feeds.addToChat")}
-				</ContextMenuItem>
+				{!mobile && (
+					<ContextMenuItem onSelect={() => addFeedItemToChat(item)}>
+						<MessageSquarePlus aria-hidden />
+						{t("plaza.feeds.addToChat")}
+					</ContextMenuItem>
+				)}
 				<ContextMenuItem
-					disabled={importing || Boolean(item.importedAt) || !href}
+					disabled={
+						importing ||
+						Boolean(item.importedAt) ||
+						!href ||
+						Boolean(mobile && !mobile.vaultPath)
+					}
 					onSelect={() => onImport(item)}
 				>
 					{item.importedAt ? (
@@ -185,6 +200,7 @@ export function PlazaFeedItemDetail({
 	onBack,
 	onImport,
 	importing,
+	mobile,
 	onResolved,
 	onToggleRead,
 }: {
@@ -193,6 +209,7 @@ export function PlazaFeedItemDetail({
 	onBack: () => void;
 	onImport: (item: FeedItem) => void;
 	importing: boolean;
+	mobile?: MobilePlazaActions;
 	onResolved: (next: FeedItem) => void;
 	onToggleRead: () => void;
 }) {
@@ -227,7 +244,17 @@ export function PlazaFeedItemDetail({
 	}, [item.bodyMarkdown, item.id, onResolved]);
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
+		<div
+			className="flex h-full min-h-0 flex-col"
+			onClickCapture={(event) => {
+				if (!mobile || !(event.target instanceof Element)) return;
+				const link = event.target.closest<HTMLAnchorElement>("a[href]");
+				if (!link || link.getAttribute("href")?.startsWith("#")) return;
+				event.preventDefault();
+				event.stopPropagation();
+				mobile.onOpenUrl(link.href);
+			}}
+		>
 			<div className="flex shrink-0 select-none items-center gap-1 px-2.5 py-2">
 				<Tooltip>
 					<TooltipTrigger asChild>
@@ -257,7 +284,7 @@ export function PlazaFeedItemDetail({
 									variant="ghost"
 									size="icon-sm"
 									aria-label={t("plaza.feeds.openOriginal")}
-									onClick={() => openExternalUrl(href)}
+									onClick={() => (mobile?.onOpenUrl ?? openExternalUrl)(href)}
 								>
 									<ExternalLink className="size-3.5" aria-hidden />
 								</Button>
@@ -273,20 +300,22 @@ export function PlazaFeedItemDetail({
 						aria-label={t("plaza.feeds.loadingBody")}
 					/>
 				) : null}
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("plaza.feeds.addToChat")}
-							onClick={() => addFeedItemToChat(item)}
-						>
-							<MessageSquarePlus className="size-3.5" aria-hidden />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent>{t("plaza.feeds.addToChat")}</TooltipContent>
-				</Tooltip>
+				{!mobile && (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("plaza.feeds.addToChat")}
+								onClick={() => addFeedItemToChat(item)}
+							>
+								<MessageSquarePlus className="size-3.5" aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>{t("plaza.feeds.addToChat")}</TooltipContent>
+					</Tooltip>
+				)}
 				{canImport ? (
 					imported ? (
 						<span className="inline-flex items-center gap-0.5 pr-1 text-muted-foreground text-xs">
@@ -300,7 +329,7 @@ export function PlazaFeedItemDetail({
 									type="button"
 									variant="ghost"
 									size="icon-sm"
-									disabled={importing}
+									disabled={importing || Boolean(mobile && !mobile.vaultPath)}
 									aria-label={t("plaza.feeds.import")}
 									onClick={() => onImport(item)}
 								>

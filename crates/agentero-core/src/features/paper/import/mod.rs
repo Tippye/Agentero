@@ -528,9 +528,23 @@ fn emit_batch_progress(
     );
 }
 
-/// Host scratch directory for path-less OS drops: `<home>/.agentero/import-tmp`.
+/// Mobile drops use the native private cache; desktop and CLI retain their
+/// existing `<home>/.agentero/import-tmp` location.
 fn import_staging_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".agentero").join("import-tmp"))
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let roots = (Some(crate::paths::agentero_cache_dir()), None);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let roots = (None, dirs::home_dir());
+    import_staging_dir_from_roots(roots.0, roots.1)
+}
+
+fn import_staging_dir_from_roots(
+    private_cache: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    private_cache
+        .map(|cache| cache.join("import-tmp"))
+        .or_else(|| home.map(|home| home.join(".agentero").join("import-tmp")))
 }
 
 /// `true` when `path` lives inside the Host drop staging directory.
@@ -571,7 +585,7 @@ fn import_metadata_stem<'a>(path: &'a Path, staging_dir: Option<&Path>) -> &'a s
     }
 }
 
-/// Write drop payload bytes to `~/.agentero/import-tmp/<stamp>-<name>` and return the path.
+/// Write drop bytes to the platform staging root as `<stamp>-<name>` and return the path.
 /// Used when the webview cannot expose `File.path` (typical on macOS WKWebView).
 pub fn stage_import_file(args: StageImportFileArgs) -> Result<StageImportFileResult, AppError> {
     use base64::Engine;
@@ -1568,6 +1582,28 @@ mod tests {
         );
         assert_eq!(title_from_stem("  Hello   World  "), "Hello World");
         assert_eq!(title_from_stem("   "), "Untitled");
+    }
+
+    #[test]
+    fn mobile_staging_uses_private_cache_without_home_and_desktop_keeps_legacy_path() {
+        let cache = PathBuf::from("app-private-cache");
+        let home = PathBuf::from("desktop-home");
+        let staging = cache.join("import-tmp");
+        assert_eq!(
+            import_staging_dir_from_roots(Some(cache.clone()), None),
+            Some(staging.clone())
+        );
+        assert_eq!(
+            import_staging_dir_from_roots(Some(cache), Some(PathBuf::from("/"))),
+            Some(staging.clone())
+        );
+        assert_eq!(
+            import_staging_dir_from_roots(None, Some(home.clone())),
+            Some(home.join(".agentero").join("import-tmp"))
+        );
+        assert_eq!(import_staging_dir_from_roots(None, None), None);
+        let staged = staging.join("1792563636997-a5e60013-paper.pdf");
+        assert_eq!(import_metadata_stem(&staged, Some(&staging)), "paper");
     }
 
     /// #801: stamped drop stems must yield clean title/id; only the exact

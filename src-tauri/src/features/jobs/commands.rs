@@ -653,9 +653,9 @@ pub struct JobImportEnqueueArgs {
     pub params: Option<serde_json::Value>,
 }
 
-/// Enqueue a renderer-orchestrated import (magic wand / local PDF / plaza /
-/// papers.cool). Only the vault is resolved — the paper folder does not exist
-/// yet — and the frontend executor drives the multi-command orchestration.
+/// Enqueue an import. Explicit native lookup requests (`params.native: true`)
+/// execute in Rust; ordinary desktop imports retain renderer orchestration.
+/// Mobile accepts only native identifier/title lookups in its private Vault.
 #[tauri::command]
 #[specta::specta]
 pub async fn job_import_enqueue(
@@ -663,17 +663,50 @@ pub async fn job_import_enqueue(
     center: State<'_, JobCenter>,
     args: JobImportEnqueueArgs,
 ) -> Result<ApiResult<JobSnapshot>, String> {
-    let vault = try_vault_ok!(&args.vault_path);
+    let mut params = args.params;
+    let native = params
+        .as_ref()
+        .and_then(|params| params.get("native"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    #[cfg(mobile)]
+    if !native {
+        return Ok(map_err(AppError::domain(
+            "mobile_import_invalid",
+            "Mobile imports require the native lookup executor",
+        )));
+    }
+    let parent = args.path.clone().unwrap_or_else(|| {
+        if native {
+            "papers".into()
+        } else {
+            String::new()
+        }
+    });
+    if native {
+        if let Some(object) = params.as_mut().and_then(serde_json::Value::as_object_mut) {
+            object.remove("result");
+        }
+        if let Err(error) =
+            crate::features::paper::import::native::validate(params.as_ref(), &parent)
+        {
+            return Ok(map_err(error));
+        }
+    }
+    let vault = match crate::features::paper::mobile::vault(&app, &args.vault_path) {
+        Ok(vault) => vault,
+        Err(error) => return Ok(map_err(error)),
+    };
+    if native && !vault.is_absolute() {
+        return Ok(map_err(AppError::domain(
+            "mobile_import_invalid",
+            "Native imports require a local Vault",
+        )));
+    }
     Ok(start_enqueued(
         &app,
         &center,
-        center.enqueue_import(
-            &vault,
-            args.path.unwrap_or_default(),
-            parse_lane(args.lane),
-            args.force,
-            args.params,
-        ),
+        center.enqueue_import(&vault, parent, parse_lane(args.lane), args.force, params),
     )
     .await)
 }
@@ -896,6 +929,21 @@ pub async fn job_cancel(
     center: State<'_, JobCenter>,
     job_id: String,
 ) -> Result<ApiResult<bool>, String> {
+    #[cfg(mobile)]
+    {
+        let private = match crate::features::paper::mobile::private_vault(&app) {
+            Ok(private) => private,
+            Err(error) => return Ok(map_err(error)),
+        };
+        if !center.snapshot(&job_id).await.is_some_and(|job| {
+            job.kind == JobKind::Import && Path::new(&job.vault_path) == private.as_path()
+        }) {
+            return Ok(map_err(AppError::domain(
+                "mobile_import_scope",
+                "Only private-Vault import jobs can be cancelled here",
+            )));
+        }
+    }
     let cancelled = center.cancel(&job_id).await;
     if cancelled {
         if let Some(snapshot) = center.snapshot(&job_id).await {
@@ -915,6 +963,16 @@ pub async fn job_report(
     center: State<'_, JobCenter>,
     args: JobReportArgs,
 ) -> Result<ApiResult<JobSnapshot>, String> {
+    if center
+        .snapshot(&args.job_id)
+        .await
+        .is_some_and(|job| job.kind == JobKind::Import && job.host == super::ExecHost::Host)
+    {
+        return Ok(map_err(AppError::domain(
+            "job_owned_by_host",
+            "Native import completion is owned by the Host",
+        )));
+    }
     if let Some(params) = args.params {
         center.merge_running_job_params(&args.job_id, params).await;
     }
@@ -947,15 +1005,38 @@ pub async fn job_report(
 #[tauri::command]
 #[specta::specta]
 pub async fn job_list(
+    app: tauri::AppHandle,
     center: State<'_, JobCenter>,
     args: JobListArgs,
 ) -> Result<ApiResult<Vec<JobSnapshot>>, String> {
+    #[cfg(mobile)]
+    {
+        let vault = match args.vault_path.as_deref() {
+            Some(path) => crate::features::paper::mobile::vault(&app, path),
+            None => crate::features::paper::mobile::private_vault(&app),
+        };
+        let vault = match vault {
+            Ok(vault) => vault,
+            Err(error) => return Ok(map_err(error)),
+        };
+        let jobs = center
+            .list(Some(&vault), args.path.as_deref())
+            .await
+            .into_iter()
+            .filter(|job| job.kind == JobKind::Import)
+            .collect();
+        return Ok(ApiResult::ok(jobs));
+    }
+    #[cfg(desktop)]
+    let _ = app;
+    #[cfg(desktop)]
     let vault = args
         .vault_path
         .as_deref()
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from);
+    #[cfg(desktop)]
     Ok(ApiResult::ok(
         center.list(vault.as_deref(), args.path.as_deref()).await,
     ))

@@ -10,6 +10,8 @@ pub mod catalog;
 pub mod discovery;
 pub mod import;
 pub mod ingest;
+#[cfg(feature = "desktop")]
+pub(crate) mod mobile;
 pub mod zotero;
 
 pub use agentero_core::features::paper::capabilities;

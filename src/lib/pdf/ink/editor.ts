@@ -17,6 +17,7 @@ export type InkEditorState = Readonly<{
 	mode: InkMode;
 	color: string;
 	width: number;
+	paletteRequest: number;
 	selection: { page: number; ids: string[]; bounds: InkBounds | null } | null;
 	draft: { page: number; stroke: InkShape } | null;
 	lasso: { page: number; points: InkPosition[] } | null;
@@ -52,6 +53,7 @@ export class InkEditor {
 		mode: "read",
 		color: INK_COLORS[0],
 		width: 2,
+		paletteRequest: 0,
 		selection: null,
 		draft: null,
 		lasso: null,
@@ -60,6 +62,7 @@ export class InkEditor {
 	};
 	private listeners = new Set<() => void>();
 	private gesture: Gesture | null = null;
+	private previousMode: InkMode = "pen";
 	constructor(readonly controller: InkController) {}
 	subscribe = (listener: () => void) => {
 		this.listeners.add(listener);
@@ -85,8 +88,57 @@ export class InkEditor {
 		for (const listener of this.listeners) listener();
 	}
 	setMode(mode: InkMode) {
+		if (mode !== this.state.mode) this.previousMode = this.state.mode;
 		this.cancel();
 		this.update({ mode, selection: null });
+	}
+	applyStylusAction(
+		action:
+			| "toggleEraser"
+			| "previousTool"
+			| "nextColor"
+			| "showColorPalette"
+			| "select",
+	) {
+		this.cancel();
+		if (action === "toggleEraser")
+			this.setMode(this.state.mode === "eraser" ? this.previousMode : "eraser");
+		else if (action === "previousTool") this.setMode(this.previousMode);
+		else if (action === "nextColor")
+			this.setColor(
+				INK_COLORS[
+					(INK_COLORS.indexOf(this.state.color as (typeof INK_COLORS)[number]) +
+						1) %
+						INK_COLORS.length
+				],
+			);
+		else if (action === "select") this.setMode("lasso");
+		else this.update({ paletteRequest: this.state.paletteRequest + 1 });
+	}
+	/** Selecting an existing stroke or a source-PDF region never writes a mark. */
+	selectAt(page: InkInputPage, point: InkPosition) {
+		this.cancel();
+		const ids = this.controller
+			.getPage(page.page)
+			.strokes.filter((stroke) => inkHitStroke(stroke, point, 8))
+			.map((stroke) => stroke.id);
+		const left = Math.max(0, point.x - 24),
+			top = Math.max(0, point.y - 24);
+		this.update({
+			mode: "lasso",
+			selection: {
+				page: page.page,
+				ids,
+				bounds: ids.length
+					? null
+					: {
+							x: left,
+							y: top,
+							width: Math.min(page.width, point.x + 24) - left,
+							height: Math.min(page.height, point.y + 24) - top,
+						},
+			},
+		});
 	}
 	setColor(color: string) {
 		this.update({ color });

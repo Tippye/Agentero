@@ -33,6 +33,7 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { cn } from "@/lib/core/utils";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 import {
 	type CcfCategory,
 	type CcfDeadlineItem,
@@ -74,7 +75,13 @@ const RANK_CLASS: Record<CcfRank, string> = {
 const SEGMENT_CLASS =
 	"inline-flex h-6 min-w-6 items-center justify-center rounded-md px-2 font-medium text-caption tabular-nums transition-[color,background-color,transform] duration-[var(--motion-duration-micro)] ease-[var(--motion-ease-out)] active:scale-[0.96] motion-reduce:transition-none";
 
-export function PlazaCcfDeadlinesView({ className }: { className?: string }) {
+export function PlazaCcfDeadlinesView({
+	className,
+	mobile,
+}: {
+	className?: string;
+	mobile?: MobilePlazaActions;
+}) {
 	const { t } = useTranslation("sidebar");
 	const [items, setItems] = useState<CcfDeadlineItem[]>([]);
 	const [busy, setBusy] = useState(true);
@@ -182,7 +189,9 @@ export function PlazaCcfDeadlinesView({ className }: { className?: string }) {
 								: t("plaza.ccfDeadlines.emptyFiltered")}
 						</p>
 					) : (
-						visible.map((item) => <DeadlineRow key={item.key} item={item} />)
+						visible.map((item) => (
+							<DeadlineRow key={item.key} item={item} mobile={mobile} />
+						))
 					)}
 				</div>
 			</div>
@@ -190,7 +199,13 @@ export function PlazaCcfDeadlinesView({ className }: { className?: string }) {
 	);
 }
 
-function DeadlineRow({ item }: { item: CcfDeadlineItem }) {
+function DeadlineRow({
+	item,
+	mobile,
+}: {
+	item: CcfDeadlineItem;
+	mobile?: MobilePlazaActions;
+}) {
 	const { t } = useTranslation("sidebar");
 	const days =
 		item.at === null ? null : Math.ceil((item.at - Date.now()) / 86_400_000);
@@ -261,7 +276,11 @@ function DeadlineRow({ item }: { item: CcfDeadlineItem }) {
 								variant="ghost"
 								size="icon-sm"
 								aria-label={t("plaza.ccfDeadlines.openOfficial")}
-								onClick={() => openExternalUrl(item.link)}
+								onClick={() =>
+									mobile
+										? mobile.onOpenUrl(item.link)
+										: openExternalUrl(item.link)
+								}
 							>
 								<ExternalLink className="size-3.5" aria-hidden />
 							</Button>
