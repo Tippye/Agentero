@@ -20,6 +20,7 @@ import app.tauri.plugin.Plugin
 class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val controller by lazy { AndroidBackgroundController.get(activity) }
     private val events = AndroidBackgroundEventRelay(this)
+    private val connectivityEvents = ConnectivityEventRelay(this)
     private val stylus by lazy { StylusAdapterRegistry(activity, this) }
 
     override fun load(webView: WebView) {
@@ -28,6 +29,11 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun readState(invoke: Invoke) = onUi(invoke) { invoke.resolve(state()) }
+
+    @Command
+    fun connectivityState(invoke: Invoke) = onUi(invoke) {
+        invoke.resolve(ConnectivityMonitor.get(activity.applicationContext).state(connectivityEvents))
+    }
 
     @Command
     fun configure(invoke: Invoke) = onUi(invoke) {
