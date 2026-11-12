@@ -36,6 +36,18 @@ class AgenteroMobilePlugin: Plugin {
         else { DispatchQueue.main.async(execute: work) }
     }
 
+    @objc func connectivityState(_ invoke: Invoke) {
+        let work = { [weak self] in
+            guard let self = self else {
+                invoke.reject("Connectivity adapter unavailable", code: "connectivity_unavailable")
+                return
+            }
+            ConnectivityMonitor.shared.readState(plugin: self) { hint in invoke.resolve(hint) }
+        }
+        if Thread.isMainThread { work() }
+        else { DispatchQueue.main.async(execute: work) }
+    }
+
     @objc func stylusState(_ invoke: Invoke) {
         withStylus(invoke) { invoke.resolve($0.state()) }
     }
