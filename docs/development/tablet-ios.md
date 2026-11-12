@@ -66,7 +66,7 @@
 
 | 入口 | 做法 |
 |---|---|
-| 应用内选文件 | 文档选择器。`tauri-plugin-dialog` 已是依赖，先验证它在 iOS 上返回的文件能否直接读取；不能就在本地插件里实现，选中后复制进 Vault |
+| 应用内选文件 | 已接入现有文档选择器 Copy 模式，由 Rust 直接打开选中 URL，以固定缓冲复制到私有 cache 后复用 PDF 入库；无全文件 WebView 字节或源路径参数。file URL 在 SDK 打开前建立清理 guard，关闭句柄后执行 SDK 要求的 security-scope 清理，包括打开/复制错误。只删除自身暂存，系统预复制不受 Rust 文件大小上限控制。详见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)；完整 iPhoneOS 构建和云提供器需 SDK/设备验收 |
 | 「打开方式」 | 声明 PDF 文档类型；Tauri 2.11 起移动端文件关联会触发 `RunEvent::Opened`，收到后进导入队列 |
 | 系统分享面板 | 新增分享扩展 target（在 `ios-project.yml` 里加）。扩展内存上限很低，只做一件事：把文件或链接写进 App Group 收件箱。主应用激活时取走并导入 |
 | 拖放 | iPad 上从其他应用拖 PDF 进来。WebView 的拖放事件是否可用需要验证，放在 M5 |
