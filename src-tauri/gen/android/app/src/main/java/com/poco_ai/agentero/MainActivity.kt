@@ -1,5 +1,6 @@
 package com.poco_ai.agentero
 
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +26,13 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    compatibilityGuard.onConfigurationChanged()
+    // The content frame and its safe-area listener survive this native-only swap.
+    findViewById<View>(android.R.id.content)?.let { ViewCompat.requestApplyInsets(it) }
   }
 
   // Wry installs its WebView through setContentView(View) after Rust startup,
