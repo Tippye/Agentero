@@ -9,7 +9,7 @@ React 19 + TypeScript Webview UI。全局状态为按域 **zustand vanilla store
 ## 定位
 
 - 为人类提供审阅、编辑、导航界面；Host 负责磁盘、网络、索引与 ACP。
-- Chat **只**走 AI Elements → Tauri invoke/event → Rust ACP Client → 本机 Agent，**不**用 Vercel AI SDK `useChat` 作默认传输。
+- 桌面 Chat 走 AI Elements → Tauri invoke/event → Rust ACP Client → 本机 Agent，不用 Vercel AI SDK `useChat` 作默认传输。平板通过原生远程 provider 使用 Host 上的 Agent，见[移动端](mobile.md)与[圈选区域提问](mobile-paper-context.md)。
 
 ## 技术栈
 

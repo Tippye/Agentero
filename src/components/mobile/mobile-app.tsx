@@ -37,6 +37,7 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 import { importMobilePdfs } from "@/lib/mobile/import-pdf";
+import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import {
 	canLeaveMobilePaper,
 	type MobileWorkspacePreset,
@@ -66,6 +67,9 @@ export default function MobileApp() {
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [agentProvider, setAgentProvider] = useState("ds-harness-remote");
 	const [remoteSession, setRemoteSession] = useState<SessionRef | null>(null);
+	const [regionContext, setRegionContext] =
+		useState<MobilePaperRegionContext | null>(null);
+	const regionContextRef = useRef<MobilePaperRegionContext | null>(null);
 	const [notesDirty, setNotesDirty] = useState(false);
 	const [importing, setImporting] = useState(false);
 	const fileInput = useRef<HTMLInputElement>(null);
@@ -80,6 +84,23 @@ export default function MobileApp() {
 		loading: vaultLoading,
 		retry: retryVault,
 	} = useMobileVault();
+
+	const latestRegionTarget = useRef({
+		vaultPath,
+		paperId: selectedPaper?.id,
+		agentProvider,
+		widthClass,
+		inkDirty,
+		blocked: pairingRequested || syncOpen,
+	});
+	latestRegionTarget.current = {
+		vaultPath,
+		paperId: selectedPaper?.id,
+		agentProvider,
+		widthClass,
+		inkDirty,
+		blocked: pairingRequested || syncOpen,
+	};
 
 	const { status, setStatus, pairPending, disconnect, resume, resetAvailable } =
 		useBridgeStatus(agentProvider === "agentero-bridge" || pairingRequested);
@@ -164,6 +185,38 @@ export default function MobileApp() {
 		},
 		[inkDirty, t],
 	);
+
+	const acceptRegionPrompt = useCallback(
+		(context: MobilePaperRegionContext) => {
+			const current = latestRegionTarget.current;
+			if (
+				!vaultPath ||
+				current.vaultPath !== vaultPath ||
+				current.paperId !== context.paperId ||
+				current.agentProvider !== "ds-harness-remote" ||
+				current.inkDirty ||
+				current.blocked
+			) {
+				notifyError(t("paperContext.staleCapture"));
+				return;
+			}
+			if (regionContextRef.current) {
+				notifyError(t("paperContext.pendingAlready"));
+				return;
+			}
+			regionContextRef.current = context;
+			setRegionContext(context);
+			setReaderMode("pdf");
+			setWorkspacePreset("discuss");
+			setTab(current.widthClass === "narrow" ? "agent" : "library");
+		},
+		[vaultPath, t],
+	);
+	const handleRegionContext = useCallback((id: string) => {
+		if (regionContextRef.current?.id !== id) return;
+		regionContextRef.current = null;
+		setRegionContext(null);
+	}, []);
 
 	const importFiles = async (files: File[]) => {
 		if (!vaultPath || importing || !files.length) return;
@@ -433,6 +486,11 @@ export default function MobileApp() {
 												onInkDirtyChange={setInkDirty}
 												onInkModeChange={setInkMode}
 												fetchMissing={paperSync.fetchMissing}
+												onRegionPrompt={
+													agentProvider === "ds-harness-remote"
+														? acceptRegionPrompt
+														: undefined
+												}
 											/>
 										) : null}
 									</EdgeSwipeBack>
@@ -489,6 +547,8 @@ export default function MobileApp() {
 												}
 												selection={remoteSession}
 												onSelectionChange={setRemoteSession}
+												regionContext={regionContext}
+												onRegionContextHandled={handleRegionContext}
 											/>
 										</div>
 										<div

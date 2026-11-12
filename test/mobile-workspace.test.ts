@@ -5,6 +5,7 @@ import { act, createElement, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PdfViewerProps } from "@/components/viewer/pdf/types";
+import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import type { PaperMetadata } from "@/lib/paper/types";
 
 const state = vi.hoisted(() => ({
@@ -15,6 +16,8 @@ const state = vi.hoisted(() => ({
 	notesMounts: 0,
 	agentMounts: 0,
 	pdf: null as PdfViewerProps | null,
+	regionContext: null as MobilePaperRegionContext | null,
+	handleRegionContext: null as ((id: string) => void) | null,
 	load: vi.fn(),
 	error: vi.fn(),
 	refresh: vi.fn(async () => {}),
@@ -142,7 +145,12 @@ vi.mock("@/components/mobile/mobile-notes-editor", () => ({
 	},
 }));
 vi.mock("@/components/mobile/remote/mobile-remote-agent-page", () => ({
-	MobileRemoteAgentPage: () => {
+	MobileRemoteAgentPage: (props: {
+		regionContext?: MobilePaperRegionContext | null;
+		onRegionContextHandled?: (id: string) => void;
+	}) => {
+		state.regionContext = props.regionContext ?? null;
+		state.handleRegionContext = props.onRegionContextHandled ?? null;
 		const [draft, setDraft] = useState("");
 		const [session, setSession] = useState("session-1");
 		useEffect(() => {
@@ -439,6 +447,8 @@ beforeEach(async () => {
 	vi.clearAllMocks();
 	state.papers = [paper("first"), paper("second")];
 	state.pdf = null;
+	state.regionContext = null;
+	state.handleRegionContext = null;
 	state.pdfMounts = 0;
 	state.notesMounts = 0;
 	state.agentMounts = 0;
@@ -466,6 +476,67 @@ afterEach(async () => {
 });
 
 describe("stable tablet workspace DOM", () => {
+	it("hands a captured source to the existing composer without replacing drafts, and fences pending or stale captures", async () => {
+		await resize(840);
+		await click("Paper first");
+		await ready();
+		await click("workspace.discuss");
+		await fill("test-agent", "existing unsent question");
+		const pdfNode = container.querySelector("[data-pdf-document]");
+		const originalCapture = state.pdf?.onRegionPrompt;
+		expect(originalCapture).toBeDefined();
+		const draft = {
+			page: 3,
+			region: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+			image: {
+				mimeType: "image/png",
+				data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j94sAAAAASUVORK5CYII=",
+			},
+		};
+		await act(() => originalCapture?.(draft));
+		const first = state.regionContext;
+		expect(first).toMatchObject({
+			paperId: "first",
+			title: "Paper first",
+			page: 3,
+			region: draft.region,
+		});
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdfNode);
+		expect(
+			container.querySelector<HTMLTextAreaElement>('[aria-label="test-agent"]')
+				?.value,
+		).toBe("existing unsent question");
+		expect(pane("reader")?.hidden).toBe(false);
+		expect(pane("agent")?.hidden).toBe(false);
+		await act(() => originalCapture?.({ ...draft, page: 4 }));
+		expect(state.regionContext).toBe(first);
+		expect(state.error).toHaveBeenCalledWith("paperContext.pendingAlready");
+		await act(() => state.handleRegionContext?.("stale-consumption-id"));
+		expect(state.regionContext).toBe(first);
+		await act(() => state.handleRegionContext?.(first?.id ?? ""));
+		expect(state.regionContext).toBeNull();
+		await click("Paper second");
+		await ready();
+		await act(() => originalCapture?.(draft));
+		expect(state.regionContext).toBeNull();
+		expect(state.error).toHaveBeenCalledWith("paperContext.staleCapture");
+	});
+
+	it("only exposes region handoff to the native remote provider", async () => {
+		await click("Paper first");
+		await ready();
+		expect(state.pdf?.onRegionPrompt).toBeDefined();
+		const select = container.querySelector<HTMLSelectElement>(
+			'[aria-label="remote.provider"]',
+		);
+		expect(select).not.toBeNull();
+		await act(() => {
+			if (select) select.value = "agentero-bridge";
+			select?.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		expect(state.pdf?.onRegionPrompt).toBeUndefined();
+	});
+
 	it("adapts 599/600/839/840 and presets without replacing PDF bytes, position, notes draft, or Agent session", async () => {
 		await click("Paper first");
 		await ready();

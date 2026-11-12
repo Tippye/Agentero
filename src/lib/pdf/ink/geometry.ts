@@ -1,5 +1,6 @@
 import { getStroke } from "perfect-freehand";
 import { shellFractionToUnrotatedPdf } from "@/lib/pdf/page-frame";
+import { normalizedRegionFromPoints } from "@/lib/pdf/region";
 
 export type InkPosition = { x: number; y: number };
 export type InkSample = InkPosition & {
@@ -106,6 +107,61 @@ export function inkBounds(strokes: readonly InkShape[]): InkBounds | null {
 	return Number.isFinite(left)
 		? { x: left, y: top, width: right - left, height: bottom - top }
 		: null;
+}
+
+/** Lasso geometry is useful even when the PDF figure contains no sidecar ink. */
+export function inkLassoBounds(
+	points: readonly InkPosition[],
+): InkBounds | null {
+	if (points.length < 3) return null;
+	let left = Infinity,
+		top = Infinity,
+		right = -Infinity,
+		bottom = -Infinity,
+		twiceArea = 0;
+	for (let i = 0; i < points.length; i++) {
+		const point = points[i],
+			next = points[(i + 1) % points.length];
+		if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+		left = Math.min(left, point.x);
+		top = Math.min(top, point.y);
+		right = Math.max(right, point.x);
+		bottom = Math.max(bottom, point.y);
+		twiceArea += point.x * next.y - next.x * point.y;
+	}
+	// A tap, line, or sub-4pt box is not a meaningful crop target.
+	if (right - left < 4 || bottom - top < 4 || Math.abs(twiceArea) < 1e-6)
+		return null;
+	return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+export function inkBoundsToRegion(
+	bounds: InkBounds | null,
+	page: { width: number; height: number },
+) {
+	if (
+		!bounds ||
+		![
+			bounds.x,
+			bounds.y,
+			bounds.width,
+			bounds.height,
+			page.width,
+			page.height,
+		].every(Number.isFinite) ||
+		page.width <= 0 ||
+		page.height <= 0 ||
+		bounds.width <= 0 ||
+		bounds.height <= 0
+	)
+		return null;
+	return normalizedRegionFromPoints(
+		{ x: bounds.x / page.width, y: bounds.y / page.height },
+		{
+			x: (bounds.x + bounds.width) / page.width,
+			y: (bounds.y + bounds.height) / page.height,
+		},
+	);
 }
 
 function segmentDistance(

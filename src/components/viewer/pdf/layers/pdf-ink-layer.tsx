@@ -64,9 +64,14 @@ export const PdfInkLayer = memo(function PdfInkLayer({
 		: state.strokes;
 	const selection =
 		tools.selection?.page === page
-			? inkBounds(
-					strokes.filter((stroke) => tools.selection?.ids.includes(stroke.id)),
-				)
+			? moving
+				? inkBounds(moving)
+				: (tools.selection.bounds ??
+					inkBounds(
+						strokes.filter((stroke) =>
+							tools.selection?.ids.includes(stroke.id),
+						),
+					))
 			: null;
 	const lasso = tools.lasso?.page === page ? tools.lasso.points : null;
 	return (

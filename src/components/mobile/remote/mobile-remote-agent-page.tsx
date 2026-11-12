@@ -14,6 +14,7 @@ import {
 	MessageContent,
 	MessageResponse,
 } from "@/components/agent/message";
+import { RemoteRegionContextPreview } from "@/components/mobile/remote/remote-region-context-preview";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -26,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+	ConnectionRef,
 	HostInfo,
 	Mutation,
 	OperationOutcome,
@@ -43,6 +45,10 @@ import type {
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import {
+	type MobilePaperRegionContext,
+	stagePaperRegionImage,
+} from "@/lib/mobile/paper-context";
+import {
 	canRetrySavedSignIn,
 	canSignIn,
 	credentialMessageKey,
@@ -57,12 +63,19 @@ import {
 	validTrustConfirmation,
 	workspaceKey,
 } from "@/lib/remote-agent/model";
+import {
+	RegionContextWorkflow,
+	regionPromptValues,
+	supportsRegionImage,
+} from "@/lib/remote-agent/region-context-workflow";
 import { remoteAgent } from "@/lib/remote-agent/service";
 
 export type MobileRemoteAgentPageProps = {
 	active?: boolean;
 	selection?: SessionRef | null;
 	onSelectionChange?: (session: SessionRef | null) => void;
+	regionContext?: MobilePaperRegionContext | null;
+	onRegionContextHandled?: (id: string) => void;
 };
 
 /** DSH is the default provider; the existing Bridge page remains a separate parent choice. */
@@ -70,6 +83,8 @@ export function MobileRemoteAgentPage({
 	active = true,
 	selection,
 	onSelectionChange,
+	regionContext,
+	onRegionContextHandled,
 }: MobileRemoteAgentPageProps) {
 	const { t } = useTranslation("mobile");
 	const formId = useId();
@@ -90,6 +105,21 @@ export function MobileRemoteAgentPage({
 		null,
 	);
 	const [confirmation, setConfirmation] = useState("");
+	const [pendingRegion, setPendingRegion] =
+		useState<MobilePaperRegionContext | null>(null);
+	const [includeRegionImage, setIncludeRegionImage] = useState(true);
+	const handledRegionIds = useRef(new Set<string>());
+	const currentRegionId = useRef<string | null>(null);
+	currentRegionId.current = pendingRegion?.id ?? null;
+	const mounted = useRef(true);
+	const regionWorkflowRef = useRef<RegionContextWorkflow | null>(null);
+	if (!regionWorkflowRef.current)
+		regionWorkflowRef.current = new RegionContextWorkflow({
+			stage: stagePaperRegionImage,
+			upload: remoteAgent.upload,
+			send: remoteAgent.execute,
+		});
+	const regionWorkflow = regionWorkflowRef.current;
 	const [draft, setDraft] = useState("");
 	const [attachments, setAttachments] = useState<RemoteAttachment[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -129,6 +159,17 @@ export function MobileRemoteAgentPage({
 				account.info.connection.connectionId,
 			])
 		: null;
+	const currentConnectionKey = useRef(connectionKey);
+	currentConnectionKey.current = connectionKey;
+	const regionState = pendingRegion
+		? regionWorkflow.state(pendingRegion.id, selectedKey, journal)
+		: null;
+	const regionImageSupported =
+		supportsRegionImage(capabilities) || Boolean(regionState?.uploaded);
+	const regionBlocked = Boolean(
+		regionState?.uncertain ||
+			(pendingRegion && includeRegionImage && !regionImageSupported),
+	);
 	const journalReady = Boolean(
 		connectionKey && journalConnection === connectionKey,
 	);
@@ -144,6 +185,7 @@ export function MobileRemoteAgentPage({
 	void revision;
 
 	function chooseSession(value: SessionRef | null) {
+		currentSelectionKey.current = value ? sessionKey(value) : null;
 		setSession(value);
 		setSnapshot(null);
 		setDraft("");
@@ -151,6 +193,12 @@ export function MobileRemoteAgentPage({
 		onSelectionChange?.(value);
 	}
 	const adoptCatalog = useCallback((value: RemoteAgentCatalog) => {
+		currentConnectionKey.current = value.account
+			? JSON.stringify([
+					value.account.info.connection.providerId,
+					value.account.info.connection.connectionId,
+				])
+			: null;
 		setCatalog(value);
 		setProviderId(
 			value.account?.info.connection.providerId ?? value.defaultProvider,
@@ -162,6 +210,7 @@ export function MobileRemoteAgentPage({
 				: value.account,
 		);
 		if (!value.account) {
+			currentSelectionKey.current = null;
 			setSession(null);
 			setSnapshot(null);
 			setAttachments([]);
@@ -181,6 +230,60 @@ export function MobileRemoteAgentPage({
 		setSessions([]);
 		chooseSession(null);
 	}
+	function finishRegion(id: string, clearComposer: boolean) {
+		if (currentRegionId.current !== id) return;
+		currentRegionId.current = null;
+		handledRegionIds.current.add(id);
+		while (handledRegionIds.current.size > 128) {
+			const oldest = handledRegionIds.current.values().next().value;
+			if (oldest === undefined) break;
+			handledRegionIds.current.delete(oldest);
+		}
+		regionWorkflow.discard(id);
+		setPendingRegion((current) => (current?.id === id ? null : current));
+		onRegionContextHandled?.(id);
+		if (clearComposer) {
+			setDraft("");
+			setAttachments([]);
+		}
+	}
+	async function inspectOperation(id: string, connection: ConnectionRef) {
+		const expected = JSON.stringify([
+			connection.providerId,
+			connection.connectionId,
+		]);
+		if (currentConnectionKey.current !== expected) {
+			notifyError(t("paperContext.errors.staleTarget"));
+			return;
+		}
+		const receipt = await remoteAgent.receipt(connection, id);
+		journal.inspect(id, receipt);
+		const consumed = regionWorkflow.observedSend(id, journal);
+		if (
+			mounted.current &&
+			currentConnectionKey.current === expected &&
+			consumed?.target === currentSelectionKey.current
+		)
+			finishRegion(consumed.contextId, true);
+		if (mounted.current && currentConnectionKey.current === expected)
+			await refresh();
+	}
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
+	useEffect(() => {
+		if (
+			!pendingRegion &&
+			regionContext &&
+			!handledRegionIds.current.has(regionContext.id)
+		) {
+			setPendingRegion(regionContext);
+			setIncludeRegionImage(true);
+		}
+	}, [regionContext, pendingRegion]);
 	async function run(action: () => Promise<void>) {
 		if (busyRef.current) return;
 		busyRef.current = true;
@@ -207,6 +310,7 @@ export function MobileRemoteAgentPage({
 			setDraft("");
 			setAttachments([]);
 		}
+		currentSelectionKey.current = nextKey;
 		setSession(selection);
 	}, [selection]);
 	useEffect(() => {
@@ -373,18 +477,85 @@ export function MobileRemoteAgentPage({
 		}
 	}
 	async function send() {
-		if (!session || blocked || (!draft.trim() && attachments.length === 0))
+		if (
+			!session ||
+			blocked ||
+			(!draft.trim() && attachments.length === 0 && !pendingRegion)
+		)
 			return;
+		const capturedSession = session;
+		const target = sessionKey(capturedSession);
+		const capturedConnection = connectionKey;
+		const current = () =>
+			mounted.current &&
+			currentSelectionKey.current === target &&
+			currentConnectionKey.current === capturedConnection;
+		if (pendingRegion) {
+			const context = pendingRegion;
+			const result = await regionWorkflow.submit({
+				context,
+				includeImage: includeRegionImage,
+				session: capturedSession,
+				capabilities,
+				text: draft,
+				attachments,
+				journal,
+				isCurrent: () => current() && currentRegionId.current === context.id,
+				formatReference: (source, imageAttached) =>
+					t("paperContext.prompt", {
+						...regionPromptValues(source),
+						imageStatus: t(
+							imageAttached
+								? "paperContext.imageAttached"
+								: "paperContext.imageOmitted",
+						),
+					}),
+				onCleanupFailure: () => notifyError(t("paperContext.errors.cleanup")),
+			});
+			if (result.kind === "sent" && result.current)
+				finishRegion(result.contextId, true);
+			else if (result.kind === "alreadySent" && result.current) {
+				finishRegion(result.contextId, false);
+				notifyError(t("paperContext.errors.alreadySent"));
+			} else if (
+				result.kind === "rejected" &&
+				result.outcome?.status === "rejected"
+			) {
+				notifyError(result.outcome.message);
+				if (current()) await reloadCatalog();
+			} else if (result.kind === "invalidImage")
+				notifyError(t("paperContext.errors.invalidImage"));
+			else if (result.kind === "attachmentMismatch")
+				notifyError(t("paperContext.errors.attachmentMismatch"));
+			else if (
+				result.kind === "stale" ||
+				(!result.current && result.kind === "sent")
+			)
+				notifyError(t("paperContext.errors.staleTarget"));
+			else if (result.kind === "unsupportedImage")
+				notifyError(t("paperContext.referenceOnly"));
+			if (current()) await refresh();
+			return;
+		}
 		const outcome = await mutate(
-			{ type: "sendMessage", session, text: draft, attachments },
-			sessionKey(session),
+			{
+				type: "sendMessage",
+				session: capturedSession,
+				text: draft,
+				attachments,
+			},
+			target,
 		);
-		if (outcome.status === "accepted" || outcome.status === "succeeded") {
+		if (
+			current() &&
+			(outcome.status === "accepted" || outcome.status === "succeeded")
+		) {
 			setDraft("");
 			setAttachments([]);
 		}
-		await refresh();
+		if (current()) await refresh();
 	}
+
 	async function upload() {
 		if (!journalReady || !session || !canUpload(capabilities) || blocked)
 			return;
@@ -846,14 +1017,10 @@ export function MobileRemoteAgentPage({
 												disabled={busy}
 												onClick={() =>
 													void run(async () => {
-														journal.inspect(
+														await inspectOperation(
 															entry.id,
-															await remoteAgent.receipt(
-																account.info.connection,
-																entry.id,
-															),
+															account.info.connection,
 														);
-														await refresh();
 													})
 												}
 											>
@@ -882,8 +1049,10 @@ export function MobileRemoteAgentPage({
 												onClick={() =>
 													void run(async () => {
 														await refresh();
-														setDraft("");
-														setAttachments([]);
+														if (!regionWorkflow.ownsOperation(entry.id)) {
+															setDraft("");
+															setAttachments([]);
+														}
 														journal.allowNewActions(entry.id);
 													})
 												}
@@ -898,7 +1067,7 @@ export function MobileRemoteAgentPage({
 					</div>
 				)}
 			</div>
-			{session && (
+			{(session || pendingRegion) && (
 				<form
 					className="shrink-0 space-y-2 border-t bg-background p-3"
 					onSubmit={(event) => {
@@ -906,6 +1075,35 @@ export function MobileRemoteAgentPage({
 						void run(send);
 					}}
 				>
+					{pendingRegion && (
+						<RemoteRegionContextPreview
+							context={pendingRegion}
+							includeImage={includeRegionImage}
+							imageSupported={capabilities ? regionImageSupported : true}
+							uncertain={Boolean(regionState?.uncertain)}
+							uploaded={Boolean(regionState?.uploaded)}
+							busy={busy}
+							onIncludeImage={setIncludeRegionImage}
+							onRemove={() => finishRegion(pendingRegion.id, false)}
+							onInspect={
+								supports(capabilities, "operationReceipts") &&
+								regionWorkflow.pendingOperations(pendingRegion.id, journal)
+									.length
+									? () =>
+											void run(async () => {
+												for (const operation of regionWorkflow.pendingOperations(
+													pendingRegion.id,
+													journal,
+												))
+													await inspectOperation(
+														operation.id,
+														operation.session.workspace.host.connection,
+													);
+											})
+									: undefined
+							}
+						/>
+					)}
 					{attachments.map((attachment) => (
 						<p key={attachment.path} className="break-all text-sm">
 							{attachment.path}
@@ -917,15 +1115,21 @@ export function MobileRemoteAgentPage({
 						placeholder={t("remote.message")}
 						aria-label={t("remote.message")}
 						className="max-h-36 min-h-12 resize-none text-base"
-						disabled={busy || blocked || !supports(capabilities, "sendMessage")}
+						disabled={
+							busy ||
+							blocked ||
+							!session ||
+							Boolean(regionState?.uncertain) ||
+							!supports(capabilities, "sendMessage")
+						}
 					/>
 					<div className="flex items-center justify-end gap-2">
-						{canUpload(capabilities) && (
+						{session && canUpload(capabilities) && (
 							<Button
 								type="button"
 								variant="outline"
 								className="min-h-12 min-w-12"
-								disabled={busy || blocked}
+								disabled={busy || blocked || Boolean(regionState?.uncertain)}
 								aria-label={t("remote.uploadPrivate")}
 								title={t("remote.uploadPrivate")}
 								onClick={() => void run(upload)}
@@ -933,7 +1137,7 @@ export function MobileRemoteAgentPage({
 								<Paperclip className="size-4" />
 							</Button>
 						)}
-						{supports(capabilities, "cancel") && (
+						{session && supports(capabilities, "cancel") && (
 							<Button
 								type="button"
 								variant="outline"
@@ -960,8 +1164,10 @@ export function MobileRemoteAgentPage({
 							disabled={
 								busy ||
 								blocked ||
+								!session ||
+								regionBlocked ||
 								!supports(capabilities, "sendMessage") ||
-								(!draft.trim() && !attachments.length)
+								(!draft.trim() && !attachments.length && !pendingRegion)
 							}
 						>
 							<Send className="size-4" />

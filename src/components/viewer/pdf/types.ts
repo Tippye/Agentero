@@ -25,6 +25,15 @@ import type { PdfViewerHandle } from "@/lib/workspace/viewer/pdf-viewer-registry
 
 export type { PdfViewerHandle };
 
+/** Unsent PDF crop for a parent-owned, explicitly reviewed context draft. */
+export type PdfRegionPromptDraft = {
+	/** 1-based source PDF page. */
+	page: number;
+	/** Visible CropBox fractions in unrotated, top-left/y-down coordinates. */
+	region: PdfAskNormalizedRect;
+	image: PromptImage;
+};
+
 /** Normalized rectangle emitted by the jEV smart-highlight job. */
 type SuggestedHighlightRect = {
 	x: number | null;
@@ -54,6 +63,8 @@ export type PdfViewerProps = {
 	onInkModeChange?: (active: boolean) => void;
 	/** Mobile save/share routing; desktop defaults to the native save dialog. */
 	onInkExport?: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
+	/** Prepare an unsent region context draft; the parent owns review and Send. */
+	onRegionPrompt?: (draft: PdfRegionPromptDraft) => void;
 	/**
 	 * PDF source: local `blob:` (bytes via fs) or remote https. Prefer local
 	 * vault PDF; remote URL is fallback when download fails.
