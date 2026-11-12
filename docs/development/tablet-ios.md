@@ -67,7 +67,7 @@
 | 入口 | 做法 |
 |---|---|
 | 应用内选文件 | 已接入现有文档选择器 Copy 模式，由 Rust 直接打开选中 URL，以固定缓冲复制到私有 cache 后复用 PDF 入库；无全文件 WebView 字节或源路径参数。file URL 在 SDK 打开前建立清理 guard，关闭句柄后执行 SDK 要求的 security-scope 清理，包括打开/复制错误。只删除自身暂存，系统预复制不受 Rust 文件大小上限控制。详见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)；完整 iPhoneOS 构建和云提供器需 SDK/设备验收 |
-| 「打开方式」 | 尚未接入。下一段先验证 PDF Viewer 的 Copy 模式：显式 `LSSupportsOpeningDocumentsInPlace=false`，只接受规范路径确认位于本应用 `Documents/Inbox` 的单个普通 PDF，尽快复制到既有有界、Rust 所有的私有暂存后入库。外部 file URL 不是权限证明；目录外来源不回退为任意路径读取，可让用户重新选择。不能仅凭 `RunEvent::Opened` 就声明所有 Files/iCloud 或冷启动 Scene 已支持 |
+| 「打开方式」 | 已接入受限 Copy 模式的代码与声明：PDF Viewer/Alternate、`com.adobe.pdf`、`LSSupportsOpeningDocumentsInPlace=false` 与文件共享关闭。原始 OS 事件只允许可信原生 Documents/Inbox 的单份直接 PDF 子文件；目录描述符锚定打开，拒绝符号链接、硬链接、目录和 FIFO。单槽邮箱保留 FD，当前本地库就绪后复用现有暂存/入库；不自动切走当前论文或草稿。深链 SDK 经公开 Plugin 适配筛除文件 URL，保留配对能力；当前没有原生忙碌 Toast，忙碌时保留第一份。Inbox 源副本不自动清扫。宿主 935 项通过/10 项既有忽略，51 项前端回归及绑定/事件/Clippy 通过；这不是完整 iPhoneOS SDK 构建或设备验收。目录外来源可改用应用内选择器，不声明所有 Files/iCloud 或冷启动 Scene 已支持。详见[iOS 系统复制 PDF 入库](../backend/mobile-ios-pdf-open.md) |
 | 系统分享面板 | 新增分享扩展 target（在 `ios-project.yml` 里加）。扩展内存上限很低，只做一件事：把文件或链接写进 App Group 收件箱。主应用激活时取走并导入 |
 | 拖放 | iPad 上从其他应用拖 PDF 进来。WebView 的拖放事件是否可用需要验证，放在 M5 |
 | 导出 | 系统分享面板和「存储到文件」：笔记、带批注的 PDF 副本、BibTeX / RIS |
@@ -75,7 +75,7 @@
 
 固定 SDK 的外部打开边界已核对：Tauri 2.12.5 在 iOS 公开 `RunEvent::Opened { urls }`，Swift 插件没有 open-URL 生命周期回调；Tao 0.37.2 转为 URL 字符串时不保留原 NSURL 与 `openInPlace` 选项。其首个 Scene 的连接路径没有取出初始 URL contexts，当前应用也未声明 Scene 采用，因此不能为导入随意增加 Scene Manifest 并假定冷启动事件完备。现有 fs 插件重建 NSURL 再调用 security-scope API，不返回原始授权是否成功，不能据此把任意私有 file URL 当成授权来源。
 
-另一个待处理点是固定 deep-link 插件会将 iOS `Opened` 中的全部 URL 转发给 JS，包含 file URL；配对 hook 虽只处理 `agentero:`，但新加一个 Rust 导入消费者本身不构成“源 URL 不进入 JS”的保证。接入文件类型前须同时解决分派/过滤边界。Apple 说明 [Documents/Inbox](https://developer.apple.com/library/content/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html) 用于外部交给应用打开的文档，应用可以读取/删除、不能原地创建/修改；该模式只为受限首段提供依据，不替代完整 SDK 与实际提供器验收。
+固定 deep-link 插件原本会将 iOS `Opened` 中的全部 URL 转发给 JS，包含 file URL。现已通过公开 Plugin trait 包装该插件，仅向其转交 `agentero:` URL；空筛选结果仍转交以清除旧缓存，原事件继续供私有文档入口消费。全部十个公开 hook 的配置、命令、状态和析构继续委托原实现，没有 fork SDK 或增加文件路径 IPC。Apple 说明 [Documents/Inbox](https://developer.apple.com/library/content/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html) 用于外部交给应用打开的文档，应用可以读取/删除、不能原地创建/修改；该模式只为受限首段提供依据，不替代完整 SDK 与实际提供器验收。
 
 ### I5 后台与通知
 

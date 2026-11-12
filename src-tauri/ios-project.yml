@@ -40,6 +40,13 @@ targets:
       path: agentero_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: PDF
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
+        LSSupportsOpeningDocumentsInPlace: false
+        UIFileSharingEnabled: false
         UILaunchStoryboardName: LaunchScreen
         NSCameraUsageDescription: Agentero uses the camera to scan a pairing QR code from your computer.
         CFBundleURLTypes:

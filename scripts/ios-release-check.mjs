@@ -39,10 +39,60 @@ if (
 	process.exit(1);
 }
 
+// This release route imports owned Inbox copies, never arbitrary provider URLs.
+function requireInboxCopyPlist(contents, label) {
+	for (const key of [
+		"LSSupportsOpeningDocumentsInPlace",
+		"UIFileSharingEnabled",
+	]) {
+		const entries = [
+			...contents.matchAll(new RegExp(`<key>${key}</key>\\s*<([^>]+)>`, "g")),
+		];
+		if (entries.length !== 1 || entries[0][1] !== "false/") {
+			throw new Error(`${label}: ${key} must be declared false exactly once`);
+		}
+	}
+	if (
+		!contents.includes("CFBundleDocumentTypes") ||
+		!contents.includes("com.adobe.pdf") ||
+		!/<key>CFBundleTypeRole<\/key>\s*<string>Viewer<\/string>/.test(contents) ||
+		!/<key>LSHandlerRank<\/key>\s*<string>Alternate<\/string>/.test(contents) ||
+		contents.includes("UIApplicationSceneManifest")
+	) {
+		throw new Error(
+			`${label}: require PDF Viewer/Alternate copy mode without Scene adoption`,
+		);
+	}
+}
+requireInboxCopyPlist(plist, "Info.ios.plist");
+const generatedPlistPath = "src-tauri/gen/apple/agentero_iOS/Info.plist";
+if (existsSync(generatedPlistPath)) {
+	requireInboxCopyPlist(
+		readFileSync(generatedPlistPath, "utf8"),
+		"generated Info.plist",
+	);
+}
+
 const template = readFileSync("src-tauri/ios-project.yml", "utf8");
-const templateVersion = template.match(/^\s+iOS:\s*["']?(\d+(?:\.\d+){0,2})["']?\s*$/m)?.[1];
+if (
+	!/^\s+LSSupportsOpeningDocumentsInPlace: false\s*$/m.test(template) ||
+	!/^\s+UIFileSharingEnabled: false\s*$/m.test(template) ||
+	!template.includes("LSItemContentTypes: [com.adobe.pdf]") ||
+	!template.includes("CFBundleTypeRole: Viewer") ||
+	!template.includes("LSHandlerRank: Alternate") ||
+	template.includes("UIApplicationSceneManifest")
+) {
+	throw new Error(
+		"iOS project template must preserve the PDF Inbox copy route",
+	);
+}
+const templateVersion = template.match(
+	/^\s+iOS:\s*["']?(\d+(?:\.\d+){0,2})["']?\s*$/m,
+)?.[1];
 if (templateVersion !== minimumVersion) {
-	console.error("iOS project template and Tauri minimumSystemVersion must match");
+	console.error(
+		"iOS project template and Tauri minimumSystemVersion must match",
+	);
 	process.exit(1);
 }
 if (
