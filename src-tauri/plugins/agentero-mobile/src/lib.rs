@@ -9,6 +9,22 @@ use tauri::{
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_agentero_mobile);
 
+#[cfg(any(mobile, test))]
+fn stylus_channel(
+    callback: impl Fn(NativeStylusEvent) + Send + Sync + 'static,
+) -> tauri::ipc::Channel<tauri::ipc::InvokeResponseBody> {
+    tauri::ipc::Channel::new(move |body| {
+        let event: Result<NativeStylusEvent, _> = match body {
+            tauri::ipc::InvokeResponseBody::Json(json) => serde_json::from_str(&json),
+            tauri::ipc::InvokeResponseBody::Raw(bytes) => serde_json::from_slice(&bytes),
+        };
+        if let Ok(event) = event {
+            callback(event);
+        }
+        Ok(())
+    })
+}
+
 /// Rust-owned adapter; no raw native command handler is exposed to a WebView.
 pub struct MobileBackground<R: Runtime> {
     #[cfg(mobile)]
@@ -59,10 +75,7 @@ impl<R: Runtime> MobileBackground<R> {
         &self,
         callback: impl Fn(NativeStylusEvent) + Send + Sync + 'static,
     ) -> Result<(), String> {
-        let handler = tauri::ipc::Channel::<NativeStylusEvent>::new(move |event| {
-            callback(event);
-            Ok(())
-        });
+        let handler = stylus_channel(callback);
         self.handle
             .run_mobile_plugin_async::<serde_json::Value>(
                 "registerListener",
@@ -167,4 +180,78 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+#[cfg(test)]
+mod stylus_channel_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tauri::ipc::InvokeResponseBody;
+
+    const ACTION: &str = r#"{"kind":"action","windowLabel":"main","event":{"action":"toggleEraser","source":"nativePencilInteraction","adapterId":"apple-pencil-interaction","targetToken":"fcb7385a-e017-49d8-99dd-80f1c4426a71"}}"#;
+    const PRESENCE: &str = r#"{"kind":"presence","windowLabel":"main","targetToken":"fcb7385a-e017-49d8-99dd-80f1c4426a71","presence":{"available":true,"proximity":null,"source":"nativeInputDevice","adapterId":"android-input-device"}}"#;
+
+    #[test]
+    fn native_channel_decodes_json_and_raw_action_and_presence() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let received = events.clone();
+        let channel = stylus_channel(move |event| received.lock().unwrap().push(event));
+        for wire in [ACTION, PRESENCE] {
+            channel.send(InvokeResponseBody::Json(wire.into())).unwrap();
+            channel
+                .send(InvokeResponseBody::Raw(wire.as_bytes().to_vec()))
+                .unwrap();
+        }
+        let received = events.lock().unwrap();
+        assert_eq!(received.len(), 4);
+        for event in &received[..2] {
+            assert!(
+                matches!(event, NativeStylusEvent::Action { window_label, event }
+                if window_label == "main" && event.action == StylusAction::ToggleEraser
+                    && event.source == StylusSource::NativePencilInteraction
+                    && event.adapter_id == "apple-pencil-interaction"
+                    && event.target_token == "fcb7385a-e017-49d8-99dd-80f1c4426a71")
+            );
+        }
+        for event in &received[2..] {
+            assert!(
+                matches!(event, NativeStylusEvent::Presence { window_label, target_token, presence }
+                if window_label == "main" && target_token == "fcb7385a-e017-49d8-99dd-80f1c4426a71"
+                    && presence.available && presence.proximity.is_none()
+                    && presence.source == StylusSource::NativeInputDevice
+                    && presence.adapter_id == "android-input-device")
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_and_unknown_native_payloads_do_not_dispatch_or_close_channel() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let received = events.clone();
+        let channel = stylus_channel(move |event| received.lock().unwrap().push(event));
+        for wire in [
+            "not-json".to_string(),
+            "null".to_string(),
+            "{}".to_string(),
+            r#"{"kind":"oemDoubleTap"}"#.to_string(),
+            ACTION.replace("toggleEraser", "unsupportedGesture"),
+            ACTION.replace("nativePencilInteraction", "unknownSource"),
+            ACTION.replace("\"action\":\"toggleEraser\",", ""),
+            PRESENCE.replace("\"available\":true", "\"available\":\"connected\""),
+            PRESENCE.replace("\"available\":true", "\"unknown\":true,\"available\":true"),
+        ] {
+            channel
+                .send(InvokeResponseBody::Json(wire.clone()))
+                .unwrap();
+            channel
+                .send(InvokeResponseBody::Raw(wire.as_bytes().to_vec()))
+                .unwrap();
+        }
+        channel.send(InvokeResponseBody::Raw(vec![0xff])).unwrap();
+        assert!(events.lock().unwrap().is_empty());
+        channel
+            .send(InvokeResponseBody::Json(ACTION.into()))
+            .unwrap();
+        assert_eq!(events.lock().unwrap().len(), 1);
+    }
 }
