@@ -1,11 +1,13 @@
 import type { InkEdit } from "@/lib/pdf/ink-api";
 import type { InkController } from "./controller";
 import {
+	type InkBounds,
 	type InkPosition,
 	type InkSample,
 	type InkShape,
 	inkBounds,
 	inkHitStroke,
+	inkLassoBounds,
 	inkLassoIds,
 	moveInk,
 } from "./geometry";
@@ -15,7 +17,7 @@ export type InkEditorState = Readonly<{
 	mode: InkMode;
 	color: string;
 	width: number;
-	selection: { page: number; ids: string[] } | null;
+	selection: { page: number; ids: string[]; bounds: InkBounds | null } | null;
 	draft: { page: number; stroke: InkShape } | null;
 	lasso: { page: number; points: InkPosition[] } | null;
 	moving: { page: number; strokes: InkShape[] } | null;
@@ -66,6 +68,18 @@ export class InkEditor {
 		};
 	};
 	getState = () => this.state;
+	getSelectionBounds = (): InkBounds | null => {
+		const selection = this.state.selection;
+		if (!selection) return null;
+		return (
+			selection.bounds ??
+			inkBounds(
+				this.controller
+					.getPage(selection.page)
+					.strokes.filter((stroke) => selection.ids.includes(stroke.id)),
+			)
+		);
+	};
 	private update(patch: Partial<InkEditorState>) {
 		this.state = { ...this.state, ...patch };
 		for (const listener of this.listeners) listener();
@@ -206,15 +220,23 @@ export class InkEditor {
 				kind: "delete",
 				id,
 			}));
-		else if (gesture.originals)
-			operations = (this.state.moving?.strokes ?? []).map((stroke) => ({
-				kind: "put",
-				stroke,
-			}));
-		else
+		else if (gesture.originals) {
+			const moved = this.state.moving?.strokes ?? [];
+			operations = moved.map((stroke) => ({ kind: "put", stroke }));
+			if (moved.length)
+				this.update({
+					selection: {
+						page: gesture.page.page,
+						ids: moved.map((stroke) => stroke.id),
+						// Transformed ink follows current native geometry, including undo/sync.
+						bounds: null,
+					},
+				});
+		} else
 			this.update({
 				selection: {
 					page: gesture.page.page,
+					bounds: inkLassoBounds(gesture.samples),
 					ids: inkLassoIds(
 						this.controller.getPage(gesture.page.page).strokes,
 						gesture.samples,
@@ -269,6 +291,7 @@ export class InkEditor {
 				selection: {
 					page: selection.page,
 					ids: copies.map((stroke) => stroke.id),
+					bounds: null,
 				},
 			});
 	}

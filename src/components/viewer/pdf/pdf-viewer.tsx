@@ -153,6 +153,7 @@ import {
 	annotationWikilinkMarkdown,
 	wikiTargetForPaper,
 } from "@/lib/pdf/annotation-ref";
+import type { PdfAskNormalizedRect } from "@/lib/pdf/ask/types";
 import { bookmarkPageIndex } from "@/lib/pdf/bookmark";
 import {
 	type EditableBookmark,
@@ -513,6 +514,7 @@ function PdfViewerInner({
 	onInkDirtyChange,
 	onInkModeChange,
 	onInkExport,
+	onRegionPrompt,
 	docId,
 	baseDocId,
 	embeddedTarget,
@@ -1716,6 +1718,7 @@ function PdfViewerInner({
 		visualCropRegion,
 		toggleRegionSelect,
 		beginVisualAnnotation,
+		beginRegionPrompt,
 		handleVisualRegionSelect,
 	} = usePdfRegionFraming({
 		docId,
@@ -1725,10 +1728,27 @@ function PdfViewerInner({
 		interactionCap,
 		setSelectionMenu,
 		onVisualDraft: handleVisualDraft,
+		onRegionPrompt,
 		screenPointForRegion,
 		plainViewer,
 	});
 
+	const handleAskInkRegion = useCallback(
+		async (page: number, region: PdfAskNormalizedRect) => {
+			if (
+				!onRegionPrompt ||
+				!inkEditable ||
+				!isActive ||
+				!inkEditor ||
+				inkEditor.controller.getOverview().dirty
+			)
+				return;
+			const baseline = inkEditor.controller.getPage(page);
+			if (!baseline.snapshot || baseline.loading || baseline.error) return;
+			await beginRegionPrompt(page, { ...region });
+		},
+		[onRegionPrompt, inkEditable, isActive, inkEditor, beginRegionPrompt],
+	);
 	const handleToggleReaderRegion = useCallback(() => {
 		inkEditor?.setMode("read");
 		toggleRegionSelect();
@@ -2652,7 +2672,7 @@ function PdfViewerInner({
 				<InkInputBridge
 					editor={inkEditor}
 					documentId={docId}
-					enabled={inkEditable && isActive}
+					enabled={inkEditable && isActive && !visualCropPending}
 					docCapRef={docCapRef}
 				/>
 				<WheelZoomHandler docId={docId} />
@@ -2710,6 +2730,12 @@ function PdfViewerInner({
 					editor={inkEditor}
 					editable={inkEditable}
 					pageSize={inkPageSize}
+					cropPending={visualCropPending}
+					onAskRegion={
+						onRegionPrompt && inkEditable && isActive
+							? handleAskInkRegion
+							: undefined
+					}
 					onExport={!mobileInk || onInkExport ? handleExportInk : undefined}
 				/>
 			)}

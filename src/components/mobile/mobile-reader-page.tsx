@@ -13,8 +13,13 @@ import { MobileNotesEditor } from "@/components/mobile/mobile-notes-editor";
 import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
+import type { PdfRegionPromptDraft } from "@/components/viewer/pdf/types";
 import { notifyError } from "@/lib/core/notify";
 import { exportMobileInkPdf } from "@/lib/mobile/export-pdf";
+import {
+	createPaperRegionContext,
+	type MobilePaperRegionContext,
+} from "@/lib/mobile/paper-context";
 import { loadMobilePaperPdf, mobilePaperPaths } from "@/lib/mobile/paper-files";
 import type {
 	MobileWorkspacePreset,
@@ -39,6 +44,7 @@ export type MobileReaderPageProps = {
 	onInkDirtyChange?: (dirty: boolean) => void;
 	onInkModeChange?: (active: boolean) => void;
 	onInkExport?: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
+	onRegionPrompt?: (context: MobilePaperRegionContext) => void;
 	fetchMissing?: (paper: PaperMetadata) => Promise<boolean>;
 };
 
@@ -53,6 +59,7 @@ export function MobileReaderPage({
 	onInkDirtyChange,
 	onInkModeChange,
 	onInkExport,
+	onRegionPrompt,
 	fetchMissing,
 }: MobileReaderPageProps) {
 	const { t } = useTranslation("mobile");
@@ -82,6 +89,18 @@ export function MobileReaderPage({
 		(bytes: Uint8Array, name: string) =>
 			exportMobileInkPdf(bytes, name, paperDirectory),
 		[paperDirectory],
+	);
+
+	const captureRegion = useCallback(
+		(draft: PdfRegionPromptDraft) => {
+			if (!onRegionPrompt) return;
+			try {
+				onRegionPrompt(createPaperRegionContext(paper, draft));
+			} catch {
+				notifyError(t("paperContext.errors.invalidImage"));
+			}
+		},
+		[paper, onRegionPrompt, t],
 	);
 
 	useEffect(() => {
@@ -154,6 +173,7 @@ export function MobileReaderPage({
 										onInkDirtyChange={onInkDirtyChange}
 										onInkModeChange={onInkModeChange}
 										onInkExport={onInkExport ?? exportInk}
+										onRegionPrompt={onRegionPrompt ? captureRegion : undefined}
 										className="h-full"
 									/>
 								) : (

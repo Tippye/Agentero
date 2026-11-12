@@ -6,6 +6,7 @@ import {
 	Highlighter,
 	LassoSelect,
 	Loader2,
+	MessageCircleQuestion,
 	PenLine,
 	Redo2,
 	RotateCcw,
@@ -13,7 +14,7 @@ import {
 	Undo2,
 	X,
 } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +24,9 @@ import {
 } from "@/components/ui/popover";
 import { PDF_CHROME_CHIP } from "@/components/viewer/pdf/chrome/pdf-chrome-surface";
 import { cn } from "@/lib/core/utils";
+import type { PdfAskNormalizedRect } from "@/lib/pdf/ask/types";
 import { INK_COLORS, type InkEditor, type InkMode } from "@/lib/pdf/ink/editor";
+import { inkBoundsToRegion } from "@/lib/pdf/ink/geometry";
 
 const TOOLS = [
 	{ mode: "read", Icon: Hand },
@@ -37,11 +40,15 @@ export function PdfInkToolbar({
 	editor,
 	editable,
 	onExport,
+	onAskRegion,
+	cropPending = false,
 	pageSize,
 }: {
 	editor: InkEditor;
 	editable: boolean;
 	onExport?: () => Promise<void>;
+	onAskRegion?: (page: number, region: PdfAskNormalizedRect) => Promise<void>;
+	cropPending?: boolean;
 	pageSize: (page: number) => { width: number; height: number } | null;
 }) {
 	const { t } = useTranslation("viewer");
@@ -52,8 +59,25 @@ export function PdfInkToolbar({
 	);
 	const [open, setOpen] = useState(false);
 	const [exporting, setExporting] = useState(false);
+	const [asking, setAsking] = useState(false);
+	const askingRef = useRef(false);
+	const busy = cropPending || asking;
+	const selection = state.selection;
+	const size = selection ? pageSize(selection.page) : null;
+	const region =
+		selection && size
+			? inkBoundsToRegion(editor.getSelectionBounds(), size)
+			: null;
+	const baseline = selection ? editor.controller.getPage(selection.page) : null;
+	const canAsk =
+		!!region &&
+		!!baseline?.snapshot &&
+		!baseline.loading &&
+		!baseline.error &&
+		!overview.dirty;
 	const active = TOOLS.find((tool) => tool.mode === state.mode) ?? TOOLS[0];
 	const select = (mode: InkMode) => {
+		if (busy) return;
 		editor.setMode(mode);
 		setOpen(false);
 	};
@@ -77,6 +101,7 @@ export function PdfInkToolbar({
 							<PopoverTrigger asChild>
 								<Button
 									className={HIT}
+									disabled={busy}
 									variant={state.mode === "read" ? "ghost" : "secondary"}
 									size="icon"
 									aria-label={t("ink.tools")}
@@ -155,7 +180,7 @@ export function PdfInkToolbar({
 							className={HIT}
 							size="icon"
 							variant="ghost"
-							disabled={!overview.canUndo}
+							disabled={busy || !overview.canUndo}
 							aria-label={t("ink.undo")}
 							title={t("ink.undo")}
 							onClick={() => editor.controller.undo()}
@@ -166,7 +191,7 @@ export function PdfInkToolbar({
 							className={HIT}
 							size="icon"
 							variant="ghost"
-							disabled={!overview.canRedo}
+							disabled={busy || !overview.canRedo}
 							aria-label={t("ink.redo")}
 							title={t("ink.redo")}
 							onClick={() => editor.controller.redo()}
@@ -179,7 +204,7 @@ export function PdfInkToolbar({
 									className={HIT}
 									size="icon"
 									variant="ghost"
-									disabled={overview.dirty}
+									disabled={busy || overview.dirty}
 									aria-label={t("ink.copy")}
 									title={t("ink.copy")}
 									onClick={() => {
@@ -193,7 +218,7 @@ export function PdfInkToolbar({
 									className={HIT}
 									size="icon"
 									variant="ghost"
-									disabled={overview.dirty}
+									disabled={busy || overview.dirty}
 									aria-label={t("ink.delete")}
 									title={t("ink.delete")}
 									onClick={() => editor.deleteSelection()}
@@ -203,6 +228,56 @@ export function PdfInkToolbar({
 							</>
 						)}
 					</>
+				)}
+				{editable && onAskRegion && (canAsk || asking) && (
+					<Button
+						className={HIT}
+						size="icon"
+						variant="ghost"
+						disabled={busy || exporting}
+						aria-busy={asking}
+						aria-label={t("ink.askRegion")}
+						title={t("ink.askRegion")}
+						onClick={() => {
+							if (
+								askingRef.current ||
+								cropPending ||
+								editor.controller.getOverview().dirty
+							)
+								return;
+							const current = editor.getState().selection;
+							const currentSize = current ? pageSize(current.page) : null;
+							const target = currentSize
+								? inkBoundsToRegion(editor.getSelectionBounds(), currentSize)
+								: null;
+							const loaded = current
+								? editor.controller.getPage(current.page)
+								: null;
+							if (
+								!current ||
+								!target ||
+								!loaded?.snapshot ||
+								loaded.loading ||
+								loaded.error
+							)
+								return;
+							const page = current.page,
+								captured = { ...target };
+							askingRef.current = true;
+							setAsking(true);
+							editor.setMode("read");
+							void onAskRegion(page, captured).finally(() => {
+								askingRef.current = false;
+								setAsking(false);
+							});
+						}}
+					>
+						{asking ? (
+							<Loader2 className="size-5 animate-spin" />
+						) : (
+							<MessageCircleQuestion className="size-5" />
+						)}
+					</Button>
 				)}
 				{overview.failedPage !== null && (
 					<>
@@ -239,7 +314,7 @@ export function PdfInkToolbar({
 						className={HIT}
 						size="icon"
 						variant="ghost"
-						disabled={overview.dirty || exporting}
+						disabled={busy || overview.dirty || exporting}
 						aria-label={t("ink.export")}
 						title={t("ink.export")}
 						onClick={() => {
