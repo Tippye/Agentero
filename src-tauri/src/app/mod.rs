@@ -14,6 +14,11 @@ mod handlers;
 mod logging;
 pub mod menu;
 mod mobile_connectivity;
+#[cfg(any(target_os = "ios", all(test, unix)))]
+mod mobile_deep_links;
+#[cfg(any(target_os = "ios", all(test, unix)))]
+#[cfg_attr(test, allow(dead_code))]
+mod mobile_documents;
 #[cfg(any(target_os = "ios", test))]
 mod mobile_webview;
 pub(crate) mod remote_agent;
@@ -182,6 +187,12 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(crate::app::open_request::PendingVaultOpen::new())
         .manage(crate::app::open_request::PendingUiRequest::new());
+    #[cfg(target_os = "ios")]
+    {
+        builder = builder.manage(Arc::new(
+            crate::features::paper::import::ios_inbox::IosInbox::default(),
+        ));
+    }
     if let Some(script) = agentero_core::perf::init_script() {
         builder = builder.append_invoke_initialization_script(script);
     }
@@ -243,9 +254,16 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_deep_link::init())
-        .plugin(logging::build_log_plugin().build());
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(target_os = "ios")]
+    {
+        builder = builder.plugin(mobile_deep_links::plugin());
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_deep_link::init());
+    }
+    builder = builder.plugin(logging::build_log_plugin().build());
 
     #[cfg(mobile)]
     {
@@ -727,6 +745,10 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             let _ = &app;
+            #[cfg(target_os = "ios")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                mobile_documents::receive_opened(app, urls);
+            }
             if matches!(
                 event,
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
