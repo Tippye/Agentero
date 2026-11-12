@@ -219,6 +219,11 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(logging::build_log_plugin().build());
 
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_agentero_mobile::init());
+    }
+
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder
