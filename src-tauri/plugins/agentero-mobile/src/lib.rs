@@ -54,6 +54,54 @@ impl<R: Runtime> MobileBackground<R> {
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
+    #[cfg(mobile)]
+    pub async fn on_stylus_event(
+        &self,
+        callback: impl Fn(NativeStylusEvent) + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let handler = tauri::ipc::Channel::<NativeStylusEvent>::new(move |event| {
+            callback(event);
+            Ok(())
+        });
+        self.handle
+            .run_mobile_plugin_async::<serde_json::Value>(
+                "registerListener",
+                serde_json::json!({"event":"stylus-event", "handler":handler}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn stylus_state(&self) -> Result<StylusState, String> {
+        #[cfg(mobile)]
+        {
+            self.handle
+                .run_mobile_plugin_async("stylusState", serde_json::json!({}))
+                .await
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(desktop)]
+        {
+            Ok(StylusState::default())
+        }
+    }
+
+    pub async fn stylus_set_target(&self, target: StylusTarget) -> Result<StylusState, String> {
+        #[cfg(mobile)]
+        {
+            self.handle
+                .run_mobile_plugin_async("stylusSetTarget", target)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(desktop)]
+        {
+            let _ = target;
+            Ok(StylusState::default())
+        }
+    }
+
     pub async fn read_state(&self) -> Result<BackgroundState, String> {
         self.call("readState", serde_json::json!({})).await
     }

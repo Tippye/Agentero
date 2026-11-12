@@ -33,6 +33,10 @@ export const commands = {
 	mobileBackgroundOpenSettings: (target: BackgroundSettingsTarget) => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_open_settings", { target })),
 	mobileRouteRead: (vaultPath: string) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_read", { vaultPath })),
 	mobileRouteSave: (vaultPath: string, expectedRevision: string, route: MobileWindowRoute) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_save", { vaultPath, expectedRevision, route })),
+	/**  Read native adapter capabilities and provenance-tagged observations. */
+	mobileStylusGetState: () => typedError<ApiResult<StylusState>, string>(__TAURI_INVOKE("mobile_stylus_get_state")),
+	/**  Admit one current visible PDF target; stale token cleanup cannot replace another target. */
+	mobileStylusSetTarget: (token: string, active: boolean) => typedError<ApiResult<StylusState>, string>(__TAURI_INVOKE("mobile_stylus_set_target", { token, active })),
 	bridgeClientConnect: (args: BridgeConnectArgs) => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_connect", { args })),
 	bridgeClientResume: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_resume")),
 	bridgeClientResetIdentity: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_reset_identity")),
@@ -142,9 +146,9 @@ export const commands = {
 	jobLayoutTranslateClaim: (args: JobLayoutTranslateClaimArgs) => typedError<ApiResult<boolean>, string>(__TAURI_INVOKE("job_layout_translate_claim", { args })),
 	jobDownloadAssetsEnqueue: (args: JobEnqueueArgs) => typedError<ApiResult<JobSnapshot>, string>(__TAURI_INVOKE("job_download_assets_enqueue", { args })),
 	/**
-	 *  Enqueue a renderer-orchestrated import (magic wand / local PDF / plaza /
-	 *  papers.cool). Only the vault is resolved — the paper folder does not exist
-	 *  yet — and the frontend executor drives the multi-command orchestration.
+	 *  Enqueue an import. Explicit native lookup requests (`params.native: true`)
+	 *  execute in Rust; ordinary desktop imports retain renderer orchestration.
+	 *  Mobile accepts only native identifier/title lookups in its private Vault.
 	 */
 	jobImportEnqueue: (args: JobImportEnqueueArgs) => typedError<ApiResult<JobSnapshot>, string>(__TAURI_INVOKE("job_import_enqueue", { args })),
 	/**
@@ -891,6 +895,8 @@ export const events = {
 	mcpStatus: makeEvent<McpStatusEvent>("mcp:status"),
 	mcpTunnelStatus: makeEvent<McpTunnelStatusEvent>("mcp:tunnel-status"),
 	menuInvoked: makeEvent<MenuInvokedEvent>("menu:invoked"),
+	mobileStylusAction: makeEvent<MobileStylusActionEvt>("mobile:stylus-action"),
+	mobileStylusPresence: makeEvent<MobileStylusPresenceEvt>("mobile:stylus-presence"),
 	paperAssetsReady: makeEvent<PaperAssetsReadyEvent>("paper:assets-ready"),
 	paperImported: makeEvent<PaperImportedEvent>("paper:imported"),
 	paperRenamed: makeEvent<PaperRenamedEventPayload>("paper:renamed"),
@@ -4485,7 +4491,11 @@ export type MobileRouteSnapshot = {
 	route: MobileWindowRoute | null,
 };
 
-export type MobileRouteTab = "library" | "agent";
+export type MobileRouteTab = "library" | "agent" | "plaza";
+
+export type MobileStylusActionEvt = StylusActionEvent;
+
+export type MobileStylusPresenceEvt = StylusPresenceEvent;
 
 export type MobileWindowRoute = {
 	paperId: string | null,
@@ -5949,6 +5959,45 @@ export type StageImportFileArgs = {
 export type StageImportFileResult = {
 	/**  Absolute path written on disk. */
 	path: string,
+};
+
+export type StylusAction = "toggleEraser" | "previousTool" | "nextColor" | "showColorPalette" | "select";
+
+export type StylusActionEvent = {
+	action: StylusAction,
+	source: StylusSource,
+	adapterId: string,
+	targetToken: string,
+};
+
+export type StylusAdapterCapability = {
+	id: string,
+	source: StylusSource,
+	actions: StylusAction[],
+	doubleTap: boolean,
+	barrelButton: boolean,
+	invertedPen: boolean,
+	hardwarePresence: boolean,
+};
+
+/**  Observation provenance matters: a registered input source is not a connected-pen list. */
+export type StylusPresence = {
+	available: boolean,
+	proximity: boolean | null,
+	source: StylusSource,
+	adapterId: string,
+};
+
+export type StylusPresenceEvent = {
+	targetToken: string,
+	presence: StylusPresence,
+};
+
+export type StylusSource = "nativeInputDevice" | "nativePencilInteraction" | "pointer";
+
+export type StylusState = {
+	adapters: StylusAdapterCapability[],
+	presence: StylusPresence[],
 };
 
 export type SyncBackendConfig = SyncBackendConfig_Serialize | SyncBackendConfig_Deserialize;

@@ -19,6 +19,7 @@ const MAX_VAULT: usize = 16 * 1024;
 pub enum MobileRouteTab {
     Library,
     Agent,
+    Plaza,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

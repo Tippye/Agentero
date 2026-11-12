@@ -25,6 +25,8 @@ pub mod lifecycle;
 pub mod mobile_background;
 #[cfg(feature = "desktop")]
 pub mod mobile_route;
+#[cfg(feature = "desktop")]
+pub mod mobile_stylus;
 pub mod remote_agent;
 
 #[path = "../app/open_request/mod.rs"]

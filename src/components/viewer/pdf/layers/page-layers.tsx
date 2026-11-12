@@ -1336,8 +1336,9 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					heightPx={frameHeight}
 					className="z-[5]"
 				>
-					{/* Unmount text selection while framing a visual region. */}
-					{mode.regionSelecting || mode.inkEditing ? null : (
+					{/* Keep one SDK geometry/selection registration for pen/finger holds.
+					    The viewport's native input boundary consumes ink gestures. */}
+					{mode.regionSelecting ? null : (
 						<PdfTextSelectionLayer
 							documentId={docId}
 							pageIndex={pageIndex}

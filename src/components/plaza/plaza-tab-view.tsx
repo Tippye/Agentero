@@ -1,4 +1,5 @@
 import { lazy, useEffect, useState } from "react";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 
 const PlazaView = lazy(() =>
 	import("@/components/plaza/plaza-view").then((m) => ({
@@ -14,6 +15,7 @@ export function PlazaTabView({
 	active: boolean;
 	path: string;
 	className?: string;
+	mobile?: MobilePlazaActions;
 }) {
 	const [visited, setVisited] = useState(false);
 	useEffect(() => {

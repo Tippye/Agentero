@@ -1,5 +1,14 @@
-import { ArrowLeft, LoaderCircle, Plus, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	ArrowLeft,
+	Info,
+	LoaderCircle,
+	Menu,
+	Plus,
+	RefreshCw,
+	Search,
+	WandSparkles,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
@@ -22,10 +31,14 @@ import {
 	MobileAgentToolbar,
 	MobileReaderModeToggle,
 } from "@/components/mobile/mobile-header-actions";
+import { MobileLibraryNavigation } from "@/components/mobile/mobile-library-navigation";
 import { MobileLibraryPage } from "@/components/mobile/mobile-library-page";
 import { MobileNav, type MobileTab } from "@/components/mobile/mobile-nav";
 import { MobilePairing } from "@/components/mobile/mobile-pairing";
 import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
+import { MobilePaperImport } from "@/components/mobile/mobile-paper-import";
+import { MobilePaperInfo } from "@/components/mobile/mobile-paper-info";
+import { MobilePlazaPage } from "@/components/mobile/mobile-plaza-page";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
 import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
@@ -43,6 +56,7 @@ import {
 	getMobileBackgroundState,
 } from "@/lib/mobile/background";
 import { importMobilePdfs } from "@/lib/mobile/import-pdf";
+import { filterMobilePapers } from "@/lib/mobile/navigation";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
 import type { MobileWindowRoute } from "@/lib/mobile/route";
 import {
@@ -54,9 +68,14 @@ import type { PaperMetadata } from "@/lib/paper/types";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 
 export default function MobileApp() {
-	const { t } = useTranslation("mobile");
+	const { t } = useTranslation(["mobile", "sidebar", "shortcuts"]);
 	const [tab, setTab] = useState<MobileTab>("library");
 	const [libraryQuery, setLibraryQuery] = useState("");
+	const [selectedTag, setSelectedTag] = useState<string | null>(null);
+	const [paperImportOpen, setPaperImportOpen] = useState(false);
+	const [importReference, setImportReference] = useState("");
+	const [infoPaper, setInfoPaper] = useState<PaperMetadata | null>(null);
+	const [paperInfoOpen, setPaperInfoOpen] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [syncOpen, setSyncOpen] = useState(false);
 	const [backgroundOpen, setBackgroundOpen] = useState(false);
@@ -106,7 +125,13 @@ export default function MobileApp() {
 		agentProvider,
 		widthClass,
 		inkDirty,
-		blocked: pairingRequested || syncOpen || backgroundOpen,
+		blocked:
+			pairingRequested ||
+			syncOpen ||
+			backgroundOpen ||
+			sidebarOpen ||
+			paperImportOpen ||
+			paperInfoOpen,
 	});
 	latestRegionTarget.current = {
 		vaultPath,
@@ -114,7 +139,13 @@ export default function MobileApp() {
 		agentProvider,
 		widthClass,
 		inkDirty,
-		blocked: pairingRequested || syncOpen || backgroundOpen,
+		blocked:
+			pairingRequested ||
+			syncOpen ||
+			backgroundOpen ||
+			sidebarOpen ||
+			paperImportOpen ||
+			paperInfoOpen,
 	};
 
 	const { status, setStatus, pairPending, disconnect, resume, resetAvailable } =
@@ -126,13 +157,36 @@ export default function MobileApp() {
 		loading: papersLoading,
 		refresh,
 	} = useMobilePapers({ vaultPath });
+	const visiblePapers = useMemo(
+		() => filterMobilePapers(papers, libraryQuery, selectedTag),
+		[papers, libraryQuery, selectedTag],
+	);
+	const showImport = useCallback((reference = "") => {
+		setImportReference(reference);
+		setPaperImportOpen(true);
+	}, []);
+	const showPaperInfo = useCallback((paper: PaperMetadata) => {
+		setInfoPaper(paper);
+		setPaperInfoOpen(true);
+	}, []);
+	const updatePaperInfo = useCallback(
+		async (paper: PaperMetadata) => {
+			setInfoPaper(paper);
+			setSelectedPaper((current) =>
+				current?.id === paper.id ? paper : current,
+			);
+			await refresh();
+		},
+		[refresh],
+	);
 	const restoreRoute = useCallback(
 		(route: MobileWindowRoute) => {
 			const paper = papers.find((paper) => paper.id === route.paperId) ?? null;
 			setSelectedPaper(paper);
 			setReaderMode(route.readerMode);
-			setWorkspacePreset(route.preset);
-			setTab(route.tab);
+			// Restoring a document never opens auxiliary panes without a new user action.
+			setWorkspacePreset("read");
+			setTab(paper ? "library" : route.tab);
 			setReadingSnapshot(
 				paper && route.pdf && typeof route.pdf.zoom === "number"
 					? {
@@ -236,12 +290,22 @@ export default function MobileApp() {
 	}, [canLeaveReader, markInteraction]);
 	const selectPaper = useCallback(
 		(paper: PaperMetadata) => {
-			if (selectedPaper?.path === paper.path && selectedPaper?.id === paper.id)
+			if (
+				selectedPaper?.path === paper.path &&
+				selectedPaper?.id === paper.id
+			) {
+				markInteraction();
+				setWorkspacePreset("read");
+				setTab("library");
 				return;
+			}
 			if (!canLeaveReader()) return;
 			markInteraction();
 			setInkMode(false);
 			setReadingSnapshot(null);
+			setWorkspacePreset("read");
+			setReaderMode("pdf");
+			setTab("library");
 			setSelectedPaper(paper);
 		},
 		[selectedPaper, canLeaveReader, markInteraction],
@@ -265,6 +329,7 @@ export default function MobileApp() {
 				return;
 			}
 			markInteraction();
+			if (next === "library") setWorkspacePreset("read");
 			setTab(next);
 		},
 		[inkDirty, t, markInteraction],
@@ -344,7 +409,13 @@ export default function MobileApp() {
 				selectTab("library");
 			}
 		},
-		inkMode || inkDirty || pairingRequested || syncOpen || backgroundOpen,
+		inkMode ||
+			inkDirty ||
+			pairingRequested ||
+			syncOpen ||
+			backgroundOpen ||
+			paperImportOpen ||
+			paperInfoOpen,
 	);
 
 	const inReader = tab === "library" && selectedPaper !== null;
@@ -353,7 +424,7 @@ export default function MobileApp() {
 		<div
 			ref={workspaceRef}
 			data-workspace-width={widthClass}
-			className="mobile-shell flex h-dvh min-h-0 overflow-hidden bg-background text-foreground"
+			className="mobile-shell mobile-safe-area flex h-dvh min-h-0 overflow-hidden bg-background text-foreground"
 			{...swipeHandlers}
 		>
 			<input
@@ -407,29 +478,66 @@ export default function MobileApp() {
 					showStatus={layout.agent && agentProvider === "agentero-bridge"}
 					leading={
 						inReader ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								className="size-11"
-								aria-label={t("reader.back")}
-								onClick={closeReader}
-							>
-								<ArrowLeft className="size-4" />
-							</Button>
+							<div className="flex shrink-0 items-center">
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="size-11"
+									aria-label={t("reader.back")}
+									onClick={closeReader}
+								>
+									<ArrowLeft className="size-4" />
+								</Button>
+								{widthClass !== "wide" && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										className="size-11"
+										aria-label={t("settings.menu")}
+										onClick={() => setSidebarOpen(true)}
+									>
+										<Menu className="size-4" />
+									</Button>
+								)}
+							</div>
 						) : undefined
 					}
 					trailing={
 						inReader ? (
-							<MobileReaderModeToggle
-								mode={readerMode}
-								onChange={selectReaderMode}
-								preset={workspacePreset}
-								widthClass={widthClass}
-								onPresetChange={selectPreset}
-							/>
+							<div className="flex min-w-0 items-center gap-1">
+								<MobileReaderModeToggle
+									mode={readerMode}
+									onChange={selectReaderMode}
+									preset={workspacePreset}
+									widthClass={widthClass}
+									onPresetChange={selectPreset}
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="size-11"
+									aria-label={t("sidebar:paperInfo.info")}
+									onClick={() => showPaperInfo(selectedPaper)}
+								>
+									<Info className="size-4" />
+								</Button>
+							</div>
 						) : tab === "library" ? (
 							<div className="flex shrink-0 items-center gap-1">
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-12"
+									disabled={!vaultPath}
+									aria-label={t("shortcuts:labels.magicWand")}
+									onClick={() => showImport()}
+								>
+									<WandSparkles className="size-4" />
+								</Button>
 								<Button
 									type="button"
 									variant="ghost"
@@ -486,6 +594,26 @@ export default function MobileApp() {
 						layoutKey={`${widthClass}:${workspacePreset}:${tab}:${Boolean(selectedPaper)}`}
 						panes={[
 							{
+								id: "plaza",
+								visible: tab === "plaza",
+								weight: 1,
+								content: (
+									<MobilePlazaPage
+										active={
+											tab === "plaza" &&
+											!sidebarOpen &&
+											!paperImportOpen &&
+											!paperInfoOpen &&
+											!pairingRequested &&
+											!syncOpen &&
+											!backgroundOpen
+										}
+										vaultPath={vaultPath}
+										onImportPaper={showImport}
+									/>
+								),
+							},
+							{
 								id: "library",
 								visible: layout.library,
 								weight: 1.3,
@@ -508,11 +636,11 @@ export default function MobileApp() {
 										</div>
 										<div className="min-h-0 flex-1">
 											<MobileLibraryPage
-												papers={papers}
+												papers={visiblePapers}
 												loading={papersLoading}
 												selected={selectedPaper}
 												onSelect={selectPaper}
-												query={libraryQuery}
+												query=""
 												syncStates={paperSync.states}
 												onPinChange={paperSync.setPinned}
 												syncProgress={paperSync.progressText}
@@ -556,7 +684,10 @@ export default function MobileApp() {
 											inkMode ||
 											pairingRequested ||
 											syncOpen ||
-											backgroundOpen
+											backgroundOpen ||
+											sidebarOpen ||
+											paperImportOpen ||
+											paperInfoOpen
 										}
 									>
 										{vaultPath && selectedPaper ? (
@@ -571,7 +702,10 @@ export default function MobileApp() {
 													layout.reader &&
 													!pairingRequested &&
 													!syncOpen &&
-													!backgroundOpen
+													!backgroundOpen &&
+													!sidebarOpen &&
+													!paperImportOpen &&
+													!paperInfoOpen
 												}
 												initialReadingSnapshot={
 													readingSnapshot?.paperId === selectedPaper.id
@@ -720,6 +854,20 @@ export default function MobileApp() {
 					/>
 				</DialogContent>
 			</Dialog>
+			<MobilePaperImport
+				open={paperImportOpen}
+				onOpenChange={setPaperImportOpen}
+				vaultPath={vaultPath}
+				initialText={importReference}
+				onImported={refresh}
+			/>
+			<MobilePaperInfo
+				open={paperInfoOpen}
+				onOpenChange={setPaperInfoOpen}
+				paper={infoPaper}
+				vaultPath={vaultPath}
+				onUpdated={updatePaperInfo}
+			/>
 			<MobileSyncPanel
 				open={syncOpen}
 				vaultPath={vaultPath}
@@ -740,14 +888,31 @@ export default function MobileApp() {
 				onSync={() => setSyncOpen(true)}
 				syncDisabled={!vaultPath}
 				navigation={
-					<MobileNav
-						tab={tab}
-						variant="sidebar"
-						agentTemplate={selectedAgent?.template}
-						onTab={(next) => {
+					<MobileLibraryNavigation
+						active={tab}
+						onNavigate={(next) => {
 							selectTab(next);
 							setSidebarOpen(false);
 						}}
+						papers={papers}
+						selectedPaperId={selectedPaper?.id}
+						onSelectPaper={(paper) => {
+							selectPaper(paper);
+							setSidebarOpen(false);
+						}}
+						query={libraryQuery}
+						onQueryChange={setLibraryQuery}
+						selectedTag={selectedTag}
+						onTagChange={(tag) => {
+							if (!canLeaveReader()) return;
+							setSelectedTag(tag);
+							closeReader();
+							selectTab("library");
+							setSidebarOpen(false);
+						}}
+						loading={papersLoading}
+						onImport={() => showImport()}
+						onPaperInfo={showPaperInfo}
 					/>
 				}
 				open={sidebarOpen}

@@ -1,4 +1,5 @@
 import { useWebViewSelection } from "@/components/viewer/web-view/use-web-view-selection";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 /**
  * Embedded web page for a Plaza source, with in-frame browsing.
  *
@@ -92,7 +93,89 @@ function isNavMessage(data: unknown): data is NavMessage {
 	);
 }
 
-export function PlazaWebFrame({
+type PlazaWebFrameProps = Parameters<typeof DesktopPlazaWebFrame>[0] & {
+	mobile?: MobilePlazaActions;
+};
+
+export function PlazaWebFrame(props: PlazaWebFrameProps) {
+	if (props.mobile)
+		return (
+			<MobilePlazaWebFrame
+				key={props.homeUrl}
+				homeUrl={props.homeUrl}
+				title={props.title}
+				className={props.className}
+				mobile={props.mobile}
+			/>
+		);
+	return <DesktopPlazaWebFrame {...props} />;
+}
+
+function MobilePlazaWebFrame({
+	homeUrl,
+	title,
+	className,
+	mobile,
+}: {
+	homeUrl: string;
+	title: string;
+	className?: string;
+	mobile: MobilePlazaActions;
+}) {
+	const { t } = useTranslation("mobile");
+	const [failed, setFailed] = useState(false);
+	const [epoch, setEpoch] = useState(0);
+	return (
+		<div className={cn("flex h-full min-h-0 min-w-0 flex-col", className)}>
+			<div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+				<p className="min-w-0 flex-1 text-muted-foreground text-xs">
+					{t("plaza.embedFallback")}
+				</p>
+				<Button
+					type="button"
+					variant="ghost"
+					className="min-h-11 min-w-11"
+					aria-label={t("plaza.reload")}
+					onClick={() => {
+						setFailed(false);
+						setEpoch((value) => value + 1);
+					}}
+				>
+					<RotateCw className="size-4" />
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					className="min-h-11 gap-2"
+					onClick={() => mobile.onOpenUrl(homeUrl)}
+				>
+					<ExternalLink className="size-4" />
+					{t("plaza.openBrowser")}
+				</Button>
+			</div>
+			{failed ? (
+				<div
+					role="status"
+					className="grid flex-1 place-items-center p-4 text-muted-foreground text-sm"
+				>
+					{t("plaza.embedUnavailable")}
+				</div>
+			) : (
+				<iframe
+					key={`${homeUrl}:${epoch}`}
+					title={title}
+					src={homeUrl}
+					sandbox="allow-scripts allow-same-origin allow-forms"
+					referrerPolicy="no-referrer"
+					className="min-h-0 w-full flex-1 border-0 bg-background"
+					onErrorCapture={() => setFailed(true)}
+				/>
+			)}
+		</div>
+	);
+}
+
+function DesktopPlazaWebFrame({
 	homeUrl,
 	embedOrigin,
 	lastPathStorageKey,

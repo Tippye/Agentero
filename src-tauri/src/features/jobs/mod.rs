@@ -99,11 +99,14 @@ impl JobKind {
         }
     }
 
-    /// Execution host of the kind's business logic: `LayoutAnalyze`,
-    /// `LayoutTranslate`, `Import`, `ConnectorSync`, `CitingScan`, `LibraryIo`
-    /// and `MetadataRefresh` are offered to the renderer (`job:offer`); every
-    /// other kind runs a Rust runner.
+    /// Default executor. Mobile imports run in Rust; other renderer kinds keep
+    /// their existing offer protocol. Explicit native import requests override
+    /// the desktop default when the concrete job is created.
     pub fn exec_host(self) -> ExecHost {
+        #[cfg(mobile)]
+        if self == JobKind::Import {
+            return ExecHost::Host;
+        }
         match self {
             JobKind::LayoutAnalyze
             | JobKind::LayoutTranslate
@@ -1152,7 +1155,17 @@ impl JobCenter {
             phase: Some("queued".into()),
             error: None,
             force,
-            host: kind.exec_host(),
+            host: if kind == JobKind::Import
+                && params
+                    .as_ref()
+                    .and_then(|params| params.get("native"))
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            {
+                ExecHost::Host
+            } else {
+                kind.exec_host()
+            },
             params,
             task_id,
         };
@@ -1900,7 +1913,7 @@ impl Default for JobCenter {
 /// multi-command import orchestration) and calls back with progress / success /
 /// failure. Lives in the scheduler (not a business domain) because it is the
 /// renderer-offer protocol itself.
-fn renderer_offer_runner(
+pub(crate) fn renderer_offer_runner(
     center: JobCenter,
     app: tauri::AppHandle,
     started: StartedJob,

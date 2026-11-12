@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
 		path: "papers/example",
 		title: "Offline paper",
 		authors: [],
+		tags: [],
 	} as PaperMetadata,
 	mounts: 0,
 	remoteMounts: 0,
@@ -21,6 +22,15 @@ const state = vi.hoisted(() => ({
 	refresh: vi.fn(async (_rescan?: boolean) => {}),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+vi.mock("@/components/mobile/mobile-paper-import", () => ({
+	MobilePaperImport: () => null,
+}));
+vi.mock("@/components/mobile/mobile-paper-info", () => ({
+	MobilePaperInfo: () => null,
+}));
+vi.mock("@/components/mobile/mobile-plaza-page", () => ({
+	MobilePlazaPage: () => null,
+}));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
 	useMobileVault: () => ({
 		vaultPath: "/private/Vault",

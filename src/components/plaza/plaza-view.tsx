@@ -14,32 +14,41 @@ import { PlazaFeedsView } from "@/components/plaza/plaza-feeds-view";
 import { PlazaSkillsView } from "@/components/plaza/plaza-skills-view";
 import { PlazaWebFrame } from "@/components/plaza/plaza-web-frame";
 import { EmptyState } from "@/components/ui/empty-state";
+import type { MobilePlazaActions } from "@/lib/mobile/navigation";
 import { plazaSourceForPath, plazaSourceLabel } from "@/lib/plaza";
 
 export function PlazaView({
 	path,
 	className,
+	mobile,
 }: {
 	path: string;
 	className?: string;
+	mobile?: MobilePlazaActions;
 }) {
 	const { t } = useTranslation("sidebar");
 	const source = plazaSourceForPath(path);
 
 	if (source?.panel === "skills") {
-		return <PlazaSkillsView className={className} />;
+		return <PlazaSkillsView className={className} mobile={mobile} />;
 	}
 
 	if (source?.panel === "feeds") {
-		return <PlazaFeedsView className={className} />;
+		return <PlazaFeedsView className={className} mobile={mobile} />;
 	}
 
 	if (source?.panel === "arxivRec") {
-		return <PlazaArxivRecView className={className} />;
+		return (
+			<PlazaArxivRecView
+				key={mobile ? (mobile.vaultPath ?? "unavailable") : undefined}
+				className={className}
+				mobile={mobile}
+			/>
+		);
 	}
 
 	if (source?.panel === "ccfDeadlines") {
-		return <PlazaCcfDeadlinesView className={className} />;
+		return <PlazaCcfDeadlinesView className={className} mobile={mobile} />;
 	}
 
 	if (source?.url) {
@@ -47,7 +56,7 @@ export function PlazaView({
 			<PlazaWebFrame
 				homeUrl={source.url}
 				desktopWidth={source.desktopWidth}
-				embedOrigin={source.embedOrigin?.() ?? null}
+				embedOrigin={mobile ? null : (source.embedOrigin?.() ?? null)}
 				lastPathStorageKey={
 					source.embedOrigin
 						? `agentero:plaza:${source.id}:last-path`
@@ -55,6 +64,7 @@ export function PlazaView({
 				}
 				title={plazaSourceLabel(source)}
 				className={className}
+				mobile={mobile}
 			/>
 		);
 	}

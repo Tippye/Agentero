@@ -45,6 +45,10 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 import {
+	type MobilePlazaActions,
+	mobilePaperImportReference,
+} from "@/lib/mobile/navigation";
+import {
 	ARXIV_FEED_CHIPS,
 	arxivFeedUrl,
 	compareFeedSubs,
@@ -268,7 +272,13 @@ function AddForm({
 	);
 }
 
-export function PlazaFeedsView({ className }: { className?: string }) {
+export function PlazaFeedsView({
+	className,
+	mobile,
+}: {
+	className?: string;
+	mobile?: MobilePlazaActions;
+}) {
 	const { t } = useTranslation("sidebar");
 	const [subs, setSubs] = useState<FeedSub[]>([]);
 	const [hideRead, setHideRead] = useState(false);
@@ -431,6 +441,14 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 
 	const importItem = useCallback(
 		async (item: FeedItem) => {
+			if (mobile) {
+				const reference = mobilePaperImportReference({
+					title: item.title,
+					url: item.paperUrl?.trim() || item.url?.trim(),
+				});
+				if (reference) mobile.onImportPaper(reference);
+				return;
+			}
 			if (item.importedAt || importPending.current.has(item.id)) return;
 			importPending.current.add(item.id);
 			setImportingIds(new Set(importPending.current));
@@ -445,7 +463,7 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 				setImportingIds(new Set(importPending.current));
 			}
 		},
-		[applyItem, t],
+		[applyItem, t, mobile],
 	);
 
 	const setRead = useCallback(
@@ -581,8 +599,19 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 					</div>
 				</div>
 			) : (
-				<div className="flex min-h-0 min-w-0 flex-1">
-					<nav className="flex w-52 shrink-0 select-none flex-col gap-2 bg-muted/50 p-2">
+				<div
+					className={cn("flex min-h-0 min-w-0 flex-1", mobile && "flex-col")}
+				>
+					<nav
+						className={cn(
+							"shrink-0 select-none flex-col gap-2 bg-muted/50 p-2",
+							mobile
+								? openItem
+									? "hidden"
+									: "flex max-h-56 w-full overflow-y-auto"
+								: "flex w-52",
+						)}
+					>
 						<AddForm
 							busy={busy}
 							refreshing={refreshing}
@@ -687,7 +716,12 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 										type="button"
 										variant="ghost"
 										size="icon-sm"
-										className="absolute top-0 right-0.5 bottom-0 my-auto size-6 opacity-0 transition-opacity duration-150 group-hover/feed:opacity-100 focus-visible:opacity-100"
+										className={cn(
+											"absolute top-0 right-0.5 bottom-0 my-auto size-6 transition-opacity duration-150",
+											mobile
+												? "opacity-100"
+												: "opacity-0 group-hover/feed:opacity-100 focus-visible:opacity-100",
+										)}
 										aria-label={t("plaza.feeds.more")}
 										onClick={(event) => {
 											event.stopPropagation();
@@ -708,6 +742,7 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 						{openItem ? (
 							<PlazaFeedItemDetail
+								mobile={mobile}
 								item={openItem}
 								hideSource={selectedId !== null}
 								onBack={() => {
@@ -757,6 +792,7 @@ export function PlazaFeedsView({ className }: { className?: string }) {
 												data-index={virtualRow.index}
 											>
 												<PlazaFeedItemRow
+													mobile={mobile}
 													item={item}
 													hideSource={selectedId !== null}
 													onOpen={openFeedItem}

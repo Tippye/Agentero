@@ -111,7 +111,7 @@ export function MobileSidebar({
 			/>
 			<aside
 				className={cn(
-					"absolute inset-y-0 left-0 flex w-[min(20rem,85vw)] select-none flex-col border-r bg-background pt-[env(safe-area-inset-top)] shadow-dialog transition-transform duration-200 ease-out",
+					"mobile-safe-area absolute inset-y-0 left-0 flex w-[min(20rem,85vw)] select-none flex-col border-r bg-background shadow-dialog transition-transform duration-200 ease-out",
 					open ? "translate-x-0" : "-translate-x-full",
 				)}
 				aria-label={t("settings.menu")}
@@ -127,6 +127,7 @@ export function MobileSidebar({
 						type="button"
 						variant="ghost"
 						size="icon-sm"
+						className="min-h-11 min-w-11"
 						aria-label={t("settings.closeMenu")}
 						onClick={onClose}
 					>
@@ -246,7 +247,7 @@ export function MobileSidebar({
 					) : null}
 				</div>
 
-				<footer className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+				<footer className="border-t p-4">
 					<Button
 						type="button"
 						size="lg"

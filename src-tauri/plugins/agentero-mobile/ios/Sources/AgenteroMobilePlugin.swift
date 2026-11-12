@@ -3,6 +3,12 @@ import WebKit
 
 /** Platform branches replace this fail-closed bridge with their native adapter. */
 class AgenteroMobilePlugin: Plugin {
+    @objc func stylusState(_ invoke: Invoke) {
+        invoke.resolve(["adapters": [String](), "presence": [String]()])
+    }
+    @objc func stylusSetTarget(_ invoke: Invoke) {
+        invoke.resolve(["adapters": [String](), "presence": [String]()])
+    }
     @objc func readState(_ invoke: Invoke) {
         invoke.resolve([
             "platform": "ios", "persistentConnection": false, "finiteTasks": false,

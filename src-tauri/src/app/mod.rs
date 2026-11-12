@@ -98,6 +98,7 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
         ),
     );
     crate::features::mobile_background::install(app);
+    crate::features::mobile_stylus::install(app);
     app.manage(crate::features::mobile_route::MobileRouteStore::new(
         app.path()
             .app_data_dir()

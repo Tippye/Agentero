@@ -26,8 +26,14 @@ pub struct FeedsAddArgs {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn feeds_add(args: FeedsAddArgs) -> ApiResult<FeedSub> {
-    match add_and_fetch(args.url, args.title).await {
+pub async fn feeds_add(app: tauri::AppHandle, args: FeedsAddArgs) -> ApiResult<FeedSub> {
+    match crate::features::mobile_background::with_work(
+        &app,
+        crate::features::mobile_background::BackgroundReason::Transfer,
+        add_and_fetch(args.url, args.title),
+    )
+    .await
+    {
         Ok(data) => ApiResult::ok(data),
         Err(e) => map_err(e),
     }
@@ -75,8 +81,17 @@ pub struct FeedsRefreshArgs {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn feeds_refresh(args: FeedsRefreshArgs) -> ApiResult<FeedRefreshResult> {
-    match refresh(args.id, args.stale_only).await {
+pub async fn feeds_refresh(
+    app: tauri::AppHandle,
+    args: FeedsRefreshArgs,
+) -> ApiResult<FeedRefreshResult> {
+    match crate::features::mobile_background::with_work(
+        &app,
+        crate::features::mobile_background::BackgroundReason::Transfer,
+        refresh(args.id, args.stale_only),
+    )
+    .await
+    {
         Ok(data) => ApiResult::ok(data),
         Err(e) => map_err(e),
     }
@@ -141,8 +156,14 @@ pub async fn feeds_set_pinned(args: FeedsSetPinnedArgs) -> ApiResult<FeedSub> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn feeds_resolve_body(args: FeedsIdArgs) -> ApiResult<FeedItem> {
-    match resolve_body(&args.id).await {
+pub async fn feeds_resolve_body(app: tauri::AppHandle, args: FeedsIdArgs) -> ApiResult<FeedItem> {
+    match crate::features::mobile_background::with_work(
+        &app,
+        crate::features::mobile_background::BackgroundReason::Transfer,
+        resolve_body(&args.id),
+    )
+    .await
+    {
         Ok(data) => ApiResult::ok(data),
         Err(e) => map_err(e),
     }
