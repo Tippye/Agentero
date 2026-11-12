@@ -39,6 +39,8 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::mobile_background::commands::mobile_background_configure,
             crate::features::mobile_background::commands::mobile_background_request_notifications,
             crate::features::mobile_background::commands::mobile_background_open_settings,
+            crate::features::mobile_route::commands::mobile_route_read,
+            crate::features::mobile_route::commands::mobile_route_save,
             crate::integration::bridge::client_commands::bridge_client_connect,
             crate::integration::bridge::client_commands::bridge_client_resume,
             crate::integration::bridge::client_commands::bridge_client_reset_identity,

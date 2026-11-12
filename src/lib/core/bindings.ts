@@ -31,6 +31,8 @@ export const commands = {
 	mobileBackgroundRequestNotifications: () => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_request_notifications")),
 	/**  Open a system settings page after an explicit user action. */
 	mobileBackgroundOpenSettings: (target: BackgroundSettingsTarget) => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_open_settings", { target })),
+	mobileRouteRead: (vaultPath: string) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_read", { vaultPath })),
+	mobileRouteSave: (vaultPath: string, expectedRevision: string, route: MobileWindowRoute) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_save", { vaultPath, expectedRevision, route })),
 	bridgeClientConnect: (args: BridgeConnectArgs) => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_connect", { args })),
 	bridgeClientResume: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_resume")),
 	bridgeClientResetIdentity: () => typedError<ApiResult<BridgeClientStatus>, string>(__TAURI_INVOKE("bridge_client_reset_identity")),
@@ -4467,6 +4469,30 @@ export type MigrateProgress = {
 	current: number,
 	total: number,
 	phase: string,
+};
+
+export type MobilePdfPosition = {
+	page: number,
+	zoom: number | null,
+};
+
+export type MobileReaderMode = "pdf" | "notes";
+
+export type MobileRoutePreset = "read" | "compare" | "discuss";
+
+export type MobileRouteSnapshot = {
+	revision: string,
+	route: MobileWindowRoute | null,
+};
+
+export type MobileRouteTab = "library" | "agent";
+
+export type MobileWindowRoute = {
+	paperId: string | null,
+	tab: MobileRouteTab,
+	readerMode: MobileReaderMode,
+	preset: MobileRoutePreset,
+	pdf: MobilePdfPosition | null,
 };
 
 export type Mutation = { type: "createSession"; workspace: WorkspaceRef; title: string | null } | { type: "sendMessage"; session: SessionRef; text: string; attachments: RemoteAttachment[] } | { type: "cancel"; session: SessionRef } | { type: "respondPermission"; session: SessionRef; requestId: string; optionId: string } | { type: "respondQuestion"; session: SessionRef; requestId: string; answers: QuestionAnswer[] } | { type: "uploadAttachment"; upload: AttachmentUpload };

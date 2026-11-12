@@ -23,6 +23,8 @@ pub mod jobs;
 pub mod lifecycle;
 #[cfg(feature = "desktop")]
 pub mod mobile_background;
+#[cfg(feature = "desktop")]
+pub mod mobile_route;
 pub mod remote_agent;
 
 #[path = "../app/open_request/mod.rs"]

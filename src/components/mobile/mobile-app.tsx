@@ -6,6 +6,7 @@ import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
 import { useMobilePaperSync } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
+import { useMobileRoute } from "@/components/mobile/hooks/use-mobile-route";
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
@@ -43,12 +44,14 @@ import {
 } from "@/lib/mobile/background";
 import { importMobilePdfs } from "@/lib/mobile/import-pdf";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
+import type { MobileWindowRoute } from "@/lib/mobile/route";
 import {
 	canLeaveMobilePaper,
 	type MobileWorkspacePreset,
 	mobileWorkspaceLayout,
 } from "@/lib/mobile/workspace";
 import type { PaperMetadata } from "@/lib/paper/types";
+import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 
 export default function MobileApp() {
 	const { t } = useTranslation("mobile");
@@ -65,6 +68,10 @@ export default function MobileApp() {
 		null,
 	);
 	const [readerMode, setReaderMode] = useState<MobileReaderMode>("pdf");
+	const [readingSnapshot, setReadingSnapshot] = useState<{
+		paperId: string;
+		value: PdfReadingSnapshot;
+	} | null>(null);
 	const [workspacePreset, setWorkspacePreset] =
 		useState<MobileWorkspacePreset>("read");
 	const [inkDirty, setInkDirty] = useState(false);
@@ -119,6 +126,53 @@ export default function MobileApp() {
 		loading: papersLoading,
 		refresh,
 	} = useMobilePapers({ vaultPath });
+	const restoreRoute = useCallback(
+		(route: MobileWindowRoute) => {
+			const paper = papers.find((paper) => paper.id === route.paperId) ?? null;
+			setSelectedPaper(paper);
+			setReaderMode(route.readerMode);
+			setWorkspacePreset(route.preset);
+			setTab(route.tab);
+			setReadingSnapshot(
+				paper && route.pdf && typeof route.pdf.zoom === "number"
+					? {
+							paperId: paper.id,
+							value: { page: route.pdf.page, zoom: route.pdf.zoom },
+						}
+					: null,
+			);
+		},
+		[papers],
+	);
+	const { markInteraction } = useMobileRoute({
+		vaultPath,
+		loading: vaultLoading || papersLoading,
+		route: {
+			paperId: selectedPaper?.id ?? null,
+			tab,
+			readerMode,
+			preset: workspacePreset,
+			pdf:
+				selectedPaper && readingSnapshot?.paperId === selectedPaper.id
+					? readingSnapshot.value
+					: null,
+		},
+		onRestore: restoreRoute,
+	});
+	const observeReadingSnapshot = useCallback(
+		(paperId: string, value: PdfReadingSnapshot) => {
+			if (latestRegionTarget.current.paperId !== paperId) return;
+			setReadingSnapshot({ paperId, value });
+		},
+		[],
+	);
+	const selectReaderMode = useCallback(
+		(mode: MobileReaderMode) => {
+			markInteraction();
+			setReaderMode(mode);
+		},
+		[markInteraction],
+	);
 	const rescanAfterSync = useCallback(() => refresh(true), [refresh]);
 	const refreshAfterDownload = useCallback(() => refresh(), [refresh]);
 	const paperSync = useMobilePaperSync({
@@ -174,19 +228,23 @@ export default function MobileApp() {
 	}, [notesDirty, inkDirty, t]);
 	const closeReader = useCallback(() => {
 		if (!canLeaveReader()) return;
+		markInteraction();
 		setSelectedPaper(null);
+		setReadingSnapshot(null);
 		setInkMode(false);
 		setReaderMode("pdf");
-	}, [canLeaveReader]);
+	}, [canLeaveReader, markInteraction]);
 	const selectPaper = useCallback(
 		(paper: PaperMetadata) => {
 			if (selectedPaper?.path === paper.path && selectedPaper?.id === paper.id)
 				return;
 			if (!canLeaveReader()) return;
+			markInteraction();
 			setInkMode(false);
+			setReadingSnapshot(null);
 			setSelectedPaper(paper);
 		},
-		[selectedPaper, canLeaveReader],
+		[selectedPaper, canLeaveReader, markInteraction],
 	);
 	const selectPreset = useCallback(
 		(preset: MobileWorkspacePreset) => {
@@ -194,10 +252,11 @@ export default function MobileApp() {
 				notifyError(t("reader.unsavedChanges"));
 				return;
 			}
+			markInteraction();
 			setWorkspacePreset(preset);
 			setReaderMode(preset === "compare" ? "notes" : "pdf");
 		},
-		[inkDirty, widthClass, t],
+		[inkDirty, widthClass, t, markInteraction],
 	);
 	const selectTab = useCallback(
 		(next: MobileTab) => {
@@ -205,9 +264,10 @@ export default function MobileApp() {
 				notifyError(t("reader.unsavedChanges"));
 				return;
 			}
+			markInteraction();
 			setTab(next);
 		},
-		[inkDirty, t],
+		[inkDirty, t, markInteraction],
 	);
 
 	const acceptRegionPrompt = useCallback(
@@ -228,13 +288,14 @@ export default function MobileApp() {
 				notifyError(t("paperContext.pendingAlready"));
 				return;
 			}
+			markInteraction();
 			regionContextRef.current = context;
 			setRegionContext(context);
 			setReaderMode("pdf");
 			setWorkspacePreset("discuss");
 			setTab(current.widthClass === "narrow" ? "agent" : "library");
 		},
-		[vaultPath, t],
+		[vaultPath, t, markInteraction],
 	);
 	const handleRegionContext = useCallback((id: string) => {
 		if (regionContextRef.current?.id !== id) return;
@@ -276,11 +337,11 @@ export default function MobileApp() {
 				return;
 			}
 			if (dx < -60 && tab === "library") {
-				setTab("agent");
+				selectTab("agent");
 				return;
 			}
 			if (dx > 60 && tab === "agent") {
-				setTab("library");
+				selectTab("library");
 			}
 		},
 		inkMode || inkDirty || pairingRequested || syncOpen || backgroundOpen,
@@ -362,7 +423,7 @@ export default function MobileApp() {
 						inReader ? (
 							<MobileReaderModeToggle
 								mode={readerMode}
-								onChange={setReaderMode}
+								onChange={selectReaderMode}
 								preset={workspacePreset}
 								widthClass={widthClass}
 								onPresetChange={selectPreset}
@@ -512,6 +573,12 @@ export default function MobileApp() {
 													!syncOpen &&
 													!backgroundOpen
 												}
+												initialReadingSnapshot={
+													readingSnapshot?.paperId === selectedPaper.id
+														? readingSnapshot.value
+														: null
+												}
+												onReadingSnapshotChange={observeReadingSnapshot}
 												onNotesDirtyChange={setNotesDirty}
 												onInkDirtyChange={setInkDirty}
 												onInkModeChange={setInkMode}
