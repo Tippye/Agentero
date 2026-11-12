@@ -107,6 +107,7 @@
 ### I6 分屏与多窗口
 
 - **窗口缩放**：iPadOS 18 及以前是分屏浏览和侧拉，支持台前调度的机型另有自由窗口；iPadOS 26 起是窗口化模式，`UIRequiresFullScreen` 已被废弃。工程没有设置这个键，所以应用现在就会被系统缩放，S4 的三档布局要覆盖从约三分之一屏到全屏的宽度。tao 0.36 已修复 iPadOS 26 的窗口控件遮挡 WebView 内容的问题，仓库的 0.37.2 包含该修复。
+- **固定 SDK 核对**：Tao 0.37.2 仅在 `supportsMultipleScenes` 为真时请求新 Scene，否则可能使用已有 Scene；当前工程没有多场景声明。创建和激活失败是异步反馈，builder 成功不代表新的可见窗口；已有 Scene 的激活也须验证 SDK 行为。系统断开 Scene 会产生 `Destroyed`，还需要处理 Tauri `RunEvent::SceneRequested` 及 Scene 会话到稳定文档路由的映射。共享层先提供按窗口落盘的论文/模式/页码/缩放，新窗口入口仍关闭。
 - **多窗口**：
   1. Info.plist 打开多场景。
   2. Rust 侧处理系统发起的新场景请求（用户长按图标选「新窗口」），以及应用内「在新窗口打开」——后者复用桌面的 `doc_window_open`。
