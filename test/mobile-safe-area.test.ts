@@ -27,7 +27,7 @@ vi.mock("@/components/settings/panes/sync-pane", () => ({
 }));
 vi.mock("@zxing/browser", () => ({
 	BrowserQRCodeReader: class {
-		decodeFromConstraints() {
+		decodeFromStream() {
 			return Promise.resolve({ stop: vi.fn() });
 		}
 	},
@@ -38,7 +38,13 @@ import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
 
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
+let mediaDescriptor: PropertyDescriptor | undefined;
 beforeEach(() => {
+	mediaDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+	Object.defineProperty(navigator, "mediaDevices", {
+		configurable: true,
+		value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [] })) },
+	});
 	vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 	state.done.mockClear();
 	state.close.mockClear();
@@ -49,6 +55,9 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(() => root.unmount());
 	host.remove();
+	if (mediaDescriptor)
+		Object.defineProperty(navigator, "mediaDevices", mediaDescriptor);
+	else Reflect.deleteProperty(navigator, "mediaDevices");
 	vi.unstubAllGlobals();
 });
 

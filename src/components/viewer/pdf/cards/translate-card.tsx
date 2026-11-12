@@ -155,6 +155,7 @@ export function TranslateCard({
 
 	return (
 		<SelectionCard
+			data-state="open"
 			screen={screen}
 			width={TRANSLATE_CARD_WIDTH}
 			height={TRANSLATE_CARD_HEIGHT}
