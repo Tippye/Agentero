@@ -4,12 +4,23 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.WebView
+import app.agentero.mobile.WebViewCompatibilityGuard
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+  private val compatibilityGuard by lazy { WebViewCompatibilityGuard(this) }
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    // Wry invokes this before its first application URL load. Keep its lifecycle
+    // intact while known unsupported engines receive native, CSS-independent UI.
+    compatibilityGuard.onWebViewCreate(webView)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -19,12 +30,12 @@ class MainActivity : TauriActivity() {
   // Wry installs its WebView through setContentView(View) after Rust startup,
   // after onWebViewCreate. Fit its containing frame, never WebView internal padding.
   override fun setContentView(view: View?) {
-    super.setContentView(view)
+    super.setContentView(compatibilityGuard.contentFor(view))
     fitSystemInsets()
   }
 
   override fun setContentView(view: View?, params: ViewGroup.LayoutParams?) {
-    super.setContentView(view, params)
+    super.setContentView(compatibilityGuard.contentFor(view), params)
     fitSystemInsets()
   }
 

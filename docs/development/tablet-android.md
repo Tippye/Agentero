@@ -185,7 +185,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 ### A8 WebView 与输入
 
-- **WebView 版本**：前端用 Tailwind CSS 4，要求 Chrome 111 以上。系统 WebView 可独立更新，但没有 Google 服务的设备上版本可能偏旧。启动时检查版本，过旧就给出明确提示，不让用户面对错乱的界面。
+- **WebView 版本**：已接入 React 加载前的原生保护页。保留完整 Tauri/Wry 生命周期，在首次 URL 导航前用公开 `WebSettings.getDefaultUserAgent` 检查实际 Chromium 内核；已知低于 111 才关闭该 WebView 的 JavaScript，并通过两个 `setContentView` 重载替换为不依赖 HTML/CSS 的英中原生更新提示，继续复用系统栏/键盘安全区域。111 及以上和 unknown 均保留 SDK 视图，不把厂商 provider 的自定义应用版本号误当内核版本；unknown 不宣称已验证兼容。设置仅在用户点击后打开当前 provider 的应用详情并允许系统设置回退，不扫描浏览器、不自动下载或换提供器；关闭仅 `Activity.finish`。9 项新增策略与既有用例共 47 项 JVM 检查、插件与 MainActivity Kotlin 编译通过；实际字体缩放、无障碍、旋转与更新回跳仍待设备验收。详见[WebView 兼容性](../backend/mobile-webview.md)。
 - **返回手势**：已接入固定 SDK 的 `app.onBackButtonPress`，只在拥有弹层、阅读/Agent/广场状态或未保存修改时注册单个回调。成熟 Radix 层先按可取消 Escape 路径关闭当前顶层，忙碌确认不会穿透；再关闭侧栏/历史、折叠研讨、返回文献库或检查笔记/笔迹退出保护。干净文献库根页面提前注销回调，恢复 SDK 的 WebView/系统分派，不调用 `app.exit`（它会 `finishAffinity`），不申请退出权限、不停止前台服务。注册/移除串行并隔离迟到事件；SDK 的异步交接窗口仍需设备检查。确认 Android 平台后停用自定义左右滑动与阅读边缘返回，不取消普通滚动/笔输入。嵌套扫码页改用现有 Dialog，关闭后迟到的相机控制器也停止。真机预测返回、输入法优先级与任务根行为仍待验收。
 - **软键盘**：`MainActivity` 开了全面屏，键盘弹出时窗口不会自动让位。要么把键盘高度传给前端，要么确认可视视口接口在这种模式下给出正确的值——M1 开头验证。
 - **外接键盘和鼠标**：快捷键走 Web 键盘事件；有鼠标或触控板时保留悬停菜单和右键菜单。
