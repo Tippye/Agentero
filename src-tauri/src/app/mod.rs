@@ -14,6 +14,8 @@ mod handlers;
 mod logging;
 pub mod menu;
 mod mobile_connectivity;
+#[cfg(any(target_os = "ios", test))]
+mod mobile_webview;
 pub(crate) mod remote_agent;
 pub mod vault_session;
 
@@ -271,6 +273,11 @@ pub fn run() {
     }
 
     builder = handlers::attach_handlers(builder);
+
+    #[cfg(target_os = "ios")]
+    {
+        builder = mobile_webview::attach(builder);
+    }
 
     #[cfg(desktop)]
     {
