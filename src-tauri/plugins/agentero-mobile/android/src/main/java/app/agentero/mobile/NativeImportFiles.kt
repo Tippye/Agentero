@@ -1,8 +1,10 @@
 package app.agentero.mobile
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.provider.OpenableColumns
 import app.tauri.annotation.InvokeArg
 import app.tauri.plugin.Invoke
@@ -21,9 +23,23 @@ internal class OpenImportFileArgs {
 internal object NativeImportFilePolicy {
     fun validUri(value: String): Boolean = value.length in 1..32768 && try {
         val uri = URI(value)
-        uri.scheme == "content" && !uri.rawAuthority.isNullOrBlank() && !uri.isOpaque
+        uri.scheme == "content" && !uri.authority.isNullOrBlank() &&
+            '@' !in uri.authority && !uri.isOpaque
     } catch (_: Exception) {
         false
+    }
+
+    /** A picker result cannot authorize reads through our own/shared-UID providers. */
+    fun <Opened> openExternal(
+        authority: String,
+        ownUid: Int,
+        providerUid: (String) -> Int?,
+        open: () -> Opened,
+    ): Opened {
+        require(authority.isNotBlank() && '@' !in authority) { "Import provider unavailable" }
+        val uid = providerUid(authority)
+        require(ownUid >= 0 && uid != null && uid >= 0 && uid != ownUid) { "Import provider unavailable" }
+        return open()
     }
 
     /** Optional provider metadata is a name only, never a path or read authority. */
@@ -79,6 +95,7 @@ internal object NativeImportFilePolicy {
 /** Rust-only selected-URI adapter. The renderer never supplies a URI to this command. */
 internal class NativeImportFiles(context: Context) {
     private val resolver = context.applicationContext.contentResolver
+    private val packages = context.applicationContext.packageManager
 
     fun open(invoke: Invoke) {
         val uri = try {
@@ -95,7 +112,14 @@ internal class NativeImportFiles(context: Context) {
                     // Unlike openAssetFileDescriptor, this rejects a provider's partial
                     // asset instead of discarding its offset/length. Read-only pipes work.
                     val selected = Uri.parse(uri)
-                    val parcel = requireNotNull(resolver.openFileDescriptor(selected, "r"))
+                    val parcel = NativeImportFilePolicy.openExternal(
+                        authority = requireNotNull(selected.authority),
+                        ownUid = Process.myUid(),
+                        providerUid = { authority ->
+                            packages.resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0))?.applicationInfo?.uid
+                        },
+                        open = { requireNotNull(resolver.openFileDescriptor(selected, "r")) },
+                    )
                     NativeImportFilePolicy.transfer(
                         descriptor = { parcel.fd },
                         detach = { parcel.detachFd() },

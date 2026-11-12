@@ -20,6 +20,61 @@ class NativeImportFilesTest {
         }
     }
 
+    @Test fun userQualifiedAndEncodedUserAuthoritiesAreRejectedBeforeLookupOrOpening() {
+        listOf("content://7@provider/document/a", "content://7%40provider/document/a", "content://%37%40provider/document/a").forEach {
+            assertFalse(NativeImportFilePolicy.validUri(it))
+        }
+        var lookups = 0
+        var opens = 0
+        assertThrows(IllegalArgumentException::class.java) {
+            NativeImportFilePolicy.openExternal("7@provider", 10001, { lookups += 1; 10002 }) { opens += 1 }
+        }
+        assertEquals(0, lookups)
+        assertEquals(0, opens)
+    }
+
+    @Test fun ownAndSharedUidProvidersCannotBeOpenedOrQueried() {
+        var opens = 0
+        var queries = 0
+        listOf("app.fileprovider", "shared.uid.provider").forEach { authority ->
+            assertThrows(IllegalArgumentException::class.java) {
+                NativeImportFilePolicy.openExternal(authority, 10001, { 10001 }) { opens += 1; queries += 1 }
+            }
+        }
+        assertEquals(0, opens)
+        assertEquals(0, queries)
+    }
+
+    @Test fun unknownInvalidAndUnresolvableProviderOwnershipFailsBeforeOpenOrQuery() {
+        var opens = 0
+        var queries = 0
+        listOf(null, -1).forEach { uid ->
+            assertThrows(IllegalArgumentException::class.java) {
+                NativeImportFilePolicy.openExternal("provider", 10001, { uid }) { opens += 1; queries += 1 }
+            }
+        }
+        assertThrows(SecurityException::class.java) {
+            NativeImportFilePolicy.openExternal("provider", 10001, { throw SecurityException("lookup unavailable") }) {
+                opens += 1; queries += 1
+            }
+        }
+        assertEquals(0, opens)
+        assertEquals(0, queries)
+    }
+
+    @Test fun externalProviderUsesExactAuthorityAndOpensOnlyAfterOwnershipLookup() {
+        val steps = mutableListOf<String>()
+        val result = NativeImportFilePolicy.openExternal("exact_provider.authority", 10001, { authority ->
+            steps.add("lookup:$authority")
+            10002
+        }) {
+            steps.add("open")
+            "selected"
+        }
+        assertEquals("selected", result)
+        assertEquals(listOf("lookup:exact_provider.authority", "open"), steps)
+    }
+
     @Test fun keepsProviderBasenamesIncludingUnicodeAndPdfExtension() {
         assertEquals("研究 🧪.pdf", NativeImportFilePolicy.displayName { "研究 🧪.pdf" })
         assertEquals("paper.PDF", NativeImportFilePolicy.displayName { "paper.PDF" })
