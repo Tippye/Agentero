@@ -21,6 +21,8 @@ pub mod host_hooks;
 pub mod jobs;
 
 pub mod lifecycle;
+#[cfg(feature = "desktop")]
+pub mod mobile_background;
 pub mod remote_agent;
 
 #[path = "../app/open_request/mod.rs"]

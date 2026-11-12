@@ -444,11 +444,19 @@ async fn perform_sync_task(
             },
         );
     };
-    let result = if let Some(paper) = requested {
-        availability::fetch_paper(&dir, &cfg, paper, &progress).await
+    let reason = if requested.is_some() {
+        crate::features::mobile_background::BackgroundReason::Transfer
     } else {
-        engine::sync_vault_locked(&dir, &cfg, &progress).await
+        crate::features::mobile_background::BackgroundReason::Sync
     };
+    let result = crate::features::mobile_background::with_work(app, reason, async {
+        if let Some(paper) = requested {
+            availability::fetch_paper(&dir, &cfg, paper, &progress).await
+        } else {
+            engine::sync_vault_locked(&dir, &cfg, &progress).await
+        }
+    })
+    .await;
     // Terminal event consumers immediately re-read status; release first.
     drop(lease);
     match result {

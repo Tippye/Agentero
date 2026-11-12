@@ -2,7 +2,7 @@
 
 Tauri 2 + Rust Host：文件系统、Catalog、索引、ACP Client、远程 Vault。tauri 无关的基座与数据域在 `agentero-core` crate；CLI（`cli/`）只依赖 `agentero-core`，Host 经桥接 re-export 复用同一实现。
 
-> 整体架构与跨层工作流见 [../architecture.md](../architecture.md)。移动端 Bridge 身份迁移、显式重置与远程操作 journal 见[远程状态恢复](remote-agent.md)。
+> 整体架构与跨层工作流见 [../architecture.md](../architecture.md)。移动端 Bridge 身份迁移、显式重置与远程操作 journal 见[远程状态恢复](remote-agent.md)，Android / iOS 的任务所有权、系统窗口与设置见[平台后台适配](mobile-background.md)。
 
 ## 定位
 
