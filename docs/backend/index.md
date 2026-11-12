@@ -2,7 +2,7 @@
 
 Tauri 2 + Rust Host：文件系统、Catalog、索引、ACP Client、远程 Vault。tauri 无关的基座与数据域在 `agentero-core` crate；CLI（`cli/`）只依赖 `agentero-core`，Host 经桥接 re-export 复用同一实现。
 
-> 整体架构与跨层工作流见 [../architecture.md](../architecture.md)。移动端 Bridge 身份迁移、显式重置与远程操作 journal 见[远程状态恢复](remote-agent.md)，Android / iOS 的任务所有权、系统窗口与设置见[平台后台适配](mobile-background.md)，按窗口保存论文、模式与阅读位置见[阅读路由恢复](mobile-route.md)。系统栏与键盘避让见[移动安全区域](mobile-safe-area.md)，笔手分流、系统笔手势与品牌扩展边界见[手写笔适配](mobile-stylus.md)，网络切换的原生提示、传输隔离与只读恢复见[移动网络恢复](mobile-connectivity.md)。Android 旧内核的 React 加载前原生提示见[WebView 兼容性](mobile-webview.md)，iOS 内容进程回收后的预算与旧输入隔离见[内容进程恢复](mobile-webview-recovery.md)，Android 单份外部 PDF 的原生授权与入库见[系统打开 PDF](mobile-pdf-open.md)。
+> 整体架构与跨层工作流见 [../architecture.md](../architecture.md)。移动端 Bridge 身份迁移、显式重置与远程操作 journal 见[远程状态恢复](remote-agent.md)，Android / iOS 的任务所有权、系统窗口与设置见[平台后台适配](mobile-background.md)，按窗口保存论文、模式与阅读位置见[阅读路由恢复](mobile-route.md)。系统栏与键盘避让见[移动安全区域](mobile-safe-area.md)，笔手分流、系统笔手势与品牌扩展边界见[手写笔适配](mobile-stylus.md)，网络切换的原生提示、传输隔离与只读恢复见[移动网络恢复](mobile-connectivity.md)。Android 旧内核的 React 加载前原生提示见[WebView 兼容性](mobile-webview.md)，iOS 内容进程回收后的预算与旧输入隔离见[内容进程恢复](mobile-webview-recovery.md)，Android 单份外部 PDF 的原生授权与入库见[系统打开 PDF](mobile-pdf-open.md)，iOS 受限的系统副本 Inbox 与深链隔离见[iOS 复制 PDF 入库](mobile-ios-pdf-open.md)。
 
 ## 定位
 

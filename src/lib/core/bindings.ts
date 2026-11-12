@@ -339,8 +339,8 @@ export const commands = {
 	/**  Select PDF files with the native picker and import private streamed copies. */
 	paperImportNativePdfs: (vaultPath: string) => typedError<ApiResult<ImportLocalPdfResult_Serialize>, string>(__TAURI_INVOKE("paper_import_native_pdfs", { vaultPath })),
 	/**
-	 *  Import one pending Android-opened PDF into the foreground local Vault.
-	 *  Returns null when no native-owned document is pending, including other platforms.
+	 *  Import one pending Android or iOS native-owned PDF into the foreground local Vault.
+	 *  Returns null when no native-owned document is pending; desktop has no Inbox.
 	 */
 	paperImportOpenedPdf: (vaultPath: string) => typedError<ApiResult<ImportLocalPdfResult_Serialize | null>, string>(__TAURI_INVOKE("paper_import_opened_pdf", { vaultPath })),
 	/**

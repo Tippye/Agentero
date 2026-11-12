@@ -12,6 +12,8 @@ pub use agentero_core::features::paper::import::*;
 
 #[cfg(feature = "desktop")]
 pub mod commands;
+#[cfg(all(feature = "desktop", any(target_os = "ios", all(test, unix))))]
+pub(crate) mod ios_inbox;
 #[cfg(feature = "desktop")]
 pub mod job_runners;
 #[cfg(feature = "desktop")]
