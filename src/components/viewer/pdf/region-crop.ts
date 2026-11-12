@@ -33,7 +33,7 @@ function cropScaleFactor(
 	const cropWidth = page.size.width * region.w;
 	const cropHeight = page.size.height * region.h;
 	const longestEdge = Math.max(cropWidth, cropHeight, 1);
-	return Math.max(0.25, Math.min(2, maxEdgePx / longestEdge));
+	return Math.min(2, maxEdgePx / longestEdge);
 }
 
 export async function renderPdfRegionPromptImage({

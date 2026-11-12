@@ -6,6 +6,7 @@
 		"highlighter": "Highlighter",
 		"eraser": "Erase a stroke",
 		"lasso": "Lasso selection",
+		"askRegion": "Ask about this region",
 		"color": "Ink color",
 		"width": "Stroke width",
 		"undo": "Undo handwriting",
