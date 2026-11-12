@@ -20,9 +20,10 @@ import app.tauri.plugin.Plugin
 class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val controller by lazy { AndroidBackgroundController.get(activity) }
     private val events = AndroidBackgroundEventRelay(this)
+    private val stylus by lazy { StylusAdapterRegistry(activity, this) }
 
     override fun load(webView: WebView) {
-        activity.runOnUiThread { controller.attach(activity, events) }
+        activity.runOnUiThread { controller.attach(activity, events); stylus.attach(webView) }
     }
 
     @Command
@@ -83,6 +84,18 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
                 onFailure = { invoke.reject(it.message ?: "Android background activity failed", "BACKGROUND_APPLY_FAILED") },
             )
         }
+    }
+
+    @Command
+    fun stylusState(invoke: Invoke) = onUi(invoke) { invoke.resolve(stylus.state()) }
+
+    @Command
+    fun stylusSetTarget(invoke: Invoke) = onUi(invoke) {
+        invoke.resolve(stylus.setTarget(invoke.parseArgs(StylusTargetArgs::class.java)))
+    }
+
+    override fun onDestroy(activity: AppCompatActivity) {
+        activity.runOnUiThread { stylus.dispose() }
     }
 
     override fun onResume(activity: AppCompatActivity) {
