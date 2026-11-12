@@ -75,7 +75,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 | 入口 | 做法 |
 |---|---|
-| 应用内选文件 | 系统文件选择器，返回的是 `content://` 地址，不是文件路径。`tauri-plugin-dialog` 和 `tauri-plugin-fs` 已是依赖，先验证它们能否直接读这种地址；不能就在本地插件里读流并复制进 Vault |
+| 应用内选文件 | 已接入 Rust 所有的系统 PDF 选择与私有 cache 流式暂存，再复用同一入库内核；不会把整份文件读入 WebView。固定版本 fs 插件丢失 asset 子区间信息，因此 `content://` 由 Rust 私有适配器调用 `openFileDescriptor("r")` 获取完整文件/pipe，拒绝子区间和空 descriptor；可选 `DISPLAY_NAME` 仅作受限文件名。提供器打开/查询在有界后台线程执行，临时授权在入库前复制完毕，不保存 URI、不扩张 renderer 权限。详见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)；云提供器与真实设备仍待验收 |
 | 「打开方式」 | 为 PDF 加查看意图过滤器。Tauri 2.11 起移动端文件关联会触发 `RunEvent::Opened` |
 | 系统分享 | 加接收分享的意图过滤器（单个和多个）。主 Activity 是 `singleTask`，分享会走到已有实例。在插件里把流复制到收件箱目录，再通知前端入队。立即复制，不长期持有对方的地址授权 |
 | 导出 | 「另存为」走系统的创建文档界面；分享走 `FileProvider` |

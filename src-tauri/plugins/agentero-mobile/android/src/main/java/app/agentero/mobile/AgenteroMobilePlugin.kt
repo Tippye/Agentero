@@ -21,6 +21,7 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val controller by lazy { AndroidBackgroundController.get(activity) }
     private val events = AndroidBackgroundEventRelay(this)
     private val connectivityEvents = ConnectivityEventRelay(this)
+    private val importFiles by lazy { NativeImportFiles(activity.applicationContext) }
     private val stylus by lazy { StylusAdapterRegistry(activity, this) }
 
     override fun load(webView: WebView) {
@@ -34,6 +35,9 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     fun connectivityState(invoke: Invoke) = onUi(invoke) {
         invoke.resolve(ConnectivityMonitor.get(activity.applicationContext).state(connectivityEvents))
     }
+
+    @Command
+    fun openImportFile(invoke: Invoke) = importFiles.open(invoke)
 
     @Command
     fun configure(invoke: Invoke) = onUi(invoke) {
