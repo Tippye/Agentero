@@ -167,6 +167,161 @@ pub(crate) async fn import_selected(
     })?
 }
 
+/// Import one Android-owned open-intent selection. No URI or file path is
+/// accepted from the renderer; other platforms have no pending selection.
+pub(crate) async fn import_opened(
+    app: tauri::AppHandle,
+    vault_path: String,
+) -> Result<Option<ImportLocalPdfResult>, AppError> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, vault_path);
+        Ok(None)
+    }
+    #[cfg(target_os = "android")]
+    {
+        let identity =
+            VaultIdentity::capture(&crate::features::paper::mobile::vault(&app, &vault_path)?)?;
+        ensure_external_listener(&app).await?;
+        let permit = admission(picker_gate())?;
+        // Once admitted, the native claim, staging and commit retain their owner
+        // even if the invoking page is destroyed. Before admission no FD is taken.
+        own_result(import_opened_owned(app, vault_path, identity, permit)).await
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn ensure_external_listener(app: &tauri::AppHandle) -> Result<(), AppError> {
+    use futures_util::{
+        future::{BoxFuture, Shared},
+        FutureExt,
+    };
+    static LISTENER: OnceLock<Shared<BoxFuture<'static, Result<(), String>>>> = OnceLock::new();
+    let registered = LISTENER.get_or_init(|| {
+        let app = app.clone();
+        async move {
+            let notifier = app.clone();
+            app.try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
+                .ok_or_else(|| "Native document access is unavailable".to_string())?
+                .on_external_pdf_pending(move || {
+                    use tauri::Emitter;
+                    let _ = notifier.emit_to("main", "mobile:external-pdf-pending", ());
+                })
+                .await
+        }
+        .boxed()
+        .shared()
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), registered.clone())
+        .await
+        .map_err(|_| {
+            failure(
+                "paper_open_unavailable",
+                "Native PDF listener registration timed out",
+            )
+        })?
+        .map_err(|_| {
+            failure(
+                "paper_open_unavailable",
+                "Native PDF listener is unavailable",
+            )
+        })
+}
+
+#[cfg(any(target_os = "android", test))]
+async fn own_result<T: Send + 'static>(
+    operation: impl Future<Output = Result<T, AppError>> + Send + 'static,
+) -> Result<T, AppError> {
+    tauri::async_runtime::spawn(operation).await.map_err(|_| {
+        failure(
+            "paper_open_interrupted",
+            "The native PDF operation ended before returning a result",
+        )
+    })?
+}
+
+#[cfg(target_os = "android")]
+async fn import_opened_owned(
+    app: tauri::AppHandle,
+    raw_vault: String,
+    identity: VaultIdentity,
+    permit: OwnedSemaphorePermit,
+) -> Result<Option<ImportLocalPdfResult>, AppError> {
+    let claim_app = app.clone();
+    let claim_identity = identity.clone();
+    let claim_vault = raw_vault.clone();
+    let opened = tauri::async_runtime::spawn_blocking(move || {
+        claim_identity.check_app(&claim_app, &claim_vault)?;
+        claim_app
+            .try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
+            .ok_or_else(|| {
+                failure(
+                    "paper_open_unavailable",
+                    "Native document access is unavailable",
+                )
+            })?
+            .take_external_pdf()
+            .map_err(|_| {
+                failure(
+                    "paper_open_failed",
+                    "Unable to open the PDF supplied by Android",
+                )
+            })
+    })
+    .await
+    .map_err(|_| {
+        failure(
+            "paper_open_failed",
+            "Unable to open the PDF supplied by Android",
+        )
+    })??;
+    let Some(mut opened) = opened else {
+        return Ok(None);
+    };
+    // Empty inbox reads never acquire background work or start foreground services.
+    let _work =
+        match app.try_state::<Arc<crate::features::mobile_background::MobileBackgroundService>>() {
+            Some(service) => Some(
+                service
+                    .track(crate::features::mobile_background::BackgroundReason::Transfer)
+                    .await?,
+            ),
+            None => None,
+        };
+    let stage_app = app.clone();
+    let stage_identity = identity.clone();
+    let stage_vault = raw_vault.clone();
+    let staged = tauri::async_runtime::spawn_blocking(move || {
+        stage_identity.check_app(&stage_app, &stage_vault)?;
+        let mut batch = new_batch(&stage_app, permit)?;
+        let name = sanitized_name(opened.display_name.as_deref(), 0);
+        let mut budget = Budget {
+            read: 0,
+            limits: LIMITS,
+        };
+        let file = stage_reader(
+            &mut opened.file,
+            &name,
+            0,
+            batch._directory.path(),
+            &mut budget,
+        )
+        .map_err(|reason| failure("paper_open_failed", reason))?;
+        batch.files.push(file);
+        Ok::<_, AppError>(batch)
+    })
+    .await
+    .map_err(|_| {
+        failure(
+            "paper_open_failed",
+            "Unable to stage the PDF supplied by Android",
+        )
+    })??;
+    commit_staged(app, raw_vault, identity, staged)
+        .await
+        .map(Some)
+}
+
 struct StagedFile {
     entry: LocalPdfImportEntry,
     _directory: TempDir,
@@ -216,6 +371,15 @@ async fn import_owned(
             "Unable to stage the selected PDFs",
         )
     })??;
+    commit_staged(app, raw_vault, identity, staged).await
+}
+
+async fn commit_staged(
+    app: tauri::AppHandle,
+    raw_vault: String,
+    identity: VaultIdentity,
+    staged: StagedBatch,
+) -> Result<ImportLocalPdfResult, AppError> {
     if staged.files.is_empty() {
         return Err(AppError::message(staged.errors.join("; ")));
     }
@@ -263,9 +427,8 @@ fn merge_errors(
     }
 }
 
-fn stage_selected(
+fn new_batch(
     app: &tauri::AppHandle,
-    files: Vec<FilePath>,
     permit: OwnedSemaphorePermit,
 ) -> Result<StagedBatch, AppError> {
     let cache = app.path().app_cache_dir().map_err(|_| {
@@ -303,12 +466,20 @@ fn stage_selected(
                 "Private PDF staging is unavailable",
             )
         })?;
-    let mut batch = StagedBatch {
+    Ok(StagedBatch {
         files: Vec::new(),
         errors: Vec::new(),
         _directory: directory,
         _permit: permit,
-    };
+    })
+}
+
+fn stage_selected(
+    app: &tauri::AppHandle,
+    files: Vec<FilePath>,
+    permit: OwnedSemaphorePermit,
+) -> Result<StagedBatch, AppError> {
+    let mut batch = new_batch(app, permit)?;
     let mut budget = Budget {
         read: 0,
         limits: LIMITS,
@@ -576,6 +747,37 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn opened_operation_keeps_admission_and_staging_until_real_completion_after_receiver_drop(
+    ) {
+        let gate = Arc::new(Semaphore::new(1));
+        let permit = admission(&gate).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_path_buf();
+        let (started, entered) = oneshot::channel();
+        let (finish, finished) = oneshot::channel();
+        let (released, release) = oneshot::channel();
+        let receiver = tokio::spawn(own_result(async move {
+            let _permit = permit;
+            let _directory = directory;
+            let _ = started.send(());
+            let _ = finished.await;
+            drop(_directory);
+            drop(_permit);
+            let _ = released.send(());
+            Ok(())
+        }));
+        entered.await.unwrap();
+        receiver.abort();
+        assert!(receiver.await.unwrap_err().is_cancelled());
+        assert!(path.exists());
+        assert!(admission(&gate).is_err());
+        finish.send(()).unwrap();
+        release.await.unwrap();
+        assert!(!path.exists());
+        assert!(admission(&gate).is_ok());
+    }
 
     struct Chunks {
         bytes: io::Cursor<Vec<u8>>,

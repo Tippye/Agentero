@@ -65,6 +65,53 @@ impl<R: Runtime> MobileBackground<R> {
         })
     }
 
+    /// Claim one native open-intent document on a blocking worker. No URI crosses IPC.
+    #[cfg(target_os = "android")]
+    pub fn take_external_pdf(&self) -> Result<Option<NativeImportFile>, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Descriptor {
+            fd: Option<i32>,
+            #[serde(default)]
+            display_name: Option<String>,
+        }
+        let descriptor = self
+            .handle
+            .run_mobile_plugin::<Descriptor>("takeExternalPdf", serde_json::json!({}))
+            .map_err(|_| "Opened PDF is unavailable".to_string())?;
+        let Some(fd) = descriptor.fd else {
+            return Ok(None);
+        };
+        if fd < 0 {
+            return Err("Opened PDF is unavailable".into());
+        }
+        use std::os::fd::FromRawFd;
+        Ok(Some(NativeImportFile {
+            file: unsafe { std::fs::File::from_raw_fd(fd) },
+            display_name: descriptor.display_name,
+        }))
+    }
+
+    /// An empty wake hint; the pending selection remains owned by native intake.
+    #[cfg(target_os = "android")]
+    pub async fn on_external_pdf_pending(
+        &self,
+        pending: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let handler = tauri::ipc::Channel::<serde_json::Value>::new(move |_| {
+            pending();
+            Ok(())
+        });
+        self.handle
+            .run_mobile_plugin_async::<serde_json::Value>(
+                "registerListener",
+                serde_json::json!({"event":"external-pdf-pending", "handler":handler}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|_| "PDF open listener is unavailable".to_string())
+    }
+
     async fn call(
         &self,
         name: &str,
