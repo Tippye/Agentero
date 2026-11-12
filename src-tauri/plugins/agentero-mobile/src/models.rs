@@ -119,6 +119,9 @@ pub struct StylusAdapterCapability {
     pub source: StylusSource,
     pub actions: Vec<StylusAction>,
     pub double_tap: bool,
+    /// Adapter gesture routing, not proof that a Pencil Pro is connected.
+    #[serde(default)]
+    pub squeeze: bool,
     pub barrel_button: bool,
     pub inverted_pen: bool,
     pub hardware_presence: bool,

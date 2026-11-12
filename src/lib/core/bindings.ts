@@ -5977,6 +5977,8 @@ export type StylusAdapterCapability = {
 	source: StylusSource,
 	actions: StylusAction[],
 	doubleTap: boolean,
+	/**  Adapter gesture routing, not proof that a Pencil Pro is connected. */
+	squeeze?: boolean,
 	barrelButton: boolean,
 	invertedPen: boolean,
 	hardwarePresence: boolean,
