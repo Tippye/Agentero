@@ -81,7 +81,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 | 导出 | 「另存为」走系统的创建文档界面；分享走 `FileProvider` |
 | 扫描纸质文档 | 后置。常用的文档扫描组件依赖 Google 服务，国内设备上不可用 |
 
-顺带收紧 `file_paths.xml`：现在暴露的是整个外部存储根目录，改成只暴露一个专用的导出目录。
+已收紧 FileProvider 的路径映射：移除整个外部存储与整个 cache，只预留 `cache/exports/` 给显式出站副本，并保留固定 Wry 相机捕获所需的应用专属 `external-files/Pictures/`。Provider 仍非导出且仅用临时 URI 授权；映射存在不等于公开读取，不声称曾发生泄漏。当前批注 PDF 另存为使用 SAF，不依赖 FileProvider；未来出站分享需真正的副本写入/授权/清理实现，本轮没有新增该功能。详见[FileProvider 目录边界](../backend/mobile-pdf-open.md#出站-fileprovider-的目录边界)。
 
 ### A5 后台保活与通知
 
