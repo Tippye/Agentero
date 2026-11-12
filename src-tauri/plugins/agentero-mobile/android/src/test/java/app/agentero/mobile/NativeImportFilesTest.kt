@@ -80,6 +80,24 @@ class NativeImportFilesTest {
         assertEquals("paper.PDF", NativeImportFilePolicy.displayName { "paper.PDF" })
     }
 
+    @Test fun malformedUtf16MetadataIsOmittedWhileValidEmojiStillTransfersTheDescriptor() {
+        listOf("paper\uD83E.pdf", "paper\uDDEA.pdf", "paper\uDDEA\uD83E.pdf").forEach { malformed ->
+            assertNull(NativeImportFilePolicy.displayName { malformed })
+        }
+        val valid = "研究 \uD83E\uDDEA.pdf"
+        assertEquals(valid, NativeImportFilePolicy.displayName { valid })
+        val steps = mutableListOf<String>()
+        NativeImportFilePolicy.transfer(
+            descriptor = { 41 },
+            detach = { steps.add("detach"); 41 },
+            closeWrapper = { steps.add("close-wrapper") },
+            closeDetached = { steps.add("close-detached") },
+            prepare = { fd -> fd to NativeImportFilePolicy.displayName { "paper\uD83E.pdf" } },
+            deliver = { response -> assertEquals(41 to null, response); steps.add("deliver") },
+        )
+        assertEquals(listOf("detach", "close-wrapper", "deliver"), steps)
+    }
+
     @Test fun trimsOrdinarySurroundingWhitespaceWithoutChangingTheBasename() {
         assertEquals("My paper.pdf", NativeImportFilePolicy.displayName { "  My paper.pdf  " })
     }

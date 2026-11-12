@@ -5,4 +5,5 @@
     <string name="agentero_webview_guard_settings">Open settings</string>
     <string name="agentero_webview_guard_close">Close</string>
     <string name="agentero_webview_guard_settings_unavailable">System settings are unavailable.</string>
+    <string name="agentero_external_pdf_busy">A PDF is already waiting to open. Try again after it finishes.</string>
 </resources>

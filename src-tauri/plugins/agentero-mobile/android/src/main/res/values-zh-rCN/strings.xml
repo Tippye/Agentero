@@ -5,4 +5,5 @@
     <string name="agentero_webview_guard_settings">打开设置</string>
     <string name="agentero_webview_guard_close">关闭</string>
     <string name="agentero_webview_guard_settings_unavailable">无法打开系统设置。</string>
+    <string name="agentero_external_pdf_busy">已有一份 PDF 等待打开，请在完成后重试。</string>
 </resources>

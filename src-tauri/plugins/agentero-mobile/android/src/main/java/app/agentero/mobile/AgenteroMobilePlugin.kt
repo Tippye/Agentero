@@ -3,6 +3,7 @@ package app.agentero.mobile
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.PermissionState
@@ -22,10 +23,20 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val events = AndroidBackgroundEventRelay(this)
     private val connectivityEvents = ConnectivityEventRelay(this)
     private val importFiles by lazy { NativeImportFiles(activity.applicationContext) }
+    private val externalPdfs by lazy {
+        ExternalPdfIntents(activity.applicationContext) { trigger("external-pdf-pending", JSObject()) }
+    }
     private val stylus by lazy { StylusAdapterRegistry(activity, this) }
 
     override fun load(webView: WebView) {
-        activity.runOnUiThread { controller.attach(activity, events); stylus.attach(webView) }
+        activity.runOnUiThread {
+            controller.attach(activity, events); stylus.attach(webView)
+            externalPdfs.initial(activity.intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        activity.runOnUiThread { externalPdfs.receive(intent) }
     }
 
     @Command
@@ -38,6 +49,16 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun openImportFile(invoke: Invoke) = importFiles.open(invoke)
+
+    @Command
+    fun takeExternalPdf(invoke: Invoke) = onUi(invoke) {
+        val uri = externalPdfs.take()
+        if (uri == null) {
+            invoke.resolve(JSObject().put("fd", org.json.JSONObject.NULL).put("displayName", org.json.JSONObject.NULL))
+        } else {
+            importFiles.open(invoke, uri)
+        }
+    }
 
     @Command
     fun configure(invoke: Invoke) = onUi(invoke) {
@@ -105,7 +126,7 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     override fun onDestroy(activity: AppCompatActivity) {
-        activity.runOnUiThread { stylus.dispose() }
+        activity.runOnUiThread { externalPdfs.clear(); stylus.dispose() }
     }
 
     override fun onResume(activity: AppCompatActivity) {

@@ -76,7 +76,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 | 入口 | 做法 |
 |---|---|
 | 应用内选文件 | 已接入 Rust 所有的系统 PDF 选择与私有 cache 流式暂存，再复用同一入库内核；不会把整份文件读入 WebView。固定版本 fs 插件丢失 asset 子区间信息，因此 只接受 `content://`，拒绝外部结果中的普通路径或 `file://` 回退。Rust 私有适配器在打开/查名称前验证精确 provider，拒绝未知 provider、应用相同 UID 和带用户前缀的跨资料 URI，再调用 `openFileDescriptor("r")` 获取完整文件/pipe，拒绝子区间和空 descriptor；可选 `DISPLAY_NAME` 仅作受限文件名。提供器打开/查询在有界后台线程执行，临时授权在入库前复制完毕，不保存 URI、不扩张 renderer 权限。详见[论文入库](../backend/paper-import.md#平板原生-pdf-选择)；云提供器与真实设备仍待验收 |
-| 「打开方式」 | 为 PDF 加查看意图过滤器。Tauri 2.11 起移动端文件关联会触发 `RunEvent::Opened` |
+| 「打开方式」 | 已加入仅 `ACTION_VIEW` / `application/pdf` / `content` 的过滤器，采用固定 SDK 公开的 `Plugin.onNewIntent` 与插件 `load` 一次性读取启动 Intent，不依赖桌面 `RunEvent::Opened`。只接受具备当前读取授权的单份 URI；相同 URI 的单项 ClipData 可作授权运输，文字、多份和额外 stream 拒绝。原生单槽邮箱保留第一份，忙碌给本地化提示；冷暖启动不重复领取，不持久化授权、不把 URI 交给前端。当前本地 Vault 就绪后与选择器共享准入锁，复用 provider UID 校验、完整 FD、私有流式暂存与原有入库内核，内容仍须通过 PDF 标头和字节上限。仅刷新文献库，不强制切走草稿/当前论文；真实文件管理器、云提供器及冷暖启动授权仍待设备验收。详见[系统打开 PDF](../backend/mobile-pdf-open.md) |
 | 系统分享 | 加接收分享的意图过滤器（单个和多个）。主 Activity 是 `singleTask`，分享会走到已有实例。在插件里把流复制到收件箱目录，再通知前端入队。立即复制，不长期持有对方的地址授权 |
 | 导出 | 「另存为」走系统的创建文档界面；分享走 `FileProvider` |
 | 扫描纸质文档 | 后置。常用的文档扫描组件依赖 Google 服务，国内设备上不可用 |

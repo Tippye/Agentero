@@ -45,7 +45,7 @@ internal object NativeImportFilePolicy {
     /** Optional provider metadata is a name only, never a path or read authority. */
     fun displayName(read: () -> String?): String? = try {
         val raw = read()
-        if (raw == null || raw.any { it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }) {
+        if (raw == null || !wellFormedUtf16(raw) || raw.any { it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }) {
             null
         } else {
             val name = raw.trim()
@@ -56,6 +56,21 @@ internal object NativeImportFilePolicy {
         }
     } catch (_: Exception) {
         null // Metadata failure must not reject a readable selected descriptor.
+    }
+
+    private fun wellFormedUtf16(value: String): Boolean {
+        var index = 0
+        while (index < value.length) {
+            val character = value[index]
+            if (Character.isHighSurrogate(character)) {
+                if (index + 1 >= value.length || !Character.isLowSurrogate(value[index + 1])) return false
+                index += 2
+            } else {
+                if (Character.isLowSurrogate(character)) return false
+                index += 1
+            }
+        }
+        return true
     }
 
     fun <Response> transfer(
@@ -103,6 +118,15 @@ internal class NativeImportFiles(context: Context) {
                 require(NativeImportFilePolicy.validUri(it))
             }
         } catch (_: Exception) {
+            reject(invoke)
+            return
+        }
+        open(invoke, uri)
+    }
+
+    /** The URI was retained by native intent intake, never supplied by JavaScript. */
+    fun open(invoke: Invoke, uri: String) {
+        if (!NativeImportFilePolicy.validUri(uri)) {
             reject(invoke)
             return
         }
