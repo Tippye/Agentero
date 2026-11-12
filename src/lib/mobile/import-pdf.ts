@@ -15,6 +15,16 @@ export async function pickAndImportMobilePdfs(vaultPath: string) {
 	return { imported: result.papers.length, errors: result.errors };
 }
 
+/** Claim a pending system-opened PDF in Rust; null means there was no intake. */
+export async function takeAndImportOpenedMobilePdf(vaultPath: string) {
+	const result = await callApiResult(() =>
+		commands.paperImportOpenedPdf(vaultPath),
+	);
+	return result === null
+		? null
+		: { imported: result.papers.length, errors: result.errors };
+}
+
 /** Stage browser-selected files privately, then let the existing Host importer
  * own paper naming, metadata, deduplication and catalog writes. */
 export async function importMobilePdfs(vaultPath: string, files: File[]) {

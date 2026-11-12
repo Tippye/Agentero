@@ -30,6 +30,10 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 }));
 // Native transport and filesystem are test boundaries, including for the retained preview importer.
 vi.mock("@/lib/core/tauri", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/api/event", async (original) => ({
+	...(await original<typeof import("@tauri-apps/api/event")>()),
+	listen: vi.fn(async () => () => {}),
+}));
 vi.mock("@/lib/core/bindings", async (original) => {
 	const actual = await original<typeof import("@/lib/core/bindings")>();
 	return {
@@ -37,6 +41,10 @@ vi.mock("@/lib/core/bindings", async (original) => {
 		commands: {
 			...actual.commands,
 			paperImportNativePdfs: (...args: unknown[]) => io.native(...args),
+			paperImportOpenedPdf: async () => ({
+				status: "ok",
+				data: { ok: true, data: null },
+			}),
 			paperImportLocalPdf: (...args: unknown[]) => io.local(...args),
 		},
 	};

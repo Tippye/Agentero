@@ -339,6 +339,11 @@ export const commands = {
 	/**  Select PDF files with the native picker and import private streamed copies. */
 	paperImportNativePdfs: (vaultPath: string) => typedError<ApiResult<ImportLocalPdfResult_Serialize>, string>(__TAURI_INVOKE("paper_import_native_pdfs", { vaultPath })),
 	/**
+	 *  Import one pending Android-opened PDF into the foreground local Vault.
+	 *  Returns null when no native-owned document is pending, including other platforms.
+	 */
+	paperImportOpenedPdf: (vaultPath: string) => typedError<ApiResult<ImportLocalPdfResult_Serialize | null>, string>(__TAURI_INVOKE("paper_import_opened_pdf", { vaultPath })),
+	/**
 	 *  Resolve an identifier (DOI/arXiv) to metadata without importing — backs
 	 *  Edit Metadata's identifier refresh. Identifier lookup first (so a DOI /
 	 *  arXiv id is not sent to title search); S2 `publicationVenue` enriches
@@ -897,6 +902,7 @@ export const events = {
 	mcpStatus: makeEvent<McpStatusEvent>("mcp:status"),
 	mcpTunnelStatus: makeEvent<McpTunnelStatusEvent>("mcp:tunnel-status"),
 	menuInvoked: makeEvent<MenuInvokedEvent>("menu:invoked"),
+	mobileExternalPdfPending: makeEvent<MobileExternalPdfPendingEvt>("mobile:external-pdf-pending"),
 	mobileStylusAction: makeEvent<MobileStylusActionEvt>("mobile:stylus-action"),
 	mobileStylusPresence: makeEvent<MobileStylusPresenceEvt>("mobile:stylus-presence"),
 	paperAssetsReady: makeEvent<PaperAssetsReadyEvent>("paper:assets-ready"),
@@ -4478,6 +4484,8 @@ export type MigrateProgress = {
 	total: number,
 	phase: string,
 };
+
+export type MobileExternalPdfPendingEvt = null;
 
 export type MobilePdfPosition = {
 	page: number,
