@@ -171,6 +171,7 @@ dependencies = [
  "tar",
  "tauri",
  "tauri-build",
+ "tauri-plugin-agentero-mobile",
  "tauri-plugin-better-auth",
  "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
@@ -7880,6 +7881,17 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-agentero-mobile"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
