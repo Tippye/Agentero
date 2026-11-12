@@ -139,6 +139,59 @@ afterEach(async () => {
 });
 
 describe("mobile local reader", () => {
+	it("binds reading snapshots and pending PDF bytes to the current paper", async () => {
+		const observed = vi.fn();
+		await act(async () => {
+			root.render(
+				createElement(MobileReaderPage, {
+					paper,
+					vaultPath: "/private/Vault",
+					mode: "pdf",
+					active: true,
+					onNotesDirtyChange: dirty,
+					initialReadingSnapshot: { page: 7, zoom: 1.75 },
+					onReadingSnapshotChange: observed,
+				}),
+			);
+		});
+		await vi.waitFor(() => expect(state.viewer).not.toBeNull());
+		expect(state.viewer?.initialReadingSnapshot).toEqual({
+			page: 7,
+			zoom: 1.75,
+		});
+		state.viewer?.onReadingSnapshotChange?.(
+			{ page: 9, zoom: 2 },
+			"old-document",
+		);
+		expect(observed).not.toHaveBeenCalled();
+		state.viewer?.onReadingSnapshotChange?.(
+			{ page: 9, zoom: 2 },
+			"/private/Vault/papers/example",
+		);
+		expect(observed).toHaveBeenCalledWith("example", { page: 9, zoom: 2 });
+		let complete!: (value: { source: null; bytes: ArrayBuffer }) => void;
+		state.load.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					complete = resolve;
+				}),
+		);
+		await act(async () => {
+			root.render(
+				createElement(MobileReaderPage, {
+					paper: { ...paper, id: "second", path: "papers/second" },
+					vaultPath: "/private/Vault",
+					mode: "pdf",
+					active: true,
+					onNotesDirtyChange: dirty,
+				}),
+			);
+		});
+		expect(host.querySelector("[data-pdf]")).toBeNull();
+		const bytes = new ArrayBuffer(8);
+		await act(async () => complete({ source: null, bytes }));
+		expect(state.viewer?.sourceBytes).toBe(bytes);
+	});
 	it("passes local persistence paths and mounts one reader/editor across modes and width changes", async () => {
 		await render("pdf");
 		await vi.waitFor(async () => {

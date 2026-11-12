@@ -182,7 +182,10 @@ import {
 	linkPreviewDragActive,
 	subscribeLinkPreviewDrag,
 } from "@/lib/pdf/link-preview-drag";
-import type { PdfReloadPosition } from "@/lib/pdf/reload-position";
+import {
+	type PdfReadingSnapshotSeed,
+	seedPdfReadingSnapshot,
+} from "@/lib/pdf/reading-position";
 import {
 	type ActiveSelectionCard,
 	selectionAnchorKey,
@@ -223,7 +226,7 @@ function PdfReadyMark({ ok }: { ok: boolean }) {
  */
 export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 	const { t } = useTranslation("viewer");
-	const reloadPositionRef = useRef<PdfReloadPosition | null>(null);
+	const readingSeedRef = useRef<PdfReadingSnapshotSeed | null>(null);
 	const [annotationReloadRevision, setAnnotationReloadRevision] = useState(0);
 	const reloadAnnotations = useCallback(() => {
 		setAnnotationReloadRevision((revision) => revision + 1);
@@ -242,6 +245,12 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 		props.paperAbsPath ||
 		source ||
 		"pdf";
+	readingSeedRef.current = seedPdfReadingSnapshot(
+		readingSeedRef.current,
+		baseDocId,
+		props.initialReadingSnapshot,
+	);
+	const reloadPositionRef = readingSeedRef.current.position;
 	// Local buffers get a per-read revision id: the app-wide PDFium engine
 	// caches documents by `documentId`, so a reloaded buffer (TeX recompile /
 	// external overwrite) must register under a fresh id or the engine re-uses
@@ -521,6 +530,7 @@ function PdfViewerInner({
 	embeddedTargetRequest,
 	reserveCommentRail = true,
 	rememberReadingPosition = true,
+	onReadingSnapshotChange,
 	sourceBytes = null,
 	paperAbsPath = null,
 	paperRelPath = null,
@@ -720,6 +730,7 @@ function PdfViewerInner({
 		scrollRef,
 		zoomRef: zoomCapRef,
 		reloadPositionRef,
+		onReadingSnapshotChange,
 	});
 
 	// Latest-ref wrappers: the hook's helpers close over the fresh-per-render

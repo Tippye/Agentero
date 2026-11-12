@@ -26,6 +26,7 @@ import type {
 	MobileWorkspaceWidth,
 } from "@/lib/mobile/workspace";
 import type { PaperMetadata } from "@/lib/paper/types";
+import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 
 const MobilePdfViewer = lazy(() =>
 	import("@/components/viewer/pdf/pdf-viewer").then((module) => ({
@@ -40,6 +41,11 @@ export type MobileReaderPageProps = {
 	active: boolean;
 	preset?: MobileWorkspacePreset;
 	widthClass?: MobileWorkspaceWidth;
+	initialReadingSnapshot?: PdfReadingSnapshot | null;
+	onReadingSnapshotChange?: (
+		paperId: string,
+		snapshot: PdfReadingSnapshot,
+	) => void;
 	onNotesDirtyChange: (dirty: boolean) => void;
 	onInkDirtyChange?: (dirty: boolean) => void;
 	onInkModeChange?: (active: boolean) => void;
@@ -55,6 +61,8 @@ export function MobileReaderPage({
 	active,
 	preset = "read",
 	widthClass: suppliedWidth,
+	initialReadingSnapshot,
+	onReadingSnapshotChange,
 	onNotesDirtyChange,
 	onInkDirtyChange,
 	onInkModeChange,
@@ -71,6 +79,9 @@ export function MobileReaderPage({
 	const notesVisible = compare || (widthClass === "narrow" && mode === "notes");
 	const pdfVisible = compare || !notesVisible;
 	const [pdf, setPdf] = useState<{
+		paperId: string;
+		paperPath: string;
+		vaultPath: string;
 		source: string | null;
 		bytes: ArrayBuffer | null;
 	} | null>(null);
@@ -117,7 +128,13 @@ export function MobileReaderPage({
 				if (!mounted) return;
 				if (!loaded.source && !loaded.bytes)
 					setPdfError(t("reader.pdfUnavailable"));
-				else setPdf(loaded);
+				else
+					setPdf({
+						...loaded,
+						paperId: paper.id,
+						paperPath: paper.path,
+						vaultPath,
+					});
 			})
 			.catch((error) => {
 				if (mounted) {
@@ -161,7 +178,11 @@ export function MobileReaderPage({
 							</div>
 						) : (
 							<Suspense fallback={<PdfLoading />}>
-								{pdf && paths ? (
+								{pdf &&
+								paths &&
+								pdf.paperId === paper.id &&
+								pdf.paperPath === paper.path &&
+								pdf.vaultPath === vaultPath ? (
 									<MobilePdfViewer
 										source={pdf.source}
 										sourceBytes={pdf.bytes}
@@ -170,6 +191,11 @@ export function MobileReaderPage({
 										paperAbsPath={paths.paperAbsPath}
 										vaultPath={vaultPath}
 										isActive={active && pdfVisible}
+										initialReadingSnapshot={initialReadingSnapshot}
+										onReadingSnapshotChange={(snapshot, documentId) => {
+											if (documentId === paths.paperAbsPath)
+												onReadingSnapshotChange?.(paper.id, snapshot);
+										}}
 										onInkDirtyChange={onInkDirtyChange}
 										onInkModeChange={onInkModeChange}
 										onInkExport={onInkExport ?? exportInk}

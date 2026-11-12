@@ -1,4 +1,8 @@
 {
+	"route": {
+		"restoreFailed": "Could not restore the reading position.",
+		"saveFailed": "Could not save the reading position."
+	},
 	"background": {
 		"title": "Background activity",
 		"description": "System permissions and current activity on this device.",
