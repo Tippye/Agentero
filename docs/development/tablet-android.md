@@ -150,7 +150,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 **多窗口**（「在新窗口打开论文」）：
 
-- Tauri 2.11 起，在 Android 上新建窗口会创建一个新的 Activity，tao 提供了选择 Activity 的构建方法，摆放位置由系统决定。有两种形态：
+- 固定 SDK 的核对修正了早期假设：Tauri 2.12.5 公开 `activity_name`，但默认 builder 不保证新 Activity。Tao 0.37.2 可能复用可用的主 Activity，Wry 0.57.1 随后替换它的 WebView；直接选择当前 `singleTask` 的 MainActivity 也会复用实例。Android `set_focus` 在此 SDK 中尚未实现，标签/返回成功不能作为独立窗口或聚焦确认。当前不开放新窗口入口；按窗口路由持久化先由共享层接通，文档 Activity、稳定路由映射和原子预留仍待实现。目标有两种形态：
   - 独立任务窗口：新 Activity 作为单独的任务启动，并请求放到相邻窗口。在分屏和自由窗口模式下，两篇论文各占一个可独立缩放的系统窗口，最近任务里各有一项。**这是目标形态。**
   - Activity 嵌入：两个 Activity 并排在同一个任务窗口里，需要 Android 12L 以上的大屏设备和 Jetpack WindowManager 的分栏规则。应用内的并排已经由 S4 的布局提供，这种形态增益不大，不做。
 - 主 Activity 保持 `singleTask`（链接和分享要回到同一个实例），文档窗口用另一个 Activity 类。
