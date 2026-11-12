@@ -23,6 +23,19 @@ Rust 在领取前捕获规范 Vault 路径与目录身份，并取得与选择�
 
 暂存前及提交前再次核对 Vault 身份，复用同一个导入内核、去重、Catalog 写入与准备计划。旧页面的迟到结果不刷新新文献库或弹出错误。外部 PDF 成功入库后只刷新文献库，不自动切走正在阅读/编辑的文档，不替换未保存草稿，也不打开 Agent 侧栏；用户从文献库选择论文阅读。该行为不等于多窗口文档打开，也未增加 Agent 请求或未知远程操作重放。
 
+## 出站 FileProvider 的目录边界
+
+Android 的非导出 FileProvider 保留临时 URI 授权能力，但路径映射不再包含整个外部存储或整个私有 cache，只允许两个明确子目录：
+
+- `external-files-path` 的 `Pictures/`：固定 Wry 0.57.1 的 HTML 文件选择器相机捕获会通过 `getExternalFilesDir(Environment.DIRECTORY_PICTURES)` 创建临时 JPEG，再调用本应用的 FileProvider。保留这个应用专属目录，使 SDK 捕获流程仍有合法映射；它不是公共相册或外部存储根。该目录不可用或捕获创建失败时，固定 SDK 会退回普通文件选择；真实设备的捕获与回传仍需验收。
+- `cache-path` 的 `exports/`：为显式生成的出站副本预留，不能把 Vault 原件、导入暂存、凭据或其他 cache 文件直接当作可共享路径。本轮只限定映射，没有新增对外分享按钮、复制器或自动 URI 授权。
+
+Provider 仍为 `exported=false`、`grantUriPermissions=true`，authority 与系统入口均不变；路径映射本身不是公开访问授权，也不据此宣称之前发生过数据泄漏。实际出站操作仍需给指定目标最小临时权限，并遵循明确的副本所有权与清理规则。目录外路径和遍历由成熟 AndroidX FileProvider 的规范路径边界拒绝，不另写路径解析器。
+
+当前批注 PDF 的“另存为”使用系统文档创建器和 `plugin-fs` 的 SAF URI，不依赖 FileProvider，因此继续保留其目标授权及原件保护。入站 PDF 仍拒绝本应用/共享 UID 的提供器；收紧出站映射不扩大入站权限。
+
+目录收敛阶段的 29 项 PDF 另存为、笔迹导出与原生入库回归通过。验证还会检查最终 APK 内编译后的路径 XML 与 provider 声明；这些结果不等于真实相机授权、拍照回传或目标应用读取验收。
+
 ## 验证边界
 
 原生纯 JVM 策略检查覆盖动作/MIME、URI 与授权、相同/不同 ClipData、文本拒绝、VIEW 多余 stream 拒绝与 SEND 缺失/冲突 stream 的选择规则，以及邮箱的单次领取、容量、清理与冷暖启动顺序。它们不模拟 Binder 授权或提供器。Rust 复用的标头、流式上限、私有暂存及 Vault 身份检查继续回归；新增拥有者检查在等待点丢弃调用接收者，确认真实操作结束前许可与临时目录仍有效。事件契约断言唤醒序列化为 null，不含文档字段。
@@ -36,6 +49,7 @@ Rust 在领取前捕获规范 Vault 路径与目录身份，并取得与选择�
 - [Tauri Android Plugin 的公开生命周期](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/mobile/android/src/main/java/app/tauri/plugin/Plugin.kt)
 - [Tauri deep-link 插件的冷启动与 onNewIntent 处理](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/deep-link/android/src/main/java/DeepLinkPlugin.kt)
 - [Android 临时 URI 读取授权](https://developer.android.com/training/secure-file-sharing/share-file)
+- [Android 官方窄范围 FileProvider 配置建议](https://developer.android.com/privacy-and-security/risks/file-providers)与 [FileProvider 路径类型](https://developer.android.com/reference/androidx/core/content/FileProvider)；[GitHub CodePath 的相机分享目录示例](https://github.com/codepath/android_guides/wiki/Sharing-Content-with-Intents)用于对照 `getExternalFilesDir(Pictures)` 与 `external-files-path`。实际兼容路径以固定 [Wry 相机捕获实现](https://github.com/tauri-apps/wry/blob/wry-v0.57.1/src/android/kotlin/RustWebChromeClient.kt)为准。
 - [Android ACTION_VIEW](https://developer.android.com/reference/android/content/Intent#ACTION_VIEW)
 - [Android 接收分享与 IntentCompat 推荐接口](https://developer.android.com/develop/ui/compose/sharing/receive)、[MIME-only extra 分享过滤器](https://developer.android.com/training/basics/intents/filters)及 [IntentCompat](https://developer.android.com/reference/androidx/core/content/IntentCompat#getParcelableExtra(android.content.Intent,java.lang.String,java.lang.Class%3CT%3E))；已核对固定 Core 1.17.0 源码的 API 33 兼容路径。
 - [Readest 的单份/多份分享分派](https://github.com/readest/readest/blob/main/apps/readest-app/src-tauri/gen/android/app/src/main/java/com/bilingify/readest/MainActivity.kt)与 [MIME-only 分享过滤器](https://github.com/readest/readest/blob/main/apps/readest-app/src-tauri/gen/android/app/src/main/AndroidManifest.xml)：只参考系统 transport 形态，保留本应用的单份 PDF、原生 URI 所有权与授权边界。
