@@ -1,4 +1,7 @@
 //! Native Harness provider over official Typert Remote carriers at upstream 11064af.
+#[cfg(test)]
+#[path = "network_tests.rs"]
+mod network_tests;
 use super::{
     api::ServerApi,
     crypto::DeviceIdentity,
@@ -479,6 +482,19 @@ impl RemoteAgentProvider for DshRemoteProvider {
         state.hosts.clear();
         state.connected = false;
         Ok(())
+    }
+    async fn network_changed(&self) {
+        let connections: Vec<_> = self.connections.lock().await.values().cloned().collect();
+        for connection in connections {
+            let state = connection.lock().await;
+            if state.connected {
+                // Keep the selected Host and all receipts/grants. The next scoped
+                // read lazily reconnects that exact Host with existing credentials.
+                for host in state.hosts.values() {
+                    host.rpc.close().await;
+                }
+            }
+        }
     }
     async fn resume(
         &self,

@@ -90,6 +90,7 @@ struct FakeProvider {
     connects: AtomicUsize,
     disconnects: AtomicUsize,
     resumes: AtomicUsize,
+    network_hints: AtomicUsize,
     dispatches: AtomicUsize,
     reads: AtomicUsize,
     crossed_namespace: AtomicBool,
@@ -110,6 +111,7 @@ impl FakeProvider {
             connects: AtomicUsize::new(0),
             disconnects: AtomicUsize::new(0),
             resumes: AtomicUsize::new(0),
+            network_hints: AtomicUsize::new(0),
             dispatches: AtomicUsize::new(0),
             reads: AtomicUsize::new(0),
             crossed_namespace: AtomicBool::new(false),
@@ -167,6 +169,10 @@ impl RemoteAgentProvider for FakeProvider {
     async fn disconnect(&self, _: &ConnectionRef) -> Result<(), AppError> {
         self.disconnects.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    async fn network_changed(&self) {
+        self.network_hints.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn resume(&self, connection: &ConnectionRef) -> Result<ConnectionInfo, AppError> {
@@ -530,6 +536,33 @@ async fn concurrent_duplicate_operation_dispatches_once_and_conflicting_reuse_fa
         OperationOutcome::Succeeded { .. }
     ));
     assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn network_hint_preserves_disconnect_unknown_receipts_and_never_resumes() {
+    let (service, provider, connection) = setup().await;
+    let unused = Arc::new(FakeProvider::new("unused-provider"));
+    service.register(unused.clone()).unwrap();
+    provider.fail_execution.store(true, Ordering::SeqCst);
+    let request = send(&session(&connection, "harness"));
+    let before = service.execute(&request).await.unwrap();
+    assert!(matches!(before, OperationOutcome::Unknown { .. }));
+    service.network_changed().await;
+    assert_eq!(service.execute(&request).await.unwrap(), before);
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
+    service.disconnect(&connection).await.unwrap();
+    service.network_changed().await;
+    assert!(service
+        .read_session(&session(&connection, "harness"))
+        .await
+        .is_err());
+    assert_eq!(provider.connects.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.resumes.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.network_hints.load(Ordering::SeqCst), 2);
+    assert_eq!(unused.network_hints.load(Ordering::SeqCst), 2);
+    assert_eq!(unused.connects.load(Ordering::SeqCst), 0);
+    assert_eq!(unused.resumes.load(Ordering::SeqCst), 0);
+    assert_eq!(unused.dispatches.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

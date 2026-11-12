@@ -10,11 +10,11 @@ use tauri::{
 tauri::ios_plugin_binding!(init_plugin_agentero_mobile);
 
 #[cfg(any(mobile, test))]
-fn stylus_channel(
-    callback: impl Fn(NativeStylusEvent) + Send + Sync + 'static,
+fn native_channel<T: serde::de::DeserializeOwned + 'static>(
+    callback: impl Fn(T) + Send + Sync + 'static,
 ) -> tauri::ipc::Channel<tauri::ipc::InvokeResponseBody> {
     tauri::ipc::Channel::new(move |body| {
-        let event: Result<NativeStylusEvent, _> = match body {
+        let event: Result<T, _> = match body {
             tauri::ipc::InvokeResponseBody::Json(json) => serde_json::from_str(&json),
             tauri::ipc::InvokeResponseBody::Raw(bytes) => serde_json::from_slice(&bytes),
         };
@@ -75,7 +75,7 @@ impl<R: Runtime> MobileBackground<R> {
         &self,
         callback: impl Fn(NativeStylusEvent) + Send + Sync + 'static,
     ) -> Result<(), String> {
-        let handler = stylus_channel(callback);
+        let handler = native_channel::<NativeStylusEvent>(callback);
         self.handle
             .run_mobile_plugin_async::<serde_json::Value>(
                 "registerListener",
@@ -84,6 +84,39 @@ impl<R: Runtime> MobileBackground<R> {
             .await
             .map(|_| ())
             .map_err(|error| error.to_string())
+    }
+
+    /// Register before reading the snapshot so no native path change is lost.
+    #[cfg(mobile)]
+    pub async fn on_connectivity_changed(
+        &self,
+        callback: impl Fn(ConnectivityHint) + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let handler = native_channel::<ConnectivityHint>(callback);
+        self.handle
+            .run_mobile_plugin_async::<serde_json::Value>(
+                "registerListener",
+                serde_json::json!({"event":"connectivity-changed", "handler":handler}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn connectivity_state(&self) -> Result<ConnectivityHint, String> {
+        #[cfg(mobile)]
+        {
+            self.handle
+                .run_mobile_plugin_async("connectivityState", serde_json::json!({}))
+                .await
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(desktop)]
+        {
+            Ok(ConnectivityHint {
+                generation: "0".into(),
+            })
+        }
     }
 
     pub async fn stylus_state(&self) -> Result<StylusState, String> {
@@ -192,10 +225,53 @@ mod stylus_channel_tests {
     const PRESENCE: &str = r#"{"kind":"presence","windowLabel":"main","targetToken":"fcb7385a-e017-49d8-99dd-80f1c4426a71","presence":{"available":true,"proximity":null,"source":"nativeInputDevice","adapterId":"android-input-device"}}"#;
 
     #[test]
+    fn connectivity_channel_preserves_decimal_generation_and_survives_bad_payloads() {
+        let received = Arc::new(Mutex::new(Vec::<ConnectivityHint>::new()));
+        let output = received.clone();
+        let channel =
+            native_channel::<ConnectivityHint>(move |hint| output.lock().unwrap().push(hint));
+        for invalid in [
+            "null",
+            "{}",
+            "not-json",
+            r#"{"generation":1}"#,
+            r#"{"generation":"1","status":"online"}"#,
+        ] {
+            channel
+                .send(InvokeResponseBody::Json(invalid.into()))
+                .unwrap();
+            channel
+                .send(InvokeResponseBody::Raw(invalid.as_bytes().to_vec()))
+                .unwrap();
+        }
+        channel.send(InvokeResponseBody::Raw(vec![0xff])).unwrap();
+        assert!(received.lock().unwrap().is_empty());
+        let payload = r#"{"generation":"9007199254740993"}"#;
+        channel
+            .send(InvokeResponseBody::Json(payload.into()))
+            .unwrap();
+        channel
+            .send(InvokeResponseBody::Raw(payload.as_bytes().to_vec()))
+            .unwrap();
+        assert_eq!(
+            received.lock().unwrap().as_slice(),
+            &[
+                ConnectivityHint {
+                    generation: "9007199254740993".into()
+                },
+                ConnectivityHint {
+                    generation: "9007199254740993".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn native_channel_decodes_json_and_raw_action_and_presence() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let received = events.clone();
-        let channel = stylus_channel(move |event| received.lock().unwrap().push(event));
+        let channel =
+            native_channel::<NativeStylusEvent>(move |event| received.lock().unwrap().push(event));
         for wire in [ACTION, PRESENCE] {
             channel.send(InvokeResponseBody::Json(wire.into())).unwrap();
             channel
@@ -228,7 +304,8 @@ mod stylus_channel_tests {
     fn malformed_and_unknown_native_payloads_do_not_dispatch_or_close_channel() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let received = events.clone();
-        let channel = stylus_channel(move |event| received.lock().unwrap().push(event));
+        let channel =
+            native_channel::<NativeStylusEvent>(move |event| received.lock().unwrap().push(event));
         for wire in [
             "not-json".to_string(),
             "null".to_string(),

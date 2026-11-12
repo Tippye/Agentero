@@ -275,6 +275,22 @@ impl RemoteAgentService {
             .clone()
     }
 
+    /// Notify registered transport owners without changing connection or journal
+    /// state. Provider callbacks cannot authorize an explicit reconnect.
+    pub async fn network_changed(&self) {
+        let adapters: Vec<_> = match self.registry.read() {
+            Ok(registry) => registry
+                .providers
+                .values()
+                .map(|provider| provider.adapter.clone())
+                .collect(),
+            Err(_) => return,
+        };
+        for adapter in adapters {
+            adapter.network_changed().await;
+        }
+    }
+
     pub async fn connect(&self, request: &ConnectRequest) -> Result<ConnectionInfo, AppError> {
         let provider = self.provider(&request.connection)?;
         if provider.descriptor.config_version != request.config_version {

@@ -469,6 +469,7 @@ async fn generation_changed_during_read_is_rejected_before_challenge_proof_or_ne
         .clone();
     assert!(sender
         .send(ClientCommand::Rpc {
+            transport_epoch: 1,
             id: "queued".into(),
             method: "test".into(),
             params: Value::Null,
@@ -509,4 +510,325 @@ async fn generation_changed_during_read_is_rejected_before_challenge_proof_or_ne
         .unwrap_err()
         .to_string()
         .contains("may already have executed"));
+}
+
+async fn paired_runtime(fixture: &Fixture) -> (Arc<BridgeClientController>, ClientLaunch) {
+    fixture.seed_native(&BridgeClientIdentity::create());
+    fixture.profiles().save(&profile("Research")).unwrap();
+    let controller = controller(fixture);
+    let mut launch = None;
+    controller
+        .resume_owned(|value| launch = Some(value))
+        .await
+        .unwrap();
+    (controller, launch.unwrap())
+}
+
+#[tokio::test]
+async fn network_hint_never_restores_disconnected_profiles_or_reads_identity() {
+    let fixture = Fixture::new();
+    fixture.profiles().save(&profile("SavedOnly")).unwrap();
+    let raw = fixture.profiles().snapshot().unwrap();
+    *fixture.backend.read_fault.lock().unwrap() = Some(CredentialError::Locked);
+    let controller = controller(&fixture);
+    for _ in 0..32 {
+        controller.network_changed().unwrap();
+    }
+    assert!(controller.state.lock().unwrap().runtime.is_none());
+    assert_eq!(controller.state.lock().unwrap().generation, 0);
+    assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), 0);
+    assert!(fixture.backend.writes.lock().unwrap().is_empty());
+    assert_eq!(fixture.profiles().snapshot().unwrap(), raw);
+
+    *fixture.backend.read_fault.lock().unwrap() = None;
+    fixture.seed_native(&BridgeClientIdentity::create());
+    let mut launch = None;
+    controller
+        .resume_owned(|value| launch = Some(value))
+        .await
+        .unwrap();
+    let launch = launch.unwrap();
+    controller.disconnect().unwrap();
+    let reads = fixture.backend.reads.load(Ordering::SeqCst);
+    controller.network_changed().unwrap();
+    assert!(*launch.stop.borrow());
+    assert!(!launch.owner.is_current());
+    assert!(controller.state.lock().unwrap().runtime.is_none());
+    assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(fixture.profiles().snapshot().unwrap(), raw);
+    controller.reset_identity().await.unwrap();
+    let reads = fixture.backend.reads.load(Ordering::SeqCst);
+    controller.network_changed().unwrap();
+    assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), reads);
+    assert!(controller.state.lock().unwrap().runtime.is_none());
+    assert!(fixture.profiles().snapshot().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn network_hint_cancels_connect_handshake_read_and_write_without_reusing_old_proof() {
+    for phase in ["connect", "handshake", "session read", "session write"] {
+        let fixture = Fixture::new();
+        let (controller, launch) = paired_runtime(&fixture).await;
+        let raw = fixture.profiles().snapshot().unwrap();
+        let reads = fixture.backend.reads.load(Ordering::SeqCst);
+        let mut network = launch.owner.network.clone();
+        let attempt = launch.owner.begin_transport(&mut network).unwrap();
+        let old = attempt.clone();
+        let mut stop = launch.stop.clone();
+        let (entered, ready) = oneshot::channel();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        struct PendingIo(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for PendingIo {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let did_drop = dropped.clone();
+        let task = tokio::spawn(async move {
+            attempt
+                .while_current(&mut stop, async {
+                    let _io = PendingIo(did_drop);
+                    let _ = entered.send(());
+                    std::future::pending::<()>().await;
+                })
+                .await
+        });
+        ready.await.unwrap();
+        controller.network_changed().unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect(phase)
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("may already have executed"),
+            "{phase}"
+        );
+        assert!(dropped.load(Ordering::SeqCst), "{phase}");
+        assert!(!old.is_current());
+        assert!(old
+            .sign_challenge(&launch.identity, b"late challenge")
+            .is_err());
+        assert!(!old.mark_paired().await.unwrap());
+        assert!(old.ready().is_err());
+        assert!(controller
+            .rpc("agent_run_once".into(), Value::Null)
+            .await
+            .is_err());
+        let next = launch.owner.begin_transport(&mut network).unwrap();
+        let mut stop = launch.stop.clone();
+        assert_eq!(next.while_current(&mut stop, async { 7 }).await.unwrap(), 7);
+        assert!(next
+            .sign_challenge(&launch.identity, b"new challenge")
+            .is_ok());
+        assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), reads);
+        assert_eq!(fixture.profiles().snapshot().unwrap(), raw);
+    }
+}
+
+#[tokio::test]
+async fn blocked_old_rpc_keeps_admission_epoch_after_drain_and_new_session_readiness() {
+    let fixture = Fixture::new();
+    let (controller, mut launch) = paired_runtime(&fixture).await;
+    let mut network = launch.owner.network.clone();
+    let old = launch.owner.begin_transport(&mut network).unwrap();
+    old.ready().unwrap();
+    let (sender, epoch) = {
+        let state = controller.state.lock().unwrap();
+        let runtime = state.runtime.as_ref().unwrap();
+        (runtime.commands.clone(), runtime.transport_epoch)
+    };
+    let mut queued = Vec::new();
+    for index in 0..64 {
+        let (response, reply) = oneshot::channel();
+        sender
+            .send(ClientCommand::Rpc {
+                transport_epoch: epoch,
+                id: format!("old-{index}"),
+                method: "agent_run_once".into(),
+                params: Value::Null,
+                response,
+            })
+            .await
+            .unwrap();
+        queued.push(reply);
+    }
+    assert_eq!(sender.capacity(), 0);
+    let mut blocked = Box::pin(controller.rpc("old blocked mutation".into(), Value::Null));
+    assert!(futures_util::poll!(blocked.as_mut()).is_pending());
+    controller.network_changed().unwrap();
+    fail_queued(&mut launch.commands);
+    for reply in queued {
+        assert!(reply.await.unwrap().is_err());
+    }
+    let next = launch.owner.begin_transport(&mut network).unwrap();
+    assert!(controller
+        .rpc("too early".into(), Value::Null)
+        .await
+        .is_err());
+    next.ready().unwrap();
+    // The pre-hint producer resumes only after the one-time drain and after the
+    // next session is ready. It still carries the old epoch, never a fresh one.
+    assert!(futures_util::poll!(blocked.as_mut()).is_pending());
+    let ClientCommand::Rpc {
+        transport_epoch,
+        method,
+        response,
+        ..
+    } = launch.commands.recv().await.unwrap();
+    assert_eq!(method, "old blocked mutation");
+    assert_eq!(transport_epoch, epoch);
+    assert!(!next.accepts_command(transport_epoch));
+    response.send(Err(transport_interrupted())).unwrap();
+    assert!(blocked
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("may already have executed"));
+
+    let mut fresh = Box::pin(controller.rpc("fresh user read".into(), Value::Null));
+    assert!(futures_util::poll!(fresh.as_mut()).is_pending());
+    let ClientCommand::Rpc {
+        transport_epoch,
+        method,
+        response,
+        ..
+    } = launch.commands.recv().await.unwrap();
+    assert_eq!(method, "fresh user read");
+    assert!(next.accepts_command(transport_epoch));
+    response
+        .send(Ok(serde_json::json!({"fresh": true})))
+        .unwrap();
+    assert_eq!(fresh.await.unwrap(), serde_json::json!({"fresh": true}));
+}
+
+#[tokio::test]
+async fn network_bursts_wake_existing_backoff_once_without_new_runtime_or_secret_access() {
+    let fixture = Fixture::new();
+    let (controller, launch) = paired_runtime(&fixture).await;
+    let reads = fixture.backend.reads.load(Ordering::SeqCst);
+    let raw = fixture.profiles().snapshot().unwrap();
+    let generation = controller.state.lock().unwrap().generation;
+    let sender = controller
+        .state
+        .lock()
+        .unwrap()
+        .runtime
+        .as_ref()
+        .unwrap()
+        .commands
+        .clone();
+    let mut network = launch.owner.network.clone();
+    let mut stop = launch.stop.clone();
+    let mut backoff = Box::pin(wait_for_retry(&launch.owner, &mut stop, &mut network));
+    assert!(futures_util::poll!(backoff.as_mut()).is_pending());
+    for _ in 0..64 {
+        controller.network_changed().unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(1), backoff)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!network.has_changed().unwrap());
+    let next = launch.owner.begin_transport(&mut network).unwrap();
+    let state = controller.state.lock().unwrap();
+    let runtime = state.runtime.as_ref().unwrap();
+    assert_eq!(state.generation, generation);
+    assert!(runtime.commands.same_channel(&sender));
+    assert_eq!(next.transport_epoch, Some(runtime.transport_epoch));
+    assert_eq!(runtime.transport_epoch, 65);
+    assert!(!runtime.accepting);
+    drop(state);
+    assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(fixture.profiles().snapshot().unwrap(), raw);
+}
+
+#[tokio::test]
+async fn network_hint_parks_unpaired_candidate_and_rejects_pair_ack_waiting_for_lifecycle() {
+    let fixture = Fixture::new();
+    fixture.seed_native(&BridgeClientIdentity::create());
+    fixture.profiles().save(&profile("OldSaved")).unwrap();
+    let raw = fixture.profiles().snapshot().unwrap();
+    let controller = controller(&fixture);
+    let candidate = profile("ExplicitCandidate");
+    let mut launch = None;
+    controller
+        .connect_owned(candidate.offer_url, candidate.device_name, |value| {
+            launch = Some(value)
+        })
+        .await
+        .unwrap();
+    let launch = launch.unwrap();
+    let mut network = launch.owner.network.clone();
+    let attempt = launch.owner.begin_transport(&mut network).unwrap();
+    let guard = controller.lifecycle.lock().await;
+    let (entered, ready) = oneshot::channel();
+    let ack = tokio::spawn(async move {
+        let _ = entered.send(());
+        attempt.mark_paired().await
+    });
+    ready.await.unwrap();
+    let reads = fixture.backend.reads.load(Ordering::SeqCst);
+    controller.network_changed().unwrap();
+    drop(guard);
+    assert!(!ack.await.unwrap().unwrap());
+    assert!(*launch.stop.borrow());
+    assert!(!launch.owner.is_current());
+    assert!(launch.owner.begin_transport(&mut network).is_err());
+    let status = controller.status().unwrap();
+    assert!(!status.connected && !status.paired);
+    assert!(status
+        .last_error
+        .unwrap()
+        .contains("retry pairing explicitly"));
+    let epoch = controller
+        .state
+        .lock()
+        .unwrap()
+        .runtime
+        .as_ref()
+        .unwrap()
+        .transport_epoch;
+    controller.network_changed().unwrap();
+    assert_eq!(
+        controller
+            .state
+            .lock()
+            .unwrap()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .transport_epoch,
+        epoch
+    );
+    assert!(
+        !controller
+            .resume_owned(|_| panic!("visibility resumed parked PairRequest"))
+            .await
+            .unwrap()
+            .paired
+    );
+    assert_eq!(fixture.backend.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(fixture.profiles().snapshot().unwrap(), raw);
+}
+
+#[tokio::test]
+async fn normal_socket_retirement_also_fences_old_queue_without_bypassing_backoff() {
+    let fixture = Fixture::new();
+    let (controller, launch) = paired_runtime(&fixture).await;
+    let mut network = launch.owner.network.clone();
+    let old = launch.owner.begin_transport(&mut network).unwrap();
+    old.ready().unwrap();
+    let epoch = old.transport_epoch.unwrap();
+    old.retire_transport().unwrap();
+    assert!(!old.is_current());
+    assert!(!network.has_changed().unwrap());
+    assert!(controller
+        .rpc("offline mutation".into(), Value::Null)
+        .await
+        .is_err());
+    let next = launch.owner.begin_transport(&mut network).unwrap();
+    next.ready().unwrap();
+    assert!(!next.accepts_command(epoch));
+    assert!(next.accepts_command(next.transport_epoch.unwrap()));
 }

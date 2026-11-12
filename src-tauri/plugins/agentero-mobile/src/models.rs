@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Process-local change counter, not a claim of Internet or Host reachability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConnectivityHint {
+    pub generation: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum BackgroundPlatform {
