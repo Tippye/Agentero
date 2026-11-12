@@ -31,6 +31,19 @@
 // read by Rust code.
 #![allow(dead_code)]
 
+#[derive(serde::Serialize, specta::Type, tauri_specta::Event)]
+#[serde(transparent)]
+#[tauri_specta(event_name = "mobile:external-pdf-pending")]
+pub struct MobileExternalPdfPendingEvt(pub ());
+
+#[test]
+fn external_pdf_wake_event_contains_no_document_payload() {
+    assert_eq!(
+        serde_json::to_value(MobileExternalPdfPendingEvt(())).unwrap(),
+        serde_json::to_value(()).unwrap()
+    );
+}
+
 #[derive(specta::Type, tauri_specta::Event)]
 #[tauri_specta(event_name = "mobile:stylus-action")]
 pub struct MobileStylusActionEvt(pub tauri_plugin_agentero_mobile::StylusActionEvent);
@@ -467,6 +480,7 @@ use std::path::{Path, PathBuf};
 fn registered_event_names() -> BTreeSet<String> {
     use tauri_specta::Event as _;
     let mut names: Vec<&str> = vec![
+        MobileExternalPdfPendingEvt::NAME,
         MobileStylusActionEvt::NAME,
         MobileStylusPresenceEvt::NAME,
         JobOfferEvent::NAME,

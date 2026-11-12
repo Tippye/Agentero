@@ -113,6 +113,7 @@ vi.mock("@/components/mobile/hooks/use-pair-offer-links", () => ({
 vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
 vi.mock("@/lib/mobile/import-pdf", () => ({
 	importMobilePdfs: state.importPdfs,
+	takeAndImportOpenedMobilePdf: vi.fn(async () => null),
 }));
 vi.mock("@/lib/mobile/paper-files", () => ({
 	loadMobilePaperPdf: state.load,

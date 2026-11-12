@@ -148,6 +148,7 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::paper::import::commands::skill_discard,
             crate::features::paper::import::commands::paper_import_local_pdf,
             crate::features::paper::import::commands::paper_import_native_pdfs,
+            crate::features::paper::import::commands::paper_import_opened_pdf,
             crate::features::paper::import::commands::paper_resolve_identifier,
             crate::features::paper::import::commands::paper_stage_import_file,
             crate::features::paper::import::commands::notes_template_seed,
@@ -345,6 +346,7 @@ pub(crate) fn export_typescript_bindings() {
         // carry `event_name` matching each literal so `events.*` in
         // bindings.ts listens on the same wire names.
         .events(tauri_specta::collect_events![
+            crate::app::events_contract::MobileExternalPdfPendingEvt,
             crate::app::events_contract::MobileStylusActionEvt,
             crate::app::events_contract::MobileStylusPresenceEvt,
             crate::app::events_contract::JobOfferEvent,

@@ -248,6 +248,27 @@ pub async fn paper_import_native_pdfs(
     Ok(op.finish_result(result))
 }
 
+/// Import one pending Android-opened PDF into the foreground local Vault.
+/// Returns null when no native-owned document is pending, including other platforms.
+#[tauri::command]
+#[specta::specta]
+pub async fn paper_import_opened_pdf(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    vault_path: String,
+) -> Result<ApiResult<Option<ImportLocalPdfResult>>, String> {
+    let op = OpTimer::start("paper_import_opened_pdf");
+    let result = if window.label() == "main" {
+        super::native_picker::import_opened(app, vault_path).await
+    } else {
+        Err(AppError::domain(
+            "paper_open_unavailable",
+            "Opened PDF import requires the main application window",
+        ))
+    };
+    Ok(op.finish_result(result))
+}
+
 /// Stage a path-less OS drop (File bytes as base64) into `~/.agentero/import-tmp/`.
 #[tauri::command]
 #[specta::specta]

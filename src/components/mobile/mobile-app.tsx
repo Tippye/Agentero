@@ -22,6 +22,7 @@ import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
 import { useMobileBackLayer } from "@/components/mobile/hooks/use-mobile-back-layer";
+import { useMobileExternalPdfs } from "@/components/mobile/hooks/use-mobile-external-pdfs";
 import { useMobilePaperSync } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { useMobilePapers } from "@/components/mobile/hooks/use-mobile-papers";
 import { useMobileRoute } from "@/components/mobile/hooks/use-mobile-route";
@@ -178,6 +179,8 @@ export default function MobileApp() {
 		target.mounted = true;
 		target.vaultPath = vaultPath;
 		target.epoch++;
+		// A committed new target owns its busy UI; old operations keep admission only.
+		setImporting(false);
 		return () => {
 			target.mounted = false;
 			target.epoch++;
@@ -186,6 +189,12 @@ export default function MobileApp() {
 	useLayoutEffect(() => {
 		importTarget.current.refresh = refresh;
 	}, [refresh]);
+	const externalPdfWake = useMobileExternalPdfs({
+		vaultPath,
+		admission: importAdmission,
+		target: importTarget,
+		setImporting,
+	});
 	const visiblePapers = useMemo(
 		() => filterMobilePapers(papers, libraryQuery, selectedTag),
 		[papers, libraryQuery, selectedTag],
@@ -519,7 +528,8 @@ export default function MobileApp() {
 				report(errorText(error));
 			} finally {
 				importAdmission.current = false;
-				if (target.mounted) setImporting(false);
+				if (current()) setImporting(false);
+				externalPdfWake();
 			}
 		}
 	};
