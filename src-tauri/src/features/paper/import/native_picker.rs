@@ -451,23 +451,21 @@ fn open_android_selection(
     app: &tauri::AppHandle,
     picked: &FilePath,
 ) -> Result<(std::fs::File, Option<String>), &'static str> {
+    let uri = android_document_uri(picked)?;
+    app.try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
+        .ok_or("Native document access is unavailable")?
+        .open_import_file(uri)
+        .map(|opened| (opened.file, opened.display_name))
+        .map_err(|_| "This document provider cannot provide a whole PDF file")
+}
+
+// ACTION_GET_CONTENT results come from another provider, not a trusted path
+// picker. Never let a provider name an app-private file through file:// or Path.
+#[cfg(any(target_os = "android", test))]
+fn android_document_uri(picked: &FilePath) -> Result<String, &'static str> {
     match picked {
-        FilePath::Url(url) if url.scheme() == "content" => app
-            .try_state::<tauri_plugin_agentero_mobile::MobileBackground<tauri::Wry>>()
-            .ok_or("Native document access is unavailable")?
-            .open_import_file(url.to_string())
-            .map(|opened| (opened.file, opened.display_name))
-            .map_err(|_| "This document provider cannot provide a whole PDF file"),
-        FilePath::Url(url) if url.scheme() == "file" => {
-            let path = url.to_file_path().map_err(|_| "Invalid selected file")?;
-            std::fs::File::open(path)
-                .map(|file| (file, None))
-                .map_err(|_| "Unable to read the selected PDF")
-        }
-        FilePath::Path(path) => std::fs::File::open(path)
-            .map(|file| (file, None))
-            .map_err(|_| "Unable to read the selected PDF"),
-        FilePath::Url(_) => Err("This document provider is unsupported"),
+        FilePath::Url(url) if url.scheme() == "content" => Ok(url.to_string()),
+        _ => Err("Android PDF selection requires a content document URI"),
     }
 }
 
@@ -686,6 +684,35 @@ mod tests {
         assert_eq!(limits.read, 12);
         assert_eq!(fs::read_dir(private.path()).unwrap().count(), 0);
         assert_eq!(fs::read(&selected).unwrap(), bytes);
+    }
+    #[test]
+    fn android_provider_results_require_content_uri_before_any_file_open() {
+        let private = tempfile::tempdir().unwrap();
+        let source = private.path().join("private.pdf");
+        let bytes = b"%PDF-1.7\napp-private source";
+        fs::write(&source, bytes).unwrap();
+        let content =
+            FilePath::Url(url::Url::parse("content://documents/selected-capability").unwrap());
+        assert_eq!(
+            android_document_uri(&content).unwrap(),
+            "content://documents/selected-capability"
+        );
+        let open_count = AtomicUsize::new(0);
+        for picked in [
+            FilePath::Url(url::Url::from_file_path(&source).unwrap()),
+            FilePath::Path(source.clone()),
+            FilePath::Path(PathBuf::from("relative.pdf")),
+            FilePath::Url(url::Url::parse("http://example.invalid/private.pdf").unwrap()),
+            FilePath::Url(url::Url::parse("https://example.invalid/private.pdf").unwrap()),
+        ] {
+            let opened = android_document_uri(&picked).and_then(|_| {
+                open_count.fetch_add(1, Ordering::SeqCst);
+                fs::File::open(&source).map_err(|_| "unexpected opener failure")
+            });
+            assert!(opened.is_err());
+        }
+        assert_eq!(open_count.load(Ordering::SeqCst), 0);
+        assert_eq!(fs::read(&source).unwrap(), bytes);
     }
     #[test]
     fn original_filename_and_absent_overrides_preserve_core_deferred_recognition() {
