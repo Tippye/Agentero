@@ -256,6 +256,7 @@
 		"importToFolder": "Import to folder",
 		"comingSoonFor": "{{label}} is coming soon.",
 		"modelscope": "ModelScope Papers",
+		"huggingface": "Hugging Face Daily Papers",
 		"pwc": {
 			"label": "Papers with Code"
 		},

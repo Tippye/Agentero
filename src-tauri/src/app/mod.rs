@@ -239,6 +239,12 @@ pub fn run() {
                 crate::features::paper::discovery::proxy::modelscope::handle(request, responder);
             },
         )
+        .register_asynchronous_uri_scheme_protocol(
+            "agentero-huggingface",
+            |_ctx, request, responder| {
+                crate::features::paper::discovery::proxy::huggingface::handle(request, responder);
+            },
+        )
         .register_asynchronous_uri_scheme_protocol("agentero-pwc", |_ctx, request, responder| {
             crate::features::paper::discovery::proxy::pwc::handle(request, responder);
         })

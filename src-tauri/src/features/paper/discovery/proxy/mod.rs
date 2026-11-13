@@ -12,6 +12,8 @@
 #[cfg(feature = "desktop")]
 pub mod arxiv;
 #[cfg(feature = "desktop")]
+pub mod huggingface;
+#[cfg(feature = "desktop")]
 pub mod modelscope;
 #[cfg(feature = "desktop")]
 pub mod pwc;
