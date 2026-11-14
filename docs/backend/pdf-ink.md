@@ -6,7 +6,7 @@
 
 版本为 1。每页包含 `strokes` 和 `tombstones`；缺失一笔不代表删除。笔迹有 UUID、页码、工具、RGBA、基准宽度、点序列、Lamport revision 和创建/更新时间。坐标与宽度使用未旋转的可见 CropBox 左上角、向右/向下的 PDF 点空间；原始 `/Rotate` 由现有页面框架处理，不能存屏幕坐标。压力为 `[0,1]` 或 `null`，零压力与设备未提供压力不同。点时间是笔内经过时间，倾角成对出现。
 
-逻辑版本由 Rust 基于当前文件已观察的最大 counter 递增，actor 是配置根 `ink/replica-id` 的非空 UUID。actor 通过无覆盖发布、文件与父目录 flush 保持跨窗口/重启稳定；配置根、最终目录和文件均须位于 Vault 外。已有损坏记录、符号链接、类型错误或存储失败都不会被随机新 actor 替换。
+逻辑版本由 Rust 基于当前文件已观察的最大 counter 递增，actor 是配置根 `ink/replica-id` 的非空 UUID。actor 通过无覆盖发布、文件与父目录 flush 保持跨窗口/重启稳定；目录 flush 仅覆盖 `ink/` 与应用配置根，不向上遍历应用沙箱外的祖先。Android 的 Tauri 配置根是应用 dataDir，继续打开其父级 `/data/user/0` 会因权限失败而阻止笔迹保存，即使身份文件已经发布也会在重载时再次失败。配置根、最终目录和文件均须位于 Vault 外。已有损坏记录、符号链接、类型错误或存储失败都不会被随机新 actor 替换。
 
 ## IPC 与保存
 
