@@ -215,7 +215,13 @@ iOS Core 的既有 Library 数据根与 Tauri appDataDir 不完全相同；原�
 
 共享宿主 951 通过、10 项既有环境忽略；全量前端 3573 通过、10 项既有跳过；类型、依赖、绑定/事件与严格 Clippy 通过；共享 mobile Rust 路径完成 Android ARM64 完整构建。macOS 移动预览完成启动/建库，但控制服务无法激活或捕获窗口，未计可见 PDF 绘制验收。当前仍缺完整 Xcode/iPhoneOS SDK，未生成 IPA、未验证 iOS 目标或 Pencil/前后台真实 API；TestFlight 自动发布保持冻结。
 
-## 8. 参考
+## 8. 论文滑动操作、设置页与广场工具栏同步（2026-11-14）
+
+已合入共享分支 `260d128af`（iOS merge `8535aa332`）：文献库论文行左滑操作层（本阶段仅删除，移入 Vault 回收站并二次确认）、按电脑端结构聚合的移动设置页（外观、翻译、排版、同步、后台、关于；侧栏单入口）、以及广场标题/来源下拉/刷新/图标式打开浏览器合并到一行并移除广场魔棒。翻译与排版仍只使用远程 API，本地 ONNX/OCR/Agent 回退不进入移动设置页。
+
+共享全量前端 463 文件、3587 项通过、10 项既有跳过；TypeScript、依赖图、scoped BIOME 通过；本轮无 Rust 改动。macOS 移动预览可启动并创建私有库，但桌面控制服务无法激活/捕获窗口，因此不计入滑动、删除确认、设置页或广场 header 的可见视觉验收。当前环境仍缺完整 Xcode/iPhoneOS SDK，未生成 IPA、未验证 iOS 目标或真实设备；TestFlight 自动发布保持冻结。
+
+## 9. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - 现有 iOS 发布流程：[../test/ios-testflight.md](../test/ios-testflight.md)
