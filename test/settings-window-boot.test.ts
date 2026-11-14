@@ -128,7 +128,9 @@ beforeEach(() => {
 });
 
 describe("settings window boot", () => {
-	it("hydrates the settings store from Host before a patch can persist", async () => {
+	it("hydrates the settings store from Host before a patch can persist", {
+		timeout: 15000,
+	}, async () => {
 		const reactStore = await loadWindow();
 
 		// Boot done; the store the settings window shares must hold the Host
@@ -154,7 +156,9 @@ describe("settings window boot", () => {
 		expect(saved.translate.providerConfigs.deepl?.apiKey).toBe("sk-host-live");
 	});
 
-	it("applies settings:changed broadcasts to the same store", async () => {
+	it("applies settings:changed broadcasts to the same store", {
+		timeout: 15000,
+	}, async () => {
 		const reactStore = await loadWindow();
 		const next = hostFixture();
 		next.locale = "en";

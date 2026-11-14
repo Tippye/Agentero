@@ -5,15 +5,55 @@ import {
 	CloudDownload,
 	LoaderCircle,
 	Pin,
+	Trash2,
 } from "lucide-react";
-import { useMemo } from "react";
+import { type TouchEvent, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MobilePaperSyncState } from "@/components/mobile/hooks/use-mobile-paper-sync";
 import { PaperTitle } from "@/components/paper/paper-title";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Shimmer } from "@/components/ui/shimmer";
 import { cn } from "@/lib/core/utils";
 import type { PaperMetadata } from "@/lib/paper/types";
+
+/** Width of the revealed row actions; must match the action layer class below. */
+const ACTION_WIDTH_PX = 72;
+/** A release past this offset keeps the row open. */
+const OPEN_THRESHOLD_PX = 36;
+/** Horizontal slop before a touch counts as a row swipe. */
+const SWIPE_SLOP_PX = 8;
+/** A click right after a committed swipe is the swipe's own click, not a tap. */
+const CLICK_SUPPRESS_MS = 400;
+/** Keeps vertical scrolling native: the browser owns pan-y, we own the rest. */
+const ROW_TOUCH_ACTION = { touchAction: "pan-y" } as const;
+
+type RowSwipe = {
+	key: string;
+	offset: number;
+	dragging: boolean;
+};
+
+type SwipeGesture = {
+	key: string;
+	startX: number;
+	startY: number;
+	startOffset: number;
+	offset: number;
+	startTime: number;
+	lastX: number;
+	decided: boolean;
+	otherOpen: boolean;
+};
+
+function rowKeyOf(paper: PaperMetadata) {
+	return paper.path ?? paper.id;
+}
 
 export function MobileLibraryPage({
 	papers,
@@ -24,6 +64,7 @@ export function MobileLibraryPage({
 	syncStates = {},
 	onPinChange,
 	syncProgress,
+	onDeletePaper,
 }: {
 	papers: PaperMetadata[];
 	loading: boolean;
@@ -33,8 +74,18 @@ export function MobileLibraryPage({
 	syncStates?: Record<string, MobilePaperSyncState>;
 	onPinChange?: (paper: PaperMetadata, pinned: boolean) => void;
 	syncProgress?: string | null;
+	onDeletePaper?: (paper: PaperMetadata) => Promise<void>;
 }) {
-	const { t } = useTranslation("mobile");
+	const { t } = useTranslation(["mobile", "common"]);
+	const [openKey, setOpenKey] = useState<string | null>(null);
+	const [drag, setDrag] = useState<RowSwipe | null>(null);
+	const [pendingDelete, setPendingDelete] = useState<PaperMetadata | null>(
+		null,
+	);
+	const [busy, setBusy] = useState(false);
+	const gesture = useRef<SwipeGesture | null>(null);
+	const suppressClick = useRef<{ key: string; until: number } | null>(null);
+	const busyRef = useRef(false);
 	const filtered = useMemo(() => {
 		const normalized = query.trim().toLowerCase();
 		if (!normalized) return papers;
@@ -44,6 +95,133 @@ export function MobileLibraryPage({
 				.includes(normalized),
 		);
 	}, [papers, query]);
+
+	const shouldSuppressClick = (rowKey: string) => {
+		const suppressed = suppressClick.current;
+		return (
+			suppressed !== null &&
+			suppressed.key === rowKey &&
+			Date.now() < suppressed.until
+		);
+	};
+
+	const handleTouchStart = (rowKey: string, event: TouchEvent<HTMLElement>) => {
+		if (!onDeletePaper) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		// A fresh touch is a deliberate tap, so it ends the post-swipe click guard.
+		suppressClick.current = null;
+		const startOffset = openKey === rowKey ? ACTION_WIDTH_PX : 0;
+		gesture.current = {
+			key: rowKey,
+			startX: touch.clientX,
+			startY: touch.clientY,
+			startOffset,
+			offset: startOffset,
+			startTime: Date.now(),
+			lastX: touch.clientX,
+			decided: false,
+			otherOpen: openKey !== null && openKey !== rowKey,
+		};
+	};
+
+	const handleTouchMove = (rowKey: string, event: TouchEvent<HTMLElement>) => {
+		const current = gesture.current;
+		if (!current || current.key !== rowKey) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		const dx = touch.clientX - current.startX;
+		const dy = touch.clientY - current.startY;
+		if (!current.decided) {
+			if (
+				Math.abs(dx) <= SWIPE_SLOP_PX ||
+				Math.abs(dx) <= Math.abs(dy) * 1.25
+			) {
+				return;
+			}
+			current.decided = true;
+			// Starting a swipe on another row closes the previously open one.
+			if (current.otherOpen) {
+				setOpenKey(null);
+				current.startOffset = 0;
+				current.offset = 0;
+			}
+		}
+		const offset = Math.min(
+			ACTION_WIDTH_PX,
+			Math.max(0, current.startOffset - dx),
+		);
+		current.offset = offset;
+		current.lastX = touch.clientX;
+		setDrag({ key: rowKey, offset, dragging: true });
+	};
+
+	const handleTouchEnd = (rowKey: string, event: TouchEvent<HTMLElement>) => {
+		const current = gesture.current;
+		if (!current || current.key !== rowKey) return;
+		gesture.current = null;
+		if (!current.decided) {
+			setDrag(null);
+			return;
+		}
+		const touch = event.changedTouches[0] ?? event.touches[0];
+		const endX = touch ? touch.clientX : current.lastX;
+		const elapsed = Math.max(1, Date.now() - current.startTime);
+		const velocity = (endX - current.startX) / elapsed;
+		const shouldOpen =
+			current.offset > OPEN_THRESHOLD_PX ||
+			(current.offset > 12 && elapsed >= 16 && velocity < -0.5);
+		suppressClick.current = {
+			key: rowKey,
+			until: Date.now() + CLICK_SUPPRESS_MS,
+		};
+		setDrag(null);
+		setOpenKey(shouldOpen ? rowKey : null);
+	};
+
+	const handleTouchCancel = (rowKey: string) => {
+		if (gesture.current?.key !== rowKey) return;
+		gesture.current = null;
+		setDrag(null);
+	};
+
+	const handleSelect = (paper: PaperMetadata, rowKey: string) => {
+		if (shouldSuppressClick(rowKey)) return;
+		if (openKey === rowKey) {
+			setOpenKey(null);
+			return;
+		}
+		setOpenKey(null);
+		onSelect(paper);
+	};
+
+	const handlePin = (paper: PaperMetadata, rowKey: string, pinned: boolean) => {
+		if (shouldSuppressClick(rowKey)) return;
+		onPinChange?.(paper, pinned);
+	};
+
+	const handleDialogOpenChange = (open: boolean) => {
+		if (!open && !busyRef.current) setPendingDelete(null);
+	};
+
+	const confirmDelete = async () => {
+		const paper = pendingDelete;
+		if (!paper || !onDeletePaper || busyRef.current) return;
+		busyRef.current = true;
+		setBusy(true);
+		try {
+			await onDeletePaper(paper);
+			setPendingDelete(null);
+			const rowKey = rowKeyOf(paper);
+			setOpenKey((current) => (current === rowKey ? null : current));
+		} catch {
+			// The owner reports the failure; keep the dialog and row retryable.
+		} finally {
+			busyRef.current = false;
+			setBusy(false);
+		}
+	};
+
 	return (
 		<section className="flex h-full min-h-0 select-none flex-col">
 			{syncProgress ? (
@@ -63,79 +241,139 @@ export function MobileLibraryPage({
 				) : (
 					<>
 						<ul className="divide-y">
-							{filtered.map((paper) => (
-								<li key={paper.path ?? paper.id} className="flex items-center">
-									<button
-										type="button"
-										onClick={() => onSelect(paper)}
-										className={cn(
-											"flex min-w-0 flex-1 items-center gap-3 px-4 py-4.5 text-left md:px-6",
-											selected?.id === paper.id && "bg-muted/60",
-										)}
-									>
-										<div className="grid size-11 shrink-0 place-items-center rounded-lg border bg-muted text-muted-foreground">
-											{syncStates[paper.id] ? (
-												syncStates[paper.id].offline ? (
-													<CircleCheck
-														className="size-5"
-														aria-label={t("sync.offline")}
-													/>
-												) : (
-													<CloudDownload
-														className="size-5"
-														aria-label={t("sync.deferred")}
-													/>
-												)
-											) : (
-												<BookOpen className="size-5" />
-											)}
-										</div>
-										<span className="min-w-0 flex-1">
-											<span className="line-clamp-2 block font-medium text-base leading-6">
-												<PaperTitle text={paper.title} />
-											</span>
-											<span className="mt-1 block truncate text-muted-foreground text-sm">
-												{paper.authors.join(", ")}
-												{paper.year ? ` · ${paper.year}` : ""}
-											</span>
-										</span>
-										<ChevronRight className="size-5 shrink-0 text-muted-foreground" />
-									</button>
-									{syncStates[paper.id] && onPinChange ? (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="mr-3 size-11 shrink-0"
-											aria-pressed={syncStates[paper.id].pinned}
-											aria-label={t(
-												syncStates[paper.id].pinned ? "sync.unpin" : "sync.pin",
-												{ title: paper.title },
-											)}
-											title={t(
-												syncStates[paper.id].pinned ? "sync.unpin" : "sync.pin",
-												{ title: paper.title },
-											)}
-											disabled={syncStates[paper.id].busy}
-											onClick={() =>
-												onPinChange(paper, !syncStates[paper.id].pinned)
-											}
+							{filtered.map((paper) => {
+								const rowKey = rowKeyOf(paper);
+								const isOpen = openKey === rowKey;
+								const activeDrag = drag?.key === rowKey ? drag : null;
+								const offset = activeDrag
+									? activeDrag.offset
+									: isOpen
+										? ACTION_WIDTH_PX
+										: 0;
+								const dragging = activeDrag?.dragging === true;
+								return (
+									<li key={rowKey} className="relative overflow-hidden">
+										<div
+											className="relative overflow-hidden"
+											style={ROW_TOUCH_ACTION}
+											data-swipe-container={rowKey}
+											onTouchStart={(event) => handleTouchStart(rowKey, event)}
+											onTouchMove={(event) => handleTouchMove(rowKey, event)}
+											onTouchEnd={(event) => handleTouchEnd(rowKey, event)}
+											onTouchCancel={() => handleTouchCancel(rowKey)}
 										>
-											{syncStates[paper.id].busy ? (
-												<LoaderCircle className="size-5 animate-spin" />
-											) : (
-												<Pin
+											{onDeletePaper ? (
+												<div className="absolute inset-y-0 right-0 flex w-[4.5rem]">
+													<Button
+														type="button"
+														variant="destructive"
+														className="h-full min-h-11 w-full touch-manipulation rounded-none"
+														tabIndex={isOpen ? 0 : -1}
+														aria-label={t("library.deletePaper", {
+															title: paper.title,
+														})}
+														disabled={busy}
+														onClick={() => setPendingDelete(paper)}
+													>
+														<Trash2 className="size-5" />
+													</Button>
+												</div>
+											) : null}
+											<div
+												className="relative flex items-center bg-background"
+												data-swipe-content={rowKey}
+												style={{
+													transform:
+														offset === 0
+															? "translateX(0px)"
+															: `translateX(-${offset}px)`,
+													transition: dragging
+														? "none"
+														: "transform 150ms ease-out",
+												}}
+											>
+												<button
+													type="button"
+													onClick={() => handleSelect(paper, rowKey)}
 													className={cn(
-														"size-5",
-														syncStates[paper.id].pinned &&
-															"fill-current text-primary",
+														"flex min-w-0 flex-1 items-center gap-3 px-4 py-4.5 text-left md:px-6",
+														selected?.id === paper.id && "bg-muted/60",
 													)}
-												/>
-											)}
-										</Button>
-									) : null}
-								</li>
-							))}
+												>
+													<div className="grid size-11 shrink-0 place-items-center rounded-lg border bg-muted text-muted-foreground">
+														{syncStates[paper.id] ? (
+															syncStates[paper.id].offline ? (
+																<CircleCheck
+																	className="size-5"
+																	aria-label={t("sync.offline")}
+																/>
+															) : (
+																<CloudDownload
+																	className="size-5"
+																	aria-label={t("sync.deferred")}
+																/>
+															)
+														) : (
+															<BookOpen className="size-5" />
+														)}
+													</div>
+													<span className="min-w-0 flex-1">
+														<span className="line-clamp-2 block font-medium text-base leading-6">
+															<PaperTitle text={paper.title} />
+														</span>
+														<span className="mt-1 block truncate text-muted-foreground text-sm">
+															{paper.authors.join(", ")}
+															{paper.year ? ` · ${paper.year}` : ""}
+														</span>
+													</span>
+													<ChevronRight className="size-5 shrink-0 text-muted-foreground" />
+												</button>
+												{syncStates[paper.id] && onPinChange ? (
+													<Button
+														type="button"
+														variant="ghost"
+														size="icon"
+														className="mr-3 size-11 shrink-0"
+														aria-pressed={syncStates[paper.id].pinned}
+														aria-label={t(
+															syncStates[paper.id].pinned
+																? "sync.unpin"
+																: "sync.pin",
+															{ title: paper.title },
+														)}
+														title={t(
+															syncStates[paper.id].pinned
+																? "sync.unpin"
+																: "sync.pin",
+															{ title: paper.title },
+														)}
+														disabled={syncStates[paper.id].busy}
+														onClick={() =>
+															handlePin(
+																paper,
+																rowKey,
+																!syncStates[paper.id].pinned,
+															)
+														}
+													>
+														{syncStates[paper.id].busy ? (
+															<LoaderCircle className="size-5 animate-spin" />
+														) : (
+															<Pin
+																className={cn(
+																	"size-5",
+																	syncStates[paper.id].pinned &&
+																		"fill-current text-primary",
+																)}
+															/>
+														)}
+													</Button>
+												) : null}
+											</div>
+										</div>
+									</li>
+								);
+							})}
 						</ul>
 						{filtered.length === 0 ? (
 							<div className="grid h-full place-items-center text-muted-foreground text-sm">
@@ -145,6 +383,39 @@ export function MobileLibraryPage({
 					</>
 				)}
 			</div>
+			<Dialog
+				open={pendingDelete !== null}
+				onOpenChange={handleDialogOpenChange}
+			>
+				<DialogContent showCloseButton={false}>
+					<DialogTitle>{t("library.deletePaperTitle")}</DialogTitle>
+					<DialogDescription>
+						{t("library.deletePaperDescription", {
+							title: pendingDelete?.title ?? "",
+						})}
+					</DialogDescription>
+					<div className="flex justify-end gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							className="min-h-11"
+							disabled={busy}
+							onClick={() => setPendingDelete(null)}
+						>
+							{t("common:cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							className="min-h-11"
+							disabled={busy}
+							onClick={() => void confirmDelete()}
+						>
+							{t("library.deletePaperConfirm")}
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
 		</section>
 	);
 }

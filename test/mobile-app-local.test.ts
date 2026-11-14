@@ -20,8 +20,23 @@ const state = vi.hoisted(() => ({
 	dirty: null as ((dirty: boolean) => void) | null,
 	error: vi.fn(),
 	refresh: vi.fn(async (_rescan?: boolean) => {}),
+	trash: vi.fn(async () => ({
+		batchId: "batch",
+		rels: ["papers/example"],
+		count: 1,
+	})),
+	settings: null as {
+		open: boolean;
+		section: string;
+		vaultPath: string | null;
+	} | null,
 }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+// Keep the real plugin bridge: `@/i18n` (pulled in by the Plaza sources) needs
+// `initReactI18next`; only the translation hook is pinned to the key echo.
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({ t: state.t }),
+}));
 vi.mock("@/components/mobile/mobile-paper-import", () => ({
 	MobilePaperImport: () => null,
 }));
@@ -31,9 +46,40 @@ vi.mock("@/components/mobile/mobile-paper-info", () => ({
 vi.mock("@/components/mobile/mobile-plaza-page", () => ({
 	MobilePlazaPage: () => null,
 }));
-// Processing forms/runtime have their own focused integration suites.
-vi.mock("@/components/mobile/mobile-processing-settings", () => ({
-	MobileProcessingSettings: () => null,
+// The settings surface has its own focused integration suite; here it is only a
+// probe that records wiring and exposes the sync result to the shell.
+vi.mock("@/components/mobile/mobile-settings-page", () => ({
+	MobileSettingsPage: ({
+		open,
+		section,
+		vaultPath,
+		onClose,
+		onSynced,
+	}: {
+		open: boolean;
+		section: string;
+		vaultPath: string | null;
+		onClose: () => void;
+		onSynced?: () => void | Promise<void>;
+	}) => {
+		state.settings = { open, section, vaultPath };
+		return open
+			? createElement(
+					"div",
+					{ "data-settings-vault": vaultPath ?? "" },
+					createElement(
+						"button",
+						{ type: "button", onClick: () => void onSynced?.() },
+						"settings-synced",
+					),
+					createElement(
+						"button",
+						{ type: "button", onClick: onClose },
+						"close-settings",
+					),
+				)
+			: null;
+	},
 }));
 vi.mock("@/lib/mobile/pdf-processing", () => ({
 	useMobilePdfProcessingRuntime: () => {},
@@ -78,6 +124,11 @@ vi.mock("@/components/mobile/hooks/use-bridge-status", () => ({
 }));
 vi.mock("@/components/mobile/hooks/use-pair-offer-links", () => ({
 	usePairOfferLinks: vi.fn(),
+}));
+
+vi.mock("@/lib/paper/api", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/paper/api")>()),
+	trashPaths: state.trash,
 }));
 vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
 vi.mock("@/lib/mobile/import-pdf", () => ({ importMobilePdfs: vi.fn() }));
@@ -139,13 +190,27 @@ vi.mock("@/components/mobile/mobile-header-actions", () => ({
 vi.mock("@/components/mobile/mobile-library-page", () => ({
 	MobileLibraryPage: ({
 		onSelect,
+		onDeletePaper,
 	}: {
 		onSelect: (paper: PaperMetadata) => void;
+		onDeletePaper?: (paper: PaperMetadata) => Promise<void>;
 	}) =>
 		createElement(
-			"button",
-			{ type: "button", onClick: () => onSelect(state.paper) },
-			"open-local-paper",
+			"div",
+			null,
+			createElement(
+				"button",
+				{ type: "button", onClick: () => onSelect(state.paper) },
+				"open-local-paper",
+			),
+			createElement(
+				"button",
+				{
+					type: "button",
+					onClick: () => void onDeletePaper?.(state.paper),
+				},
+				"delete-local-paper",
+			),
 		),
 }));
 vi.mock("@/components/mobile/mobile-nav", () => ({
@@ -169,12 +234,14 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 	MobileSidebar: ({
 		open,
 		onPairAnother,
-		onSync,
+		onSettings,
+		onClose,
 		navigation,
 	}: {
 		open: boolean;
 		onPairAnother: () => void;
-		onSync: () => void;
+		onSettings: () => void;
+		onClose: () => void;
 		navigation: ReactNode;
 	}) =>
 		open
@@ -184,42 +251,19 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 					navigation,
 					createElement(
 						"button",
-						{ type: "button", onClick: onSync },
-						"open-sync",
+						{
+							type: "button",
+							onClick: () => {
+								onSettings();
+								onClose();
+							},
+						},
+						"open-settings",
 					),
 					createElement(
 						"button",
 						{ type: "button", onClick: onPairAnother },
 						"pair-desktop",
-					),
-				)
-			: null,
-}));
-vi.mock("@/components/mobile/mobile-sync-panel", () => ({
-	MobileSyncPanel: ({
-		open,
-		vaultPath,
-		onOpenChange,
-		onSynced,
-	}: {
-		open: boolean;
-		vaultPath: string;
-		onOpenChange: (open: boolean) => void;
-		onSynced: () => Promise<void>;
-	}) =>
-		open
-			? createElement(
-					"div",
-					{ "data-sync-vault": vaultPath },
-					createElement(
-						"button",
-						{ type: "button", onClick: () => void onSynced() },
-						"sync-completed",
-					),
-					createElement(
-						"button",
-						{ type: "button", onClick: () => onOpenChange(false) },
-						"close-sync",
 					),
 				)
 			: null,
@@ -273,8 +317,10 @@ beforeEach(async () => {
 	state.mounts = 0;
 	state.remoteMounts = 0;
 	state.dirty = null;
+	state.settings = null;
 	state.error.mockClear();
 	state.refresh.mockClear();
+	state.trash.mockClear();
 	host = document.createElement("div");
 	root = createRoot(host);
 	await act(async () => {
@@ -326,17 +372,25 @@ describe("mobile local-first shell", () => {
 		expect(host.textContent).toContain("Offline paper");
 	});
 
-	it("opens sync for the local Vault and rescans completed sync without losing the mounted reader", async () => {
+	it("opens settings for the local Vault and rescans completed sync without losing the mounted reader", async () => {
 		await click("open-local-paper");
 		await act(() => state.dirty?.(true));
 		await click("menu");
-		await click("open-sync");
+		await click("open-settings");
+		expect(state.settings).toEqual({
+			open: true,
+			section: "appearance",
+			vaultPath: "/private/Vault",
+		});
 		expect(
-			host.querySelector("[data-sync-vault]")?.getAttribute("data-sync-vault"),
+			host
+				.querySelector("[data-settings-vault]")
+				?.getAttribute("data-settings-vault"),
 		).toBe("/private/Vault");
-		await click("sync-completed");
+		await click("settings-synced");
 		expect(state.refresh).toHaveBeenCalledExactlyOnceWith(true);
-		await click("close-sync");
+		await click("close-settings");
+		expect(state.settings?.open).toBe(false);
 		expect(state.mounts).toBe(1);
 		expect(host.querySelector("[data-reader]")).not.toBeNull();
 	});
@@ -358,5 +412,22 @@ describe("mobile local-first shell", () => {
 				?.click(),
 		);
 		expect(host.textContent).toContain("open-local-paper");
+	});
+
+	it("trashes a paper folder through the native command and rescans the library", async () => {
+		await click("delete-local-paper");
+		expect(state.trash).toHaveBeenCalledExactlyOnceWith("/private/Vault", [
+			"papers/example",
+		]);
+		expect(state.refresh).toHaveBeenCalledExactlyOnceWith(true);
+		expect(state.error).not.toHaveBeenCalled();
+	});
+
+	it("refuses to delete the open paper while a draft is unsaved", async () => {
+		await click("open-local-paper");
+		await act(() => state.dirty?.(true));
+		await click("delete-local-paper");
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		expect(state.trash).not.toHaveBeenCalled();
 	});
 });

@@ -9,7 +9,10 @@ const state = vi.hoisted(() => ({
 	done: vi.fn(),
 	close: vi.fn(),
 }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({ t: state.t }),
+}));
 vi.mock("@/lib/bridge/client", () => ({
 	bridgeConnect: vi.fn(),
 	listenBridgeProgress: vi.fn(async () => () => {}),
@@ -34,7 +37,7 @@ vi.mock("@zxing/browser", () => ({
 }));
 
 import { MobilePairing } from "@/components/mobile/mobile-pairing";
-import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
+import { MobileSettingsPage } from "@/components/mobile/mobile-settings-page";
 
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
@@ -132,24 +135,26 @@ describe("mobile safe-area ownership", () => {
 		expect(state.done).toHaveBeenCalledOnce();
 	});
 
-	it("puts sync close controls and final scroll actions inside one safe portal host", async () => {
+	it("keeps the settings header and final scroll actions inside one safe host", async () => {
 		await act(async () => {
 			root.render(
-				createElement(MobileSyncPanel, {
+				createElement(MobileSettingsPage, {
 					open: true,
+					section: "sync",
+					onSectionChange: vi.fn(),
+					onClose: state.close,
 					vaultPath: "/private/Vault",
-					onOpenChange: state.close,
 					onSynced: vi.fn(),
 				}),
 			);
 		});
-		const close = button("sync.close");
+		const close = button("common:close");
 		const last = button("last-download-action");
 		const safeHost = close?.closest(".mobile-safe-area");
 		expect(safeHost).not.toBeNull();
 		expect(last?.closest(".mobile-safe-area")).toBe(safeHost);
 		expect(safeHost?.querySelector(".mobile-safe-area")).toBeNull();
 		await act(() => close?.click());
-		expect(state.close).toHaveBeenCalledWith(false);
+		expect(state.close).toHaveBeenCalledTimes(1);
 	});
 });

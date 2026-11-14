@@ -32,7 +32,6 @@ import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
-import { MobileBackgroundSettings } from "@/components/mobile/mobile-background-settings";
 import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import {
 	EdgeSwipeBack,
@@ -50,11 +49,11 @@ import { MobilePairing } from "@/components/mobile/mobile-pairing";
 import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
 import { MobilePaperImport } from "@/components/mobile/mobile-paper-import";
 import { MobilePaperInfo } from "@/components/mobile/mobile-paper-info";
+import { MobilePlazaControls } from "@/components/mobile/mobile-plaza-controls";
 import { MobilePlazaPage } from "@/components/mobile/mobile-plaza-page";
-import { MobileProcessingSettings } from "@/components/mobile/mobile-processing-settings";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
+import { MobileSettingsPage } from "@/components/mobile/mobile-settings-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
-import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
 import { MobileRemoteAgentPage } from "@/components/mobile/remote/mobile-remote-agent-page";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
@@ -72,24 +71,30 @@ import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 import { dismissMobileBackLayer } from "@/lib/mobile/back";
 import {
-	type BackgroundState,
-	getMobileBackgroundState,
-} from "@/lib/mobile/background";
-import {
 	importMobilePdfs,
 	pickAndImportMobilePdfs,
 } from "@/lib/mobile/import-pdf";
-import { filterMobilePapers } from "@/lib/mobile/navigation";
+import {
+	filterMobilePapers,
+	openMobilePlazaUrl,
+} from "@/lib/mobile/navigation";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
+import { mobilePaperPaths } from "@/lib/mobile/paper-files";
 import { useMobilePdfProcessingRuntime } from "@/lib/mobile/pdf-processing";
 import type { MobileWindowRoute } from "@/lib/mobile/route";
+import {
+	listenMobileSettings,
+	type MobileSettingsSection,
+} from "@/lib/mobile/settings";
 import {
 	canLeaveMobilePaper,
 	type MobileWorkspacePreset,
 	mobileWorkspaceLayout,
 } from "@/lib/mobile/workspace";
+import { trashPaths } from "@/lib/paper/api";
 import type { PaperMetadata } from "@/lib/paper/types";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
+import { PLAZA_SOURCES } from "@/lib/plaza/sources";
 
 export default function MobileApp() {
 	useMobilePdfProcessingRuntime();
@@ -103,10 +108,11 @@ export default function MobileApp() {
 	const [paperInfoOpen, setPaperInfoOpen] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [paperListCollapsed, setPaperListCollapsed] = useState(false);
-	const [syncOpen, setSyncOpen] = useState(false);
-	const [backgroundOpen, setBackgroundOpen] = useState(false);
-	const [backgroundState, setBackgroundState] =
-		useState<BackgroundState | null>(null);
+	const [plazaPath, setPlazaPath] = useState(PLAZA_SOURCES[0].path);
+	const [plazaReloadKey, setPlazaReloadKey] = useState(0);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [settingsSection, setSettingsSection] =
+		useState<MobileSettingsSection>("appearance");
 	const [pairingRequested, setPairingRequested] = useState(false);
 	const [pendingOffer, setPendingOffer] = useState<string | null>(null);
 	const [selectedPaper, setSelectedPaper] = useState<PaperMetadata | null>(
@@ -153,8 +159,7 @@ export default function MobileApp() {
 		inkDirty,
 		blocked:
 			pairingRequested ||
-			syncOpen ||
-			backgroundOpen ||
+			settingsOpen ||
 			sidebarOpen ||
 			paperImportOpen ||
 			paperInfoOpen,
@@ -167,8 +172,7 @@ export default function MobileApp() {
 		inkDirty,
 		blocked:
 			pairingRequested ||
-			syncOpen ||
-			backgroundOpen ||
+			settingsOpen ||
 			sidebarOpen ||
 			paperImportOpen ||
 			paperInfoOpen,
@@ -281,7 +285,7 @@ export default function MobileApp() {
 	const paperSync = useMobilePaperSync({
 		vaultPath,
 		papers,
-		active: !syncOpen && !backgroundOpen,
+		active: !settingsOpen,
 		onChanged: refreshAfterDownload,
 	});
 	const {
@@ -303,21 +307,14 @@ export default function MobileApp() {
 	}, []);
 	usePairOfferLinks(acceptPairOffer);
 
-	useEffect(() => {
-		if (!sidebarOpen) return;
-		let current = true;
-		void (async () => {
-			try {
-				const state = await getMobileBackgroundState();
-				if (current) setBackgroundState(state);
-			} catch {
-				// Optional capability discovery is retried when the menu reopens.
-			}
-		})();
-		return () => {
-			current = false;
-		};
-	}, [sidebarOpen]);
+	useEffect(
+		() =>
+			listenMobileSettings((section) => {
+				setSettingsSection(section);
+				setSettingsOpen(true);
+			}),
+		[],
+	);
 
 	useEffect(() => {
 		if (paired) return;
@@ -359,6 +356,33 @@ export default function MobileApp() {
 		},
 		[selectedPaper, canLeaveReader, markInteraction],
 	);
+	const openPlazaUrl = useCallback(
+		(url: string) => {
+			void openMobilePlazaUrl(url).catch((error) =>
+				notifyError(t("plaza.openFailed"), { description: errorText(error) }),
+			);
+		},
+		[t],
+	);
+	/** Trash the paper folder, then refresh; never delete while a draft is unsaved. */
+	const deletePaper = useCallback(
+		async (paper: PaperMetadata) => {
+			if (!vaultPath) return;
+			const open =
+				selectedPaper?.id === paper.id && selectedPaper?.path === paper.path;
+			if (open && !canLeaveReader()) return;
+			try {
+				const { paperRelPath } = mobilePaperPaths(vaultPath, paper);
+				await trashPaths(vaultPath, [paperRelPath]);
+				if (open) closeReader();
+				await refresh(true);
+			} catch (error) {
+				notifyError(errorText(error));
+				throw error;
+			}
+		},
+		[vaultPath, selectedPaper, canLeaveReader, closeReader, refresh],
+	);
 	const selectPreset = useCallback(
 		(preset: MobileWorkspacePreset) => {
 			if (inkDirty && widthClass === "narrow" && preset !== "read") {
@@ -395,12 +419,8 @@ export default function MobileApp() {
 			setPaperImportOpen(false);
 			return;
 		}
-		if (backgroundOpen) {
-			setBackgroundOpen(false);
-			return;
-		}
-		if (syncOpen) {
-			setSyncOpen(false);
+		if (settingsOpen) {
+			setSettingsOpen(false);
 			return;
 		}
 		if (pairingRequested) {
@@ -433,8 +453,7 @@ export default function MobileApp() {
 		markInteraction,
 		paperInfoOpen,
 		paperImportOpen,
-		backgroundOpen,
-		syncOpen,
+		settingsOpen,
 		pairingRequested,
 		sidebarOpen,
 		historyOpen,
@@ -452,8 +471,7 @@ export default function MobileApp() {
 	const ownsBack =
 		paperInfoOpen ||
 		paperImportOpen ||
-		backgroundOpen ||
-		syncOpen ||
+		settingsOpen ||
 		pairingRequested ||
 		sidebarOpen ||
 		(historyOpen && layout.agent) ||
@@ -576,8 +594,7 @@ export default function MobileApp() {
 			inkMode ||
 			inkDirty ||
 			pairingRequested ||
-			syncOpen ||
-			backgroundOpen ||
+			settingsOpen ||
 			paperImportOpen ||
 			paperInfoOpen,
 	);
@@ -722,6 +739,13 @@ export default function MobileApp() {
 									<Info className="size-4" />
 								</Button>
 							</div>
+						) : tab === "plaza" ? (
+							<MobilePlazaControls
+								path={plazaPath}
+								onPathChange={setPlazaPath}
+								onReload={() => setPlazaReloadKey((key) => key + 1)}
+								onOpenUrl={openPlazaUrl}
+							/>
 						) : tab === "library" ? (
 							<div className="flex shrink-0 items-center gap-1">
 								<Button
@@ -799,14 +823,15 @@ export default function MobileApp() {
 								weight: 1,
 								content: (
 									<MobilePlazaPage
+										path={plazaPath}
+										reloadKey={plazaReloadKey}
 										active={
 											tab === "plaza" &&
 											!sidebarOpen &&
 											!paperImportOpen &&
 											!paperInfoOpen &&
 											!pairingRequested &&
-											!syncOpen &&
-											!backgroundOpen
+											!settingsOpen
 										}
 										vaultPath={vaultPath}
 										onImportPaper={showImport}
@@ -837,6 +862,7 @@ export default function MobileApp() {
 										</div>
 										<div className="min-h-0 flex-1">
 											<MobileLibraryPage
+												onDeletePaper={deletePaper}
 												papers={visiblePapers}
 												loading={papersLoading}
 												selected={selectedPaper}
@@ -885,8 +911,7 @@ export default function MobileApp() {
 											inkDirty ||
 											inkMode ||
 											pairingRequested ||
-											syncOpen ||
-											backgroundOpen ||
+											settingsOpen ||
 											sidebarOpen ||
 											paperImportOpen ||
 											paperInfoOpen
@@ -903,8 +928,7 @@ export default function MobileApp() {
 												active={
 													layout.reader &&
 													!pairingRequested &&
-													!syncOpen &&
-													!backgroundOpen &&
+													!settingsOpen &&
 													!sidebarOpen &&
 													!paperImportOpen &&
 													!paperInfoOpen
@@ -976,8 +1000,7 @@ export default function MobileApp() {
 													layout.agent &&
 													agentProvider === "ds-harness-remote" &&
 													!pairingRequested &&
-													!syncOpen &&
-													!backgroundOpen &&
+													!settingsOpen &&
 													!sidebarOpen &&
 													!paperImportOpen &&
 													!paperInfoOpen
@@ -1004,8 +1027,7 @@ export default function MobileApp() {
 														layout.agent &&
 														agentProvider === "agentero-bridge" &&
 														!pairingRequested &&
-														!syncOpen &&
-														!backgroundOpen &&
+														!settingsOpen &&
 														!sidebarOpen &&
 														!paperImportOpen &&
 														!paperInfoOpen
@@ -1089,26 +1111,19 @@ export default function MobileApp() {
 				vaultPath={vaultPath}
 				onUpdated={updatePaperInfo}
 			/>
-			<MobileSyncPanel
-				open={syncOpen}
+			<MobileSettingsPage
+				open={settingsOpen}
+				section={settingsSection}
+				onSectionChange={setSettingsSection}
+				onClose={() => setSettingsOpen(false)}
 				vaultPath={vaultPath}
-				onOpenChange={setSyncOpen}
 				onSynced={rescanAfterSync}
 			/>
-			<MobileProcessingSettings />
-			<MobileBackgroundSettings
-				open={backgroundOpen}
-				onOpenChange={setBackgroundOpen}
-				onStateChange={setBackgroundState}
-			/>
 			<MobileSidebar
-				onBackground={
-					backgroundState?.persistentConnection
-						? () => setBackgroundOpen(true)
-						: undefined
-				}
-				onSync={() => setSyncOpen(true)}
-				syncDisabled={!vaultPath}
+				onSettings={() => {
+					setSettingsSection("appearance");
+					setSettingsOpen(true);
+				}}
 				navigation={
 					<MobileLibraryNavigation
 						active={tab}

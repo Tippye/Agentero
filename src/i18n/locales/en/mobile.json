@@ -8,8 +8,7 @@
 	"plaza": {
 		"source": "Discovery source",
 		"openBrowser": "Open in browser",
-		"reload": "Reload preview",
-		"embedFallback": "If the preview is unavailable, open this site in your browser.",
+		"refresh": "Refresh Plaza",
 		"embedUnavailable": "Preview unavailable.",
 		"openFailed": "Could not open this link.",
 		"loading": "Loading Plaza…"
@@ -160,7 +159,11 @@
 		"refresh": "Refresh library",
 		"search": "Search papers",
 		"loading": "Loading papers…",
-		"empty": "No papers"
+		"empty": "No papers",
+		"deletePaper": "Delete {{title}}",
+		"deletePaperTitle": "Delete paper?",
+		"deletePaperDescription": "Move \"{{title}}\" to the recycle bin?",
+		"deletePaperConfirm": "Delete"
 	},
 	"reader": {
 		"title": "Notes",
