@@ -67,8 +67,12 @@ export type HeadlessTranslateResult = {
 };
 
 /** Register the renderer-side `layoutTranslate` executor (before task runtime). */
-export function registerLayoutTranslateTaskExecutor(): void {
-	registerTaskExecutor("layoutTranslate", runLayoutTranslateExecutor);
+export function registerLayoutTranslateTaskExecutor(
+	options: { apiOnly?: boolean } = {},
+): void {
+	registerTaskExecutor("layoutTranslate", (ctx) =>
+		runLayoutTranslateExecutor(ctx, options.apiOnly),
+	);
 }
 
 function isCancelledError(error: unknown): boolean {
@@ -77,6 +81,7 @@ function isCancelledError(error: unknown): boolean {
 
 async function runLayoutTranslateExecutor(
 	ctx: TaskExecutorContext,
+	apiOnly = false,
 ): Promise<void> {
 	const { jobId, vaultPath, paperPath, signal } = ctx;
 	const report = (args: TaskReportArgs) =>
@@ -105,6 +110,7 @@ async function runLayoutTranslateExecutor(
 			signal,
 			report: (args) => report(args),
 			force: ctx.force,
+			apiOnly,
 			onItems: (key, items) => publisher.publish(key, items),
 		});
 		await publisher.flush();
@@ -156,6 +162,7 @@ export async function translatePaperLayoutHeadless(opts: {
 	signal?: AbortSignal;
 	report: (args: TaskReportArgs) => Promise<void> | void;
 	force?: boolean;
+	apiOnly?: boolean;
 	onItems?: (
 		key: LayoutTranslateCacheKey,
 		items: LayoutTranslateItem[],
@@ -257,6 +264,7 @@ export async function translatePaperLayoutHeadless(opts: {
 		report({ progress: 5 });
 		let reported = 5;
 		const items = await runLayoutRegionTranslate({
+			apiOnly: opts.apiOnly,
 			items: hydration.items,
 			signal,
 			paperKey: opts.paperKey,

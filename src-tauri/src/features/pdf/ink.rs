@@ -111,12 +111,22 @@ fn actor_sync_error(_: std::io::Error) -> AppError {
 }
 
 fn sync_actor_directories(directory: &Path) -> std::io::Result<()> {
+    sync_actor_directories_with(directory, |parent| fs::File::open(parent)?.sync_all())
+}
+
+fn sync_actor_directories_with(
+    directory: &Path,
+    mut sync_directory: impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    // replica-id is published inside config/ink; only ink/ and its entry in
+    // config/ changed. Android's config is the app data root: its parent is
+    // /data/user/0, which the app cannot open. Never walk outside that root.
     #[cfg(unix)]
-    for parent in directory.ancestors().take(3) {
-        fs::File::open(parent)?.sync_all()?;
+    for parent in directory.ancestors().take(2) {
+        sync_directory(parent)?;
     }
     #[cfg(not(unix))]
-    let _ = directory;
+    let _ = (directory, &mut sync_directory);
     Ok(())
 }
 

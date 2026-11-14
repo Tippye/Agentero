@@ -432,6 +432,15 @@ function createHarness() {
 		},
 		"@/lib/pdf/layout/layout-translate-progress": translateProgress,
 		"@/lib/shell/settings-window": { openSettingsWindow: () => undefined },
+		"@/lib/pdf/processing-policy": {
+			isApiOnlyPdfProcessing: () => false,
+			assertApiTranslationSettings: () => undefined,
+		},
+		"@/lib/settings": {
+			loadSettings: () => ({
+				translate: { provider: "googleapi", providerConfigs: {} },
+			}),
+		},
 		// Identity stub: the hook only maps known Host markers, else passes through.
 		"@/lib/translate": { displayTranslateError: (message: string) => message },
 	};

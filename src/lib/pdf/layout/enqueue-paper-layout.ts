@@ -19,7 +19,6 @@ import {
 	type TaskExecutorContext,
 	type TaskReportArgs,
 } from "@/lib/core/tasks";
-import { isMobileApp } from "@/lib/core/tauri";
 import { findCanonicalPaperPdfPath } from "@/lib/paper/media";
 import { analyzePaperLayoutHeadless } from "@/lib/pdf/layout/headless-analyze";
 import {
@@ -27,7 +26,9 @@ import {
 	layoutSidecarPath,
 	readLayoutSidecar,
 } from "@/lib/pdf/layout/io";
+import { assertRemoteLayoutProvider } from "@/lib/pdf/layout/run-analysis";
 import { layoutAnalysisStore } from "@/lib/pdf/layout/store";
+import { isApiOnlyPdfProcessing } from "@/lib/pdf/processing-policy";
 import {
 	isPathMissingError,
 	joinVaultPath,
@@ -47,12 +48,17 @@ function normalizePaperKey(paperAbsPath: string): string {
  * Register the renderer-side `layoutAnalyze` executor. Call before
  * `startTaskRuntime` (see `use-app-bootstrap`).
  */
-export function registerLayoutTaskExecutor(): void {
-	registerTaskExecutor("layoutAnalyze", runLayoutAnalyzeExecutor);
+export function registerLayoutTaskExecutor(
+	options: { apiOnly?: boolean } = {},
+): void {
+	registerTaskExecutor("layoutAnalyze", (ctx) =>
+		runLayoutAnalyzeExecutor(ctx, options.apiOnly),
+	);
 }
 
 async function runLayoutAnalyzeExecutor(
 	ctx: TaskExecutorContext,
+	apiOnly = false,
 ): Promise<void> {
 	const { jobId, vaultPath, paperPath, signal } = ctx;
 	const paperAbsPath = paperPath
@@ -88,6 +94,7 @@ async function runLayoutAnalyzeExecutor(
 			documentId,
 			signal,
 			force: ctx.force,
+			apiOnly,
 		});
 		await report({ progress: 100, phase: "completed", state: "succeeded" });
 	} catch (e) {
@@ -112,6 +119,7 @@ export function enqueuePaperLayoutAnalysis(opts: {
 	paperLabel?: string;
 	/** Explicit reading action takes priority over background imports. */
 	focus?: boolean;
+	apiOnly?: boolean;
 	/**
 	 * Import / download origin. When Settings → Translate → "Auto-translate
 	 * after import" is on, the Host also queues a `layoutTranslate` job that
@@ -121,16 +129,9 @@ export function enqueuePaperLayoutAnalysis(opts: {
 	autoTranslate?: boolean;
 	onError?: (error: unknown) => void;
 }): void {
-	// Mobile reads synced sidecars but does not run desktop layout/OCR jobs.
-	// In particular, opening a local PDF must not queue an unavailable executor.
-	if (isMobileApp()) {
-		if (opts.focus) {
-			queueMicrotask(() =>
-				opts.onError?.(new Error(i18n.t("viewer:pdf.layoutTranslate.failed"))),
-			);
-		}
-		return;
-	}
+	const apiOnly = isApiOnlyPdfProcessing(opts.apiOnly);
+	// Opening/importing a paper never authorizes a paid upload on mobile.
+	if (apiOnly && !opts.focus) return;
 	const paperAbsPath = normalizePaperKey(opts.paperAbsPath);
 	if (!paperAbsPath || (!opts.focus && queuedPapers.has(paperAbsPath))) return;
 
@@ -153,6 +154,7 @@ export function enqueuePaperLayoutAnalysis(opts: {
 		try {
 			const cached = await readLayoutSidecar(paperAbsPath);
 			if (cached?.regions?.length) return;
+			if (apiOnly) assertRemoteLayoutProvider();
 			await callApiResult(
 				() =>
 					commands.jobLayoutAnalyzeEnqueue({
@@ -160,7 +162,7 @@ export function enqueuePaperLayoutAnalysis(opts: {
 						path: paperRelPath,
 						lane: opts.focus ? "focus" : "normal",
 						force: false,
-						autoTranslate: opts.autoTranslate ?? false,
+						autoTranslate: apiOnly ? false : (opts.autoTranslate ?? false),
 					}),
 				{ fallback: "layout analysis enqueue failed" },
 			);
@@ -223,7 +225,9 @@ async function removePaperLayoutSidecars(paperAbsPath: string): Promise<void> {
 export async function forcePaperLayoutAnalysis(opts: {
 	paperAbsPath: string;
 	paperRelPath?: string | null;
+	apiOnly?: boolean;
 }): Promise<void> {
+	if (isApiOnlyPdfProcessing(opts.apiOnly)) assertRemoteLayoutProvider();
 	const paperAbsPath = opts.paperAbsPath.trim().replace(/[/\\]+$/, "");
 	if (!paperAbsPath) throw new LayoutReanalyzeError("missing-paper");
 

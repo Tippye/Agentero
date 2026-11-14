@@ -256,6 +256,7 @@
 		"importToFolder": "导入到文件夹",
 		"comingSoonFor": "{{label}} 即将推出。",
 		"modelscope": "ModelScope 论文",
+		"huggingface": "Hugging Face 每日论文",
 		"pwc": {
 			"label": "Papers with Code"
 		},

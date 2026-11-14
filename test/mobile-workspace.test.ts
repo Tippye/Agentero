@@ -66,6 +66,13 @@ vi.mock("@/components/mobile/mobile-paper-info", () => ({
 vi.mock("@/components/mobile/mobile-plaza-page", () => ({
 	MobilePlazaPage: () => null,
 }));
+// Processing forms/runtime have their own focused integration suites.
+vi.mock("@/components/mobile/mobile-processing-settings", () => ({
+	MobileProcessingSettings: () => null,
+}));
+vi.mock("@/lib/mobile/pdf-processing", () => ({
+	useMobilePdfProcessingRuntime: () => {},
+}));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
 	useMobileVault: () => ({
 		vaultPath: "/private/Vault",
@@ -546,6 +553,91 @@ function LateRootLayer() {
 }
 
 describe("stable tablet workspace DOM", () => {
+	it("collapses the wide paper list without replacing dirty reader surfaces or opening Agent", async () => {
+		await resize(1000);
+		await click("Paper first");
+		await ready();
+		const pdf = container.querySelector("[data-pdf-document]");
+		const notes = container.querySelector<HTMLTextAreaElement>(
+			'[aria-label="test-notes"]',
+		);
+		await click("change-reading-position");
+		await click("workspace.compare");
+		await fill("test-notes", "keep my unsaved draft");
+		await act(() => state.pdf?.onInkDirtyChange?.(true));
+		const separator = container.querySelector<HTMLElement>(
+			"#mobile-workspace-library-separator",
+		);
+		const readerWidth = pane("reader")
+			?.closest("[data-panel]")
+			?.getBoundingClientRect().width;
+		await click("workspace.hidePaperList");
+		expect(pane("library")?.hidden).toBe(true);
+		expect(pane("library")?.inert).toBe(true);
+		expect(separator?.hidden).toBe(true);
+		expect(
+			pane("reader")?.closest("[data-panel]")?.getBoundingClientRect().width,
+		).toBeGreaterThan(readerWidth ?? 0);
+		const expand = container.querySelector<HTMLButtonElement>(
+			'[aria-label="workspace.showPaperList"]',
+		);
+		expect(expand?.closest("[hidden]")).toBeNull();
+		expect(expand?.getAttribute("aria-expanded")).toBe("false");
+		expect(
+			document.getElementById(expand?.getAttribute("aria-controls") ?? ""),
+		).not.toBeNull();
+		await click("workspace.showPaperList");
+		expect(pane("library")?.hidden).toBe(false);
+		expect(separator?.hidden).toBe(false);
+		expect(
+			container
+				.querySelector('[aria-label="workspace.hidePaperList"]')
+				?.getAttribute("aria-expanded"),
+		).toBe("true");
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(container.querySelector('[aria-label="test-notes"]')).toBe(notes);
+		expect(notes?.value).toBe("keep my unsaved draft");
+		expect(container.querySelector("[data-position]")?.textContent).toBe(
+			"7:175",
+		);
+		expect(pane("agent")?.hidden).toBe(true);
+		expect(state.error).not.toHaveBeenCalled();
+		await click("reader.back");
+		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(state.load).toHaveBeenCalledTimes(1);
+		expect([state.pdfMounts, state.notesMounts]).toEqual([1, 1]);
+	});
+
+	it("keeps the list reachable across width bands and visible after leaving a collapsed reader", async () => {
+		await resize(840);
+		await click("Paper first");
+		await ready();
+		const pdf = container.querySelector("[data-pdf-document]");
+		await click("workspace.hidePaperList");
+		for (const size of [839, 600, 599]) {
+			await resize(size);
+			expect(pane("library")?.hidden).toBe(true);
+			await click("settings.menu");
+			await click("Paper first");
+			expect(pane("reader")?.hidden).toBe(false);
+			expect(pane("agent")?.hidden).toBe(true);
+			expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		}
+		await resize(840);
+		expect(pane("library")?.hidden).toBe(true);
+		await click("workspace.showPaperList");
+		expect(pane("library")?.hidden).toBe(false);
+		await click("workspace.hidePaperList");
+		await click("reader.back");
+		expect(pane("library")?.hidden).toBe(false);
+		expect(pane("reader")?.hidden).toBe(true);
+		await click("Paper first");
+		await ready();
+		expect(pane("library")?.hidden).toBe(true);
+		await click("workspace.showPaperList");
+		expect(pane("library")?.hidden).toBe(false);
+	});
 	it("leaves root system Back alone while a file import is pending", async () => {
 		let finish: (value: { imported: number; errors: string[] }) => void =
 			() => {};

@@ -25,8 +25,12 @@ import {
 	writeLayoutIndexFromRaw,
 } from "@/lib/pdf/layout/io";
 import type { LayoutTaskLike } from "@/lib/pdf/layout/run-analysis";
-import { runDocumentLayoutAnalysis } from "@/lib/pdf/layout/run-analysis";
+import {
+	assertRemoteLayoutProvider,
+	runDocumentLayoutAnalysis,
+} from "@/lib/pdf/layout/run-analysis";
 import { clearLayoutDocumentResult } from "@/lib/pdf/layout/store";
+import { isApiOnlyPdfProcessing } from "@/lib/pdf/processing-policy";
 
 let analysisEngine: PdfEngine | null = null;
 let analysisEnginePromise: Promise<PdfEngine> | null = null;
@@ -69,6 +73,7 @@ export async function analyzePaperLayoutHeadless(opts: {
 	 * still returns the cached sidecar.
 	 */
 	force?: boolean;
+	apiOnly?: boolean;
 	signal?: AbortSignal;
 }): Promise<HeadlessLayoutResult> {
 	const paperAbsPath = opts.paperAbsPath.replace(/[/\\]+$/, "");
@@ -97,6 +102,8 @@ export async function analyzePaperLayoutHeadless(opts: {
 		};
 	}
 
+	const apiOnly = isApiOnlyPdfProcessing(opts.apiOnly);
+	if (apiOnly) assertRemoteLayoutProvider();
 	const pdfPath = await findCanonicalPaperPdfPath(paperAbsPath);
 	if (!pdfPath) {
 		// Soft-skip: callers may race ahead of DownloadAssets. Re-enqueue after
@@ -120,7 +127,7 @@ export async function analyzePaperLayoutHeadless(opts: {
 	registry.registerPlugin(DocumentManagerPluginPackage, {});
 	registry.registerPlugin(RenderPluginPackage);
 	registry.registerPlugin(AiManagerPluginPackage, {
-		runtime: getPdfAiRuntime(),
+		runtime: getPdfAiRuntime(apiOnly),
 	});
 	registry.registerPlugin(LayoutAnalysisPluginPackage, {
 		layoutThreshold: 0.3,
@@ -175,6 +182,7 @@ export async function analyzePaperLayoutHeadless(opts: {
 			}
 			opts.signal?.addEventListener("abort", onAbort);
 			void runDocumentLayoutAnalysis(scope, documentId, {
+				apiOnly,
 				paperAbsPath,
 				paperLabel: opts.paperLabel,
 				totalPages: pageCount > 0 ? pageCount : null,

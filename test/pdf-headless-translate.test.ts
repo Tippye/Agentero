@@ -123,8 +123,11 @@ beforeEach(() => {
 it("continues only missing blocks and publishes existing translations before requesting", async () => {
 	mocks.sidecar = cached([0]);
 	const onItems = vi.fn();
-	const result = await translatePaperLayoutHeadless(request({ onItems }));
+	const result = await translatePaperLayoutHeadless(
+		request({ onItems, apiOnly: true }),
+	);
 	expect(onItems.mock.calls[0][1][0].translated).toBe("Cached 0");
+	expect(mocks.run.mock.calls[0][0].apiOnly).toBe(true);
 	expect(
 		mocks.run.mock.calls[0][0].items.map(
 			(item: LayoutTranslateItem) => item.status,
@@ -144,7 +147,9 @@ it("continues only missing blocks and publishes existing translations before req
 it("publishes a complete cache without requesting translations or rewriting it", async () => {
 	mocks.sidecar = cached([0, 1]);
 	const onItems = vi.fn();
-	const result = await translatePaperLayoutHeadless(request({ onItems }));
+	const result = await translatePaperLayoutHeadless(
+		request({ onItems, apiOnly: true }),
+	);
 	expect(result.skipped).toBe(true);
 	expect(onItems.mock.calls[0][1]).toHaveLength(2);
 	expect(mocks.run).not.toHaveBeenCalled();

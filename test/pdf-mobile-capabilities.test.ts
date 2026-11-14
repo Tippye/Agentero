@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 	read: vi.fn(),
 	publish: vi.fn(),
 	chat: vi.fn(),
+	force: vi.fn().mockResolvedValue(undefined),
+	onLayoutWrite: null as ((path: string) => void) | null,
 	quickChatArmed: undefined as (() => boolean) | undefined,
 }));
 vi.mock("@/lib/core/tauri", () => ({
@@ -27,6 +29,18 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/lib/core/tasks", () => ({ runLocalActivity: vi.fn() }));
 vi.mock("@/lib/shell/settings-window", () => ({ openSettingsWindow: vi.fn() }));
+vi.mock("@/lib/pdf/layout/enqueue-paper-layout", () => ({
+	forcePaperLayoutAnalysis: mocks.force,
+}));
+vi.mock("@/lib/pdf/layout/io", async (original) => ({
+	...(await original<typeof import("@/lib/pdf/layout/io")>()),
+	subscribeLayoutSidecarWrite: (listener: (path: string) => void) => {
+		mocks.onLayoutWrite = listener;
+		return () => {
+			mocks.onLayoutWrite = null;
+		};
+	},
+}));
 vi.mock("@/lib/vault/file-change-gate", () => ({
 	listenVaultFileChangedGated: vi.fn(),
 }));
@@ -79,10 +93,17 @@ describe("PDF viewer host capabilities", () => {
 	it("keeps desktop behavior by default and detects mobile, including an explicit preview runtime", () => {
 		expect(Object.values(pdfViewerCapabilities()).every(Boolean)).toBe(true);
 		mocks.mobile = true;
-		expect(Object.values(pdfViewerCapabilities()).some(Boolean)).toBe(false);
+		expect(pdfViewerCapabilities()).toMatchObject({
+			apiOnly: true,
+			layoutAnalysis: true,
+			layoutTranslation: true,
+			ask: false,
+			latex: false,
+			smartHighlights: false,
+		});
 		expect(pdfViewerCapabilities("desktop").ask).toBe(true);
 		mocks.mobile = false;
-		expect(pdfViewerCapabilities("mobile").layoutAnalysis).toBe(false);
+		expect(pdfViewerCapabilities("mobile").apiOnly).toBe(true);
 	});
 
 	it("renders the mobile selection palette and notes without desktop chat actions", () => {
@@ -149,6 +170,66 @@ describe("PDF viewer host capabilities", () => {
 		expect(createHighlights).toHaveBeenCalledOnce();
 	});
 
+	it("only enqueues mobile parsing after a manual action, keeping the job outside reader teardown", async () => {
+		const regions = [{ id: "synced", pageIndex: 0, kind: "image" }];
+		mocks.read.mockResolvedValue({
+			source: { generatedAt: "mobile-new" },
+			regions,
+		});
+		let layout: ReturnType<typeof usePdfLayoutRun> | undefined;
+		const docs = { isDocumentOpen: () => true };
+		function Harness() {
+			layout = usePdfLayoutRun({
+				canAnalyze: true,
+				apiOnly: pdfViewerCapabilities("mobile").apiOnly,
+				docId: "api-only-layout",
+				paperAbsPath: "/vault/papers/a",
+				paperRelPath: "papers/a",
+				isActive: true,
+				totalPages: 1,
+				layoutCap: null,
+				layoutCapRef: { current: null },
+				docCap: docs as never,
+				docCapRef: { current: docs as never },
+			});
+			return null;
+		}
+		await act(() => root.render(createElement(Harness)));
+		expect(mocks.publish).toHaveBeenCalled();
+		expect(mocks.enqueue).not.toHaveBeenCalled();
+		expect(mocks.run).not.toHaveBeenCalled();
+		await act(() =>
+			layout?.startLayoutAnalysisRef.current({ showOverlay: true }),
+		);
+		expect(mocks.enqueue).toHaveBeenCalledWith(
+			expect.objectContaining({
+				paperAbsPath: "/vault/papers/a",
+				focus: true,
+				apiOnly: true,
+			}),
+		);
+		await act(() => layout?.startLayoutAnalysisRef.current({ force: true }));
+		expect(mocks.force).toHaveBeenCalledWith(
+			expect.objectContaining({ apiOnly: true }),
+		);
+		expect(layout?.layoutTaskRef.current).toBeNull();
+		const completedRegions = [
+			{ id: "headless-result", pageIndex: 0, kind: "image" },
+		];
+		mocks.read.mockResolvedValue({
+			source: { generatedAt: "headless-finished" },
+			regions: completedRegions,
+		});
+		await act(() => mocks.onLayoutWrite?.("/vault/papers/a"));
+		expect(mocks.publish).toHaveBeenLastCalledWith(
+			expect.objectContaining({ regions: completedRegions }),
+		);
+		expect(mocks.enqueue).toHaveBeenCalledOnce();
+		await act(() => root.render(null));
+		expect(mocks.onLayoutWrite).toBeNull();
+		expect(mocks.run).not.toHaveBeenCalled();
+	});
+
 	it("loads synced layout without an analysis capability, enqueue, or inference, even on a manual rerun", async () => {
 		const regions = [{ id: "synced-figure", pageIndex: 0, kind: "image" }];
 		mocks.read.mockResolvedValue({
@@ -159,7 +240,7 @@ describe("PDF viewer host capabilities", () => {
 		const docs = { isDocumentOpen: () => true };
 		function Harness() {
 			layout = usePdfLayoutRun({
-				canAnalyze: pdfViewerCapabilities("mobile").layoutAnalysis,
+				canAnalyze: false,
 				docId: "mobile-layout",
 				paperAbsPath: "/vault/papers/a",
 				paperRelPath: "papers/a",

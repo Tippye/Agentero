@@ -62,6 +62,8 @@ describe("pdfium page origin with a CropBox larger than the MediaBox", () => {
 	beforeAll(async () => {
 		pdf = new PdfiumNative(
 			await init({
+				// WASI requires an ASCII name, independent of the checkout path.
+				thisProgram: "pdfium-page-origin-test",
 				wasmBinary: readFileSync(
 					fileURLToPath(import.meta.resolve("@embedpdf/pdfium/pdfium.wasm")),
 				),

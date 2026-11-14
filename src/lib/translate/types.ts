@@ -146,6 +146,8 @@ export type TranslateTask = {
 };
 
 export type TranslateRunOptions = {
+	/** Reject desktop Agent execution in an explicit mobile viewer preview. */
+	apiOnly?: boolean;
 	/** Override settings.provider for this call. */
 	providerId?: TranslateProviderId;
 	/** Current BYOK provider config, resolved from settings. */

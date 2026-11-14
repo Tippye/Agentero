@@ -67,6 +67,13 @@ pub async fn layout_remote_analyze_pdf(
         return map_err(unknown_provider(&provider));
     };
 
+    #[cfg(mobile)]
+    if !matches!(engine.id(), "paddle" | "mineru") {
+        return map_err(AppError::message(
+            "Mobile layout requires a hosted Paddle or MinerU API",
+        ));
+    }
+
     // Host keeps the real access token; the WebView sends a `*`-mask or nothing.
     let credentials = inject_provider_credentials(&app, engine.id(), &mut args.api_key);
 
@@ -107,6 +114,12 @@ pub async fn layout_remote_probe(
         return map_err(unknown_provider(&provider));
     };
 
+    #[cfg(mobile)]
+    if !matches!(engine.id(), "paddle" | "mineru") {
+        return map_err(AppError::message(
+            "Mobile layout requires a hosted Paddle or MinerU API",
+        ));
+    }
     let credentials = inject_provider_credentials(&app, engine.id(), &mut args.api_key);
 
     let op = OpTimer::start("layout_remote_probe");
@@ -116,6 +129,7 @@ pub async fn layout_remote_probe(
             ApiResult::ok(r)
         }
         Err(e) => {
+            let e = super::journal::redact_error(e, credentials.api_key.as_deref().unwrap_or(""));
             op.finish_err(&e);
             map_err(e)
         }

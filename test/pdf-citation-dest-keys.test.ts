@@ -572,6 +572,8 @@ describe("page boxes not at the origin", () => {
 		const maps = await buildPdfDestMaps(bytes);
 		const pdf = new PdfiumNative(
 			await init({
+				// WASI requires an ASCII name, independent of the checkout path.
+				thisProgram: "pdfium-citation-test",
 				wasmBinary: readFileSync(
 					fileURLToPath(import.meta.resolve("@embedpdf/pdfium/pdfium.wasm")),
 				),

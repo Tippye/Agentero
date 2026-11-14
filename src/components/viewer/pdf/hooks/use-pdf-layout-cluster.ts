@@ -117,6 +117,7 @@ export function usePdfLayoutCluster({
 
 	const { startLayoutAnalysisRef, layoutTaskRef } = usePdfLayoutRun({
 		canAnalyze: capabilities.layoutAnalysis,
+		apiOnly: capabilities.apiOnly,
 		docId,
 		paperAbsPath,
 		paperRelPath,
@@ -212,6 +213,7 @@ export function usePdfLayoutCluster({
 		togglePageLayoutTranslate,
 	} = usePdfLayoutTranslate({
 		enabled: capabilities.layoutTranslation,
+		apiOnly: capabilities.apiOnly,
 		reflowContext: () => {
 			const engine = engineRef.current,
 				document = docCapRef.current?.getDocument(docId);
