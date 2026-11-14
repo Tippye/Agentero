@@ -70,6 +70,8 @@ type PdfToolbarProps = {
 	onImportToLibrary?: () => void;
 	/** True while the import is running. */
 	importBusy?: boolean;
+	/** Tablet shell: enlarge the translate target and keep the meter readable. */
+	mobile?: boolean;
 };
 
 /** Top-right toolbar: region select, bulk translate. Always visible. */
@@ -94,6 +96,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 	isRemotePaper = false,
 	onImportToLibrary,
 	importBusy = false,
+	mobile = false,
 }: PdfToolbarProps) {
 	const { t } = useTranslation("viewer");
 	const visualShortcut = useShortcutLabel("visualAnnotation");
@@ -342,8 +345,15 @@ export const PdfToolbar = memo(function PdfToolbar({
 						<div
 							data-full-text-translate
 							className={cn(
-								"relative flex h-6 shrink-0 items-center justify-end overflow-hidden transition-[width,border-radius,background-color] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-								meterOpen ? "w-44 rounded-lg" : "w-6",
+								"relative flex shrink-0 items-center justify-end overflow-hidden transition-[width,border-radius,background-color] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+								mobile ? "h-11" : "h-6",
+								meterOpen
+									? mobile
+										? "w-52 rounded-lg"
+										: "w-44 rounded-lg"
+									: mobile
+										? "w-11"
+										: "w-6",
 							)}
 						>
 							{/* The running surface is a readout, not a control: only the
@@ -352,7 +362,12 @@ export const PdfToolbar = memo(function PdfToolbar({
 							{meterOpen ? (
 								<>
 									<span className="pointer-events-none absolute inset-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 motion-reduce:animate-none">
-										<span className="absolute top-0 right-7 bottom-[5px] left-2.5 flex items-center gap-2">
+										<span
+											className={cn(
+												"absolute top-0 bottom-[5px] left-2.5 flex items-center gap-2",
+												mobile ? "right-12" : "right-7",
+											)}
+										>
 											{/* String concat, not `cn`: tailwind-merge mistakes
 											    `text-caption` for a text color and drops it. */}
 											<span
@@ -392,7 +407,10 @@ export const PdfToolbar = memo(function PdfToolbar({
 											type="button"
 											size="icon-xs"
 											variant="ghost"
-											className="absolute top-0 right-0 size-6 text-foreground"
+											className={cn(
+												"absolute top-0 right-0 text-foreground",
+												mobile ? "size-11" : "size-6",
+											)}
 											aria-label={translateAriaLabel}
 											title={translateAriaLabel}
 											disabled={!engine}
@@ -416,7 +434,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 													? "secondary"
 													: "ghost"
 											}
-											className="size-6"
+											className={mobile ? "size-11" : "size-6"}
 											aria-label={translateAriaLabel}
 											aria-pressed={
 												layoutTranslateActive || layoutTranslateWaiting
@@ -428,7 +446,10 @@ export const PdfToolbar = memo(function PdfToolbar({
 											onPointerCancel={handleTranslatePointerLeave}
 											onClick={handleTranslateClick}
 										>
-											<Languages className="size-3.5" aria-hidden />
+											<Languages
+												className={mobile ? "size-5" : "size-3.5"}
+												aria-hidden
+											/>
 										</Button>
 									</TooltipTrigger>
 									<TooltipContent side="bottom">

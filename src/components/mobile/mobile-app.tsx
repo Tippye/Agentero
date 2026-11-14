@@ -54,6 +54,7 @@ import { MobilePlazaPage } from "@/components/mobile/mobile-plaza-page";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSettingsPage } from "@/components/mobile/mobile-settings-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
+import { MobileTaskIndicator } from "@/components/mobile/mobile-task-indicator";
 import { MobileRemoteAgentPage } from "@/components/mobile/remote/mobile-remote-agent-page";
 import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
@@ -1111,6 +1112,7 @@ export default function MobileApp() {
 				vaultPath={vaultPath}
 				onUpdated={updatePaperInfo}
 			/>
+			<MobileTaskIndicator />
 			<MobileSettingsPage
 				open={settingsOpen}
 				section={settingsSection}

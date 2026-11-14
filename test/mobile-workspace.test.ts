@@ -581,6 +581,8 @@ describe("stable tablet workspace DOM", () => {
 		await resize(1000);
 		await click("Paper first");
 		await ready();
+		// Fit-width must use the whole tablet pane: mobile has no comment rail.
+		expect(state.pdf?.reserveCommentRail).toBe(false);
 		const pdf = container.querySelector("[data-pdf-document]");
 		const notes = container.querySelector<HTMLTextAreaElement>(
 			'[aria-label="test-notes"]',

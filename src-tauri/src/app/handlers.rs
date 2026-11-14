@@ -459,6 +459,7 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::features::paper::import::commands::paper_import_native_pdfs,
             crate::features::paper::import::commands::paper_import_opened_pdf,
             crate::features::paper::import::commands::paper_stage_import_file,
+            crate::features::paper::analyze::refs::commands::paper_refs_parse,
             crate::features::paper::analyze::refs::commands::paper_refs_list,
             crate::features::paper::import::commands::paper_resolve_identifier,
             crate::features::pdf::bookmarks::pdf_save_bookmarks,
