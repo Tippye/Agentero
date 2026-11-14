@@ -17,6 +17,7 @@ import { type AgentResultPayload, attachAgentRun, runOnce } from "@/lib/agent";
 import type { AgentRunRefs } from "@/lib/agent/run-attach";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
+import { assertApiTranslateProvider } from "@/lib/pdf/processing-policy";
 import {
 	evictAgentTranslateSessionId,
 	getAgentTranslateSessionId,
@@ -90,6 +91,16 @@ export async function runSelectionTranslate({
 			text,
 			context,
 		});
+
+	try {
+		assertApiTranslateProvider(providerId);
+	} catch (error) {
+		const message = errorText(error);
+		notifyError(message);
+		markFailed(message);
+		stopStreaming();
+		return;
+	}
 
 	if (providerId === "agent") {
 		const prompt = buildTranslatePrompt({

@@ -4,11 +4,16 @@
 
 import { commands } from "@/lib/core/bindings";
 import { notifyError } from "@/lib/core/notify";
-import { isTauri } from "@/lib/core/tauri";
+import { isMobileApp, isTauri } from "@/lib/core/tauri";
+import { openMobileProcessingSettings } from "@/lib/mobile/processing-settings";
 import { getVaultPath } from "@/lib/vault/store";
 import { setSettingsOpenState, uiStore } from "./ui-store";
 
 export function openSettingsWindow(section?: string): void {
+	if (isMobileApp()) {
+		openMobileProcessingSettings(section === "layout" ? "layout" : "translate");
+		return;
+	}
 	if (!isTauri()) return;
 	void (async () => {
 		try {

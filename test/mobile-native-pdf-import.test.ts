@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement as h, useEffect } from "react";
+import { act, type ComponentType, createElement as h, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PaperMetadata } from "@/lib/paper/types";
@@ -16,6 +16,9 @@ const io = vi.hoisted(() => ({
 	remove: vi.fn(async () => {}),
 	readerMounts: 0,
 	backEnabled: false,
+	processingSettings: null as ComponentType | null,
+	runtimeMounts: 0,
+	runtimeUnmounts: 0,
 	paper: {
 		id: "existing",
 		path: "papers/existing",
@@ -49,7 +52,8 @@ vi.mock("@/lib/core/bindings", async (original) => {
 		},
 	};
 });
-vi.mock("@/lib/vault/fs", () => ({
+vi.mock("@/lib/vault/fs", async (original) => ({
+	...(await original<typeof import("@/lib/vault/fs")>()),
 	createVaultDirectory: (...args: unknown[]) => io.mkdir(...args),
 	writeVaultBytes: (...args: unknown[]) => io.write(...args),
 	removeVaultPath: (...args: unknown[]) => io.remove(...args),
@@ -60,6 +64,22 @@ vi.mock("@/lib/core/notify", () => ({
 vi.mock("react-i18next", () => ({
 	initReactI18next: { type: "3rdParty", init() {} },
 	useTranslation: () => ({ t: (key: string) => key }),
+}));
+// Processing forms/runtime have their own focused integration suites.
+vi.mock("@/components/mobile/mobile-processing-settings", () => ({
+	MobileProcessingSettings: () =>
+		io.processingSettings ? h(io.processingSettings) : null,
+}));
+vi.mock("@/lib/mobile/pdf-processing", () => ({
+	// Observe where MobileApp owns the runtime. Runtime behavior is tested separately.
+	useMobilePdfProcessingRuntime: () => {
+		useEffect(() => {
+			io.runtimeMounts++;
+			return () => {
+				io.runtimeUnmounts++;
+			};
+		}, []);
+	},
 }));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
 	useMobileVault: () => ({ vaultPath: io.vault, loading: false, retry() {} }),
@@ -157,6 +177,7 @@ vi.mock("@/components/mobile/mobile-background-settings", () => ({
 }));
 
 import MobileApp from "@/components/mobile/mobile-app";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAndImportMobilePdfs } from "@/lib/mobile/import-pdf";
 
 const result = (papers: unknown[] = [], errors: string[] = []) => ({
@@ -173,7 +194,7 @@ function deferred<T>() {
 }
 let root: Root, host: HTMLDivElement, disposed: boolean;
 async function render() {
-	await act(async () => root.render(h(MobileApp)));
+	await act(async () => root.render(h(TooltipProvider, null, h(MobileApp))));
 }
 function importButton() {
 	const button = host.querySelector<HTMLButtonElement>(
@@ -196,6 +217,9 @@ beforeEach(() => {
 	io.vault = "/private/Vault-A";
 	io.readerMounts = 0;
 	io.backEnabled = false;
+	io.processingSettings = null;
+	io.runtimeMounts = 0;
+	io.runtimeUnmounts = 0;
 	io.refresh = vi.fn(async () => {});
 	io.error.mockReset();
 	io.native.mockReset().mockResolvedValue(result());
@@ -213,6 +237,55 @@ afterEach(async () => {
 	host.remove();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
+});
+
+it("opens real processing dialogs from the real Sidebar while keeping runtime ownership above reader navigation", async () => {
+	const actual = await vi.importActual<
+		typeof import("@/components/mobile/mobile-processing-settings")
+	>("@/components/mobile/mobile-processing-settings");
+	io.processingSettings = actual.MobileProcessingSettings;
+	await render();
+	const clickLabel = async (label: string) => {
+		const button = [
+			...document.querySelectorAll<HTMLButtonElement>("button"),
+		].find(
+			(item) =>
+				item.getAttribute("aria-label") === label || item.textContent === label,
+		);
+		if (!button) throw Error(`Missing button ${label}`);
+		await act(async () => button.click());
+	};
+	expect(io.runtimeMounts).toBe(1);
+	await clickLabel("settings.menu");
+	await clickLabel("settings:nav.translate");
+	expect(
+		document.querySelector('[role="dialog"] #translate-cache-ir'),
+	).not.toBeNull();
+	await clickLabel("common:close");
+	await clickLabel("settings.menu");
+	await clickLabel("settings:nav.layout");
+	expect(
+		document.querySelector('[role="dialog"] #layout-provider-paddle-api-key'),
+	).not.toBeNull();
+	expect(
+		document.querySelector('[role="dialog"] #layout-provider-mineru-api-key'),
+	).not.toBeNull();
+	expect(
+		document.querySelector("#layout-provider-openaiCompatible-api-key"),
+	).toBeNull();
+	await clickLabel("common:close");
+	const paper = [...host.querySelectorAll("button")].find((button) =>
+		button.textContent?.includes("Existing paper"),
+	);
+	if (!paper) throw Error("Real library row missing");
+	await act(async () => paper.click());
+	expect(io.readerMounts).toBe(1);
+	await clickLabel("reader.back");
+	expect(host.querySelector("[data-reader-document]")).toBeNull();
+	expect(io.runtimeMounts).toBe(1);
+	expect(io.runtimeUnmounts).toBe(0);
+	await unmount();
+	expect(io.runtimeUnmounts).toBe(1);
 });
 
 it("calls the native command with only the vault and maps catalog results without staging or WebView file reads", async () => {

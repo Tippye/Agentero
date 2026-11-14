@@ -281,6 +281,7 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 		translationOnly || props.plainViewer || props.reserveCommentRail === false
 			? 0
 			: COMMENT_RAIL_WIDTH_PX;
+	const apiOnly = pdfViewerCapabilities(props.runtime).apiOnly;
 	const plugins = useMemo(() => {
 		if (!source && !effectiveSourceBytes) return null;
 		// Prefer bytes (no fetch step); fall back to a URL (remote https).
@@ -358,7 +359,7 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 			// Experimental: on-device layout (image/table/formula) via ONNX.
 			// Model lives under XDG cache (startup prefetch: ModelScope → HF).
 			createPluginRegistration(AiManagerPluginPackage, {
-				runtime: getPdfAiRuntime(),
+				runtime: getPdfAiRuntime(apiOnly),
 			}),
 			createPluginRegistration(LayoutAnalysisPluginPackage, {
 				// Match sidebar default min confidence (30%).
@@ -368,7 +369,14 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 				renderScale: 2,
 			}),
 		];
-	}, [source, effectiveSourceBytes, docId, translationOnly, rightGutter]);
+	}, [
+		source,
+		effectiveSourceBytes,
+		docId,
+		translationOnly,
+		rightGutter,
+		apiOnly,
+	]);
 
 	const hostClass = cn(
 		"relative flex h-full min-h-0 flex-col bg-muted/40",

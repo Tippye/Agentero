@@ -31,6 +31,8 @@ use std::io::Read;
 use std::time::{Duration, Instant};
 
 mod extract;
+#[cfg(test)]
+mod recovery_tests;
 
 const MINERU_BASE_URL: &str = "https://mineru.net";
 const MINERU_POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -900,6 +902,7 @@ fn parse_result_zip(bytes: &[u8]) -> Result<LayoutRemoteAnalyzePdfResult, AppErr
 /// Request one presigned upload URL; returns `(batch_id, upload_url)`.
 /// `language` selects the OCR language pack; `is_ocr` forces OCR even when
 /// the PDF carries a text layer (scanned-document option).
+#[allow(clippy::too_many_arguments)]
 async fn request_upload_url(
     client: &reqwest::Client,
     base: &str,
@@ -907,6 +910,7 @@ async fn request_upload_url(
     file_name: &str,
     language: &str,
     is_ocr: bool,
+    journal: &mut super::journal::Journal,
 ) -> Result<(String, String), AppError> {
     let body = json!({
         "files": [{ "name": file_name, "is_ocr": is_ocr }],
@@ -921,12 +925,13 @@ async fn request_upload_url(
         .json(&body)
         .send()
         .await
-        .map_err(|e| AppError::message(format!("MinerU batch submit failed: {e}")))?;
+        .map_err(|e| {
+            AppError::message(format!("MinerU batch submit failed: {}", e.without_url()))
+        })?;
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU response read failed: {e}")))?;
+    let text = response.text().await.map_err(|e| {
+        AppError::message(format!("MinerU response read failed: {}", e.without_url()))
+    })?;
     let value: Value = serde_json::from_str(&text).map_err(|_| {
         let snippet = http::http_err_snippet(&text);
         AppError::message(format!(
@@ -942,6 +947,7 @@ async fn request_upload_url(
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| AppError::message("Unexpected MinerU response: missing batch_id"))?;
+    journal.save("cloud-poll", json!({"id": batch_id}))?;
     let upload_url = data
         .get("file_urls")
         .and_then(Value::as_array)
@@ -1009,6 +1015,46 @@ async fn run_mineru_extract_unshared(
     cancel: super::CancelFn<'_>,
 ) -> Result<Vec<u8>, AppError> {
     let (base, auth) = resolve_target(credentials)?;
+    let options = serde_json::to_vec(&json!({
+        "language": credentials.language.as_deref().unwrap_or(MINERU_DEFAULT_LANGUAGE),
+        "ocr": credentials.is_ocr, "selfHosted": credentials.self_hosted,
+    }))
+    .map_err(|e| AppError::message(e.to_string()))?;
+    let endpoint = super::journal::normalized_endpoint(&base)?;
+    let key = super::journal::identity(&[
+        b"mineru-v1",
+        endpoint.as_bytes(),
+        auth.as_bytes(),
+        &pdf_bytes,
+        &options,
+    ]);
+    let mut journal = super::journal::Journal::open(key).await?;
+    if let Some(bytes) = journal.cached()? {
+        return Ok(bytes);
+    }
+    let bytes = run_mineru_with_receipt(
+        credentials,
+        pdf_bytes,
+        file_name,
+        progress,
+        cancel,
+        &mut journal,
+    )
+    .await
+    .map_err(|error| super::journal::redact_error(error, &auth))?;
+    journal.complete(&bytes)?;
+    Ok(bytes)
+}
+
+async fn run_mineru_with_receipt(
+    credentials: &HostedProviderCredentials,
+    pdf_bytes: Vec<u8>,
+    file_name: &str,
+    progress: super::ProgressFn<'_>,
+    cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
+) -> Result<Vec<u8>, AppError> {
+    let (base, auth) = resolve_target(credentials)?;
     let client = http::client(MINERU_REQUEST_TIMEOUT)?;
     // The `selfHosted` switch decides the protocol, not the host — that is what
     // keeps a relay (or the default mineru.net) on the cloud batch API.
@@ -1022,14 +1068,37 @@ async fn run_mineru_extract_unshared(
             credentials,
             progress,
             cancel,
+            journal,
         )
         .await;
     }
+    // Once submitted, the receipt's transport wins over a changed health reply.
+    let detected = if journal.stage().starts_with("v1-") {
+        DetectedDialect {
+            dialect: MineruDialect::V1,
+            version: "receipt".into(),
+            inferred: false,
+        }
+    } else if journal.stage().starts_with("task-") {
+        DetectedDialect {
+            dialect: MineruDialect::V1Tasks,
+            version: "receipt".into(),
+            inferred: false,
+        }
+    } else if journal.stage().starts_with("legacy-") {
+        DetectedDialect {
+            dialect: MineruDialect::Legacy,
+            version: "receipt".into(),
+            inferred: false,
+        }
+    } else {
+        detect_self_hosted(&client, &base, &auth).await?
+    };
     let DetectedDialect {
         dialect,
         version,
         inferred,
-    } = detect_self_hosted(&client, &base, &auth).await?;
+    } = detected;
     log::info!(
         target: "agentero::layout::hosted",
         "mineru self-hosted: {dialect:?} version={version} inferred={inferred}"
@@ -1052,6 +1121,7 @@ async fn run_mineru_extract_unshared(
                 credentials,
                 progress,
                 cancel,
+                journal,
             )
             .await
             {
@@ -1069,6 +1139,7 @@ async fn run_mineru_extract_unshared(
                         credentials,
                         progress,
                         cancel,
+                        journal,
                     )
                     .await
                 }
@@ -1085,6 +1156,7 @@ async fn run_mineru_extract_unshared(
                 credentials,
                 progress,
                 cancel,
+                journal,
             )
             .await
         }
@@ -1098,6 +1170,7 @@ async fn run_mineru_extract_unshared(
                 credentials,
                 progress,
                 cancel,
+                journal,
             )
             .await
         }
@@ -1111,10 +1184,50 @@ async fn run_mineru_extract_unshared(
                 credentials,
                 progress,
                 cancel,
+                journal,
             )
             .await
         }
     }
+}
+
+fn require_stage(journal: &super::journal::Journal, stage: &str) -> Result<(), AppError> {
+    if journal.stage() != stage {
+        return Err(AppError::message(
+            "MinerU submission outcome unknown; refusing automatic resubmission",
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_string(journal: &super::journal::Journal, field: &str) -> Result<String, AppError> {
+    journal.receipt()[field]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            AppError::message("MinerU receipt is incomplete; refusing automatic resubmission")
+        })
+}
+
+fn private_upload_headers(headers: Option<&Value>, auth: &str) -> Value {
+    // API authentication is reconstructed from current Host credentials. Only
+    // upload-specific headers may enter the device-private receipt.
+    let token = auth.strip_prefix("Bearer ").unwrap_or(auth);
+    let mut safe = serde_json::Map::new();
+    for (name, value) in headers.and_then(Value::as_object).into_iter().flatten() {
+        let Some(value) = value.as_str() else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("authorization")
+            || name.eq_ignore_ascii_case("x-api-key")
+            || (!token.is_empty() && value.contains(token))
+        {
+            continue;
+        }
+        safe.insert(name.clone(), Value::String(value.to_string()));
+    }
+    Value::Object(safe)
 }
 
 /// Cloud batch flow: request the presigned upload URL, PUT the bytes, poll the
@@ -1129,6 +1242,7 @@ async fn run_cloud_extract(
     credentials: &HostedProviderCredentials,
     progress: super::ProgressFn<'_>,
     cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
 ) -> Result<Vec<u8>, AppError> {
     // 1) Request the presigned upload URL, then PUT the raw PDF bytes
     //    (no Content-Type — the presigned signature does not cover one).
@@ -1139,20 +1253,41 @@ async fn run_cloud_extract(
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .unwrap_or(MINERU_DEFAULT_LANGUAGE);
-    let (batch_id, upload_url) =
-        request_upload_url(client, base, auth, file_name, language, credentials.is_ocr).await?;
-    let upload = client
-        .put(&upload_url)
-        .body(pdf_bytes)
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU upload failed: {e}")))?;
-    let upload_status = upload.status();
-    if !upload_status.is_success() {
-        return Err(AppError::message(format!(
-            "MinerU upload failed (HTTP {upload_status})"
-        )));
+    if journal.begin("prepared", "cloud-submitting")? {
+        let (batch_id, upload_url) = request_upload_url(
+            client,
+            base,
+            auth,
+            file_name,
+            language,
+            credentials.is_ocr,
+            journal,
+        )
+        .await?;
+        journal.save(
+            "cloud-upload",
+            json!({"id": batch_id, "uploadUrl": upload_url}),
+        )?;
     }
+    if journal.stage() == "cloud-upload" {
+        let upload_url = receipt_string(journal, "uploadUrl")?;
+        // Repeating PUT uploads to the same reserved batch, never creates a job.
+        let upload = client
+            .put(&upload_url)
+            .body(pdf_bytes)
+            .send()
+            .await
+            .map_err(|e| AppError::message(format!("MinerU upload failed: {}", e.without_url())))?;
+        let upload_status = upload.status();
+        if !upload_status.is_success() {
+            return Err(AppError::message(format!(
+                "MinerU upload failed (HTTP {upload_status})"
+            )));
+        }
+        journal.save("cloud-poll", journal.receipt().clone())?;
+    }
+    require_stage(journal, "cloud-poll")?;
+    let batch_id = receipt_string(journal, "id")?;
 
     // 2) Poll until done (deadline guards a stuck task).
     let poll_url = format!("{base}/api/v4/extract-results/batch/{batch_id}");
@@ -1170,12 +1305,13 @@ async fn run_cloud_extract(
             .header("Authorization", auth)
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU task poll failed: {e}")))?;
+            .map_err(|e| {
+                AppError::message(format!("MinerU task poll failed: {}", e.without_url()))
+            })?;
         let poll_status = poll.status();
-        let poll_text = poll
-            .text()
-            .await
-            .map_err(|e| AppError::message(format!("MinerU poll read failed: {e}")))?;
+        let poll_text = poll.text().await.map_err(|e| {
+            AppError::message(format!("MinerU poll read failed: {}", e.without_url()))
+        })?;
         let poll_value: Value = serde_json::from_str(&poll_text).map_err(|_| {
             let snippet = http::http_err_snippet(&poll_text);
             AppError::message(format!(
@@ -1232,11 +1368,12 @@ async fn run_cloud_extract(
 
     // 3) Download the result zip (presigned URL, no auth header).
     progress("downloading", None, None);
-    let zip_response = client
-        .get(&zip_url)
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU result download failed: {e}")))?;
+    let zip_response = client.get(&zip_url).send().await.map_err(|e| {
+        AppError::message(format!(
+            "MinerU result download failed: {}",
+            e.without_url()
+        ))
+    })?;
     let zip_status = zip_response.status();
     if !zip_status.is_success() {
         return Err(AppError::message(format!(
@@ -1253,7 +1390,7 @@ async fn read_capped_zip(mut response: reqwest::Response) -> Result<Vec<u8>, App
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|e| AppError::message(format!("MinerU result read failed: {e}")))?
+        .map_err(|e| AppError::message(format!("MinerU result read failed: {}", e.without_url())))?
     {
         if zip_bytes.len() + chunk.len() > MAX_RESULT_ZIP_BYTES {
             return Err(AppError::message("MinerU result zip too large"));
@@ -1364,99 +1501,126 @@ async fn run_v1_extract(
     credentials: &HostedProviderCredentials,
     progress: super::ProgressFn<'_>,
     cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
 ) -> Result<Vec<u8>, AppError> {
     progress("uploading", None, None);
-    let create = authed(client.post(format!("{base}/v1/uploads")), auth)
-        .json(&json!({
-            "filename": file_name,
-            "bytes": pdf_bytes.len(),
-            "mime_type": "application/pdf",
-            "purpose": "parse",
-        }))
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU upload request failed: {e}")))?;
-    // 4.1 removed `/v1/uploads`; a 404 here means the dialect guess was wrong
-    // (or the server is a version this build does not know). Report it as a
-    // domain error so the caller can retry on the task transport, and so the
-    // user sees the real cause instead of a downstream timeout.
-    if create.status() == StatusCode::NOT_FOUND {
-        return Err(AppError::domain(
-            ERR_MINERU_UPLOADS_MISSING,
-            "MinerU self-hosted server has no /v1/uploads endpoint \
-             (expected 4.0; 4.1 moved to /v1/tasks)",
-        ));
-    }
-    let upload = json_body(create, "upload request").await?;
-    let upload_id = upload
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload id"))?
-        .to_string();
-
-    let file_id = if upload.get("status").and_then(Value::as_str) == Some("completed") {
-        // The server already holds these bytes; the PUT is skipped.
-        v1_upload_file_id(&upload)?
-    } else {
-        let target = upload
-            .get("upload_url")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload_url"))?;
-        let url = resolve_upload_url(base, target)?;
-        let mut request = client.request(reqwest::Method::PUT, &url).body(pdf_bytes);
-        if let Some(headers) = upload.get("upload_headers").and_then(Value::as_object) {
-            for (name, value) in headers {
-                if let Some(value) = value.as_str() {
-                    request = request.header(name, value);
-                }
-            }
-        }
-        // A same-origin upload needs the API token; a presigned cross-origin
-        // URL must never receive it.
-        if same_origin(base, &url) {
-            request = authed(request, auth);
-        }
-        let response = request
+    if journal.begin("prepared", "v1-creating-upload")? {
+        let create = authed(client.post(format!("{base}/v1/uploads")), auth)
+            .json(&json!({
+                "filename": file_name,
+                "bytes": pdf_bytes.len(),
+                "mime_type": "application/pdf",
+                "purpose": "parse",
+            }))
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU upload failed: {e}")))?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(AppError::message(format!(
-                "MinerU upload failed (HTTP {status})"
-            )));
+            .map_err(|e| {
+                AppError::message(format!("MinerU upload request failed: {}", e.without_url()))
+            })?;
+        // 4.1 removed `/v1/uploads`; a 404 here means the dialect guess was wrong
+        // (or the server is a version this build does not know). Report it as a
+        // domain error so the caller can retry on the task transport, and so the
+        // user sees the real cause instead of a downstream timeout.
+        if create.status() == StatusCode::NOT_FOUND {
+            // Explicit route absence proves no upload/job was created.
+            journal.save("prepared", Value::Null)?;
+            return Err(AppError::domain(
+                ERR_MINERU_UPLOADS_MISSING,
+                "MinerU self-hosted server has no /v1/uploads endpoint \
+             (expected 4.0; 4.1 moved to /v1/tasks)",
+            ));
         }
-        let complete = authed(
-            client.post(format!("{base}/v1/uploads/{upload_id}/complete")),
-            auth,
-        )
-        .json(&json!({}))
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU upload complete failed: {e}")))?;
-        let completed = json_body(complete, "upload complete").await?;
-        v1_upload_file_id(&completed)?
-    };
+        let upload = json_body(create, "upload request").await?;
+        let upload_id = upload
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload id"))?
+            .to_string();
 
-    let job = json!({
-        "files": [{ "source": { "type": "file_id", "file_id": file_id } }],
-        // `ocr` treats every page as an image; `auto` prefers the text layer
-        // and still OCRs scanned pages.
-        "ocr_mode": if credentials.is_ocr { "ocr" } else { "auto" },
-        // One zip keeps the artifact handling identical to the cloud path and
-        // is the only output that also carries the `images/` assets.
-        "output_formats": ["zip"],
-    });
-    let submit = authed(client.post(format!("{base}/v1/parse/jobs")), auth)
-        .json(&job)
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU job submit failed: {e}")))?;
-    let submitted = json_body(submit, "job submit").await?;
-    let job_id = submitted
-        .get("job_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing job_id"))?;
+        let file_id = if upload.get("status").and_then(Value::as_str) == Some("completed") {
+            Some(v1_upload_file_id(&upload)?)
+        } else {
+            None
+        };
+        journal.save(
+            "v1-upload",
+            json!({
+                "id": upload_id,
+                "fileId": file_id,
+                "uploadUrl": upload.get("upload_url"),
+                "uploadHeaders": private_upload_headers(upload.get("upload_headers"), auth),
+            }),
+        )?;
+    }
+    if journal.stage() == "v1-upload" {
+        let upload_id = receipt_string(journal, "id")?;
+        let file_id = if let Some(file_id) = journal.receipt()["fileId"].as_str() {
+            file_id.to_string()
+        } else {
+            let target = receipt_string(journal, "uploadUrl")?;
+            let url = resolve_upload_url(base, &target)?;
+            let mut request = client.request(reqwest::Method::PUT, &url).body(pdf_bytes);
+            if let Some(headers) = journal.receipt()["uploadHeaders"].as_object() {
+                for (name, value) in headers {
+                    if let Some(value) = value.as_str() {
+                        request = request.header(name, value);
+                    }
+                }
+            }
+            if same_origin(base, &url) {
+                request = authed(request, auth);
+            }
+            let response = request.send().await.map_err(|e| {
+                AppError::message(format!("MinerU upload failed: {}", e.without_url()))
+            })?;
+            if !response.status().is_success() {
+                return Err(AppError::message(format!(
+                    "MinerU upload failed (HTTP {})",
+                    response.status()
+                )));
+            }
+            journal.save("v1-completing", journal.receipt().clone())?;
+            let complete = authed(
+                client.post(format!("{base}/v1/uploads/{upload_id}/complete")),
+                auth,
+            )
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::message(format!(
+                    "MinerU upload complete failed: {}",
+                    e.without_url()
+                ))
+            })?;
+            let completed = json_body(complete, "upload complete").await?;
+            v1_upload_file_id(&completed)?
+        };
+        journal.save("v1-ready", json!({"fileId": file_id}))?;
+    }
+    if journal.begin("v1-ready", "v1-submitting")? {
+        let file_id = receipt_string(journal, "fileId")?;
+        let job = json!({
+            "files": [{ "source": { "type": "file_id", "file_id": file_id } }],
+            "ocr_mode": if credentials.is_ocr { "ocr" } else { "auto" },
+            "output_formats": ["zip"],
+        });
+        let submit = authed(client.post(format!("{base}/v1/parse/jobs")), auth)
+            .json(&job)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::message(format!("MinerU job submit failed: {}", e.without_url()))
+            })?;
+        let submitted = json_body(submit, "job submit").await?;
+        let job_id = submitted
+            .get("job_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing job_id"))?;
+        journal.save("v1-poll", json!({"id": job_id}))?;
+    }
+    require_stage(journal, "v1-poll")?;
+    let job_id = receipt_string(journal, "id")?;
 
     // Poll until a terminal state (deadline guards a stuck task).
     let poll_url = format!("{base}/v1/parse/jobs/{job_id}");
@@ -1472,7 +1636,9 @@ async fn run_v1_extract(
         let poll = authed(client.get(&poll_url), auth)
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU task poll failed: {e}")))?;
+            .map_err(|e| {
+                AppError::message(format!("MinerU task poll failed: {}", e.without_url()))
+            })?;
         let poll = json_body(poll, "task poll").await?;
         let status = poll.get("status").and_then(Value::as_str).unwrap_or("");
         let job_progress = poll.get("progress");
@@ -1502,7 +1668,12 @@ async fn run_v1_extract(
     let response = authed(client.get(&artifact_url), auth)
         .send()
         .await
-        .map_err(|e| AppError::message(format!("MinerU result download failed: {e}")))?;
+        .map_err(|e| {
+            AppError::message(format!(
+                "MinerU result download failed: {}",
+                e.without_url()
+            ))
+        })?;
     let status = response.status();
     if !status.is_success() {
         return Err(AppError::message(format!(
@@ -1550,77 +1721,96 @@ async fn run_task_extract(
     credentials: &HostedProviderCredentials,
     progress: super::ProgressFn<'_>,
     cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
 ) -> Result<Vec<u8>, AppError> {
     progress("uploading", None, None);
-    let create = authed(client.post(format!("{base}/v1/tasks")), auth)
-        .json(&json!({
-            "files": [{ "file_name": file_name, "bytes": pdf_bytes.len() }],
-            // 4.1 rejects the 4.0 `zip` token; `default` is the one that
-            // returns Markdown + `middle_json.json` + `images/` as a zip.
-            "output_formats": ["default"],
-            // `ocr` treats every page as an image; `auto` prefers the text
-            // layer and still OCRs scanned pages.
-            "ocr_mode": if credentials.is_ocr { "ocr" } else { "auto" },
-        }))
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU task create failed: {e}")))?;
-    // Report the real cause: a 401 used to fall through to the JSON reader and
-    // surface as "missing task_id", which points nowhere.
-    let status = create.status();
-    if status == StatusCode::UNAUTHORIZED {
-        return Err(AppError::message(
-            "MinerU task create failed: invalid API token (HTTP 401)",
-        ));
-    }
-    if !status.is_success() {
-        let text = create.text().await.unwrap_or_default();
-        let snippet = http::http_err_snippet(&text);
-        return Err(AppError::message(format!(
-            "MinerU task create failed (HTTP {status}): {snippet}"
-        )));
-    }
-    let created = json_body(create, "task create").await?;
-    let task_id = created
-        .get("task_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing task_id"))?
-        .to_string();
+    if journal.begin("prepared", "task-submitting")? {
+        let create = authed(client.post(format!("{base}/v1/tasks")), auth)
+            .json(&json!({
+                "files": [{ "file_name": file_name, "bytes": pdf_bytes.len() }],
+                // 4.1 rejects the 4.0 `zip` token; `default` is the one that
+                // returns Markdown + `middle_json.json` + `images/` as a zip.
+                "output_formats": ["default"],
+                // `ocr` treats every page as an image; `auto` prefers the text
+                // layer and still OCRs scanned pages.
+                "ocr_mode": if credentials.is_ocr { "ocr" } else { "auto" },
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::message(format!("MinerU task create failed: {}", e.without_url()))
+            })?;
+        // Report the real cause: a 401 used to fall through to the JSON reader and
+        // surface as "missing task_id", which points nowhere.
+        let status = create.status();
+        if status == StatusCode::UNAUTHORIZED {
+            return Err(AppError::message(
+                "MinerU task create failed: invalid API token (HTTP 401)",
+            ));
+        }
+        if !status.is_success() {
+            let text = create.text().await.unwrap_or_default();
+            let snippet = http::http_err_snippet(&text);
+            return Err(AppError::message(format!(
+                "MinerU task create failed (HTTP {status}): {snippet}"
+            )));
+        }
+        let created = json_body(create, "task create").await?;
+        let task_id = created
+            .get("task_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing task_id"))?
+            .to_string();
 
-    let upload = created
-        .get("files")
-        .and_then(Value::as_array)
-        .and_then(|files| files.first())
-        .and_then(|file| file.get("upload"))
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload link"))?;
-    let target = upload
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload_url"))?;
-    let url = resolve_upload_url(base, target)?;
-    let mut request = client.request(reqwest::Method::PUT, &url).body(pdf_bytes);
-    if let Some(headers) = upload.get("headers").and_then(Value::as_object) {
-        for (name, value) in headers {
-            if let Some(value) = value.as_str() {
-                request = request.header(name, value);
+        journal.save("task-poll", json!({"id": task_id}))?;
+        let upload = created
+            .get("files")
+            .and_then(Value::as_array)
+            .and_then(|files| files.first())
+            .and_then(|file| file.get("upload"))
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload link"))?;
+        let target = upload
+            .get("url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing upload_url"))?;
+        journal.save(
+            "task-upload",
+            json!({
+                "id": task_id, "uploadUrl": target,
+                "uploadHeaders": private_upload_headers(upload.get("headers"), auth),
+            }),
+        )?;
+    }
+    if journal.stage() == "task-upload" {
+        let target = receipt_string(journal, "uploadUrl")?;
+        let url = resolve_upload_url(base, &target)?;
+        let mut request = client.request(reqwest::Method::PUT, &url).body(pdf_bytes);
+        if let Some(headers) = journal.receipt()["uploadHeaders"].as_object() {
+            for (name, value) in headers {
+                if let Some(value) = value.as_str() {
+                    request = request.header(name, value);
+                }
             }
         }
-    }
-    // Same rule as the 4.0 path: the token only travels to our own origin.
-    if same_origin(base, &url) {
-        request = authed(request, auth);
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU upload failed: {e}")))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(AppError::message(format!(
-            "MinerU upload failed (HTTP {status})"
-        )));
-    }
+        // Same rule as the 4.0 path: the token only travels to our own origin.
+        if same_origin(base, &url) {
+            request = authed(request, auth);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::message(format!("MinerU upload failed: {}", e.without_url())))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AppError::message(format!(
+                "MinerU upload failed (HTTP {status})"
+            )));
+        }
 
+        journal.save("task-poll", journal.receipt().clone())?;
+    }
+    require_stage(journal, "task-poll")?;
+    let task_id = receipt_string(journal, "id")?;
     let poll_url = format!("{base}/v1/tasks/{task_id}");
     let started = Instant::now();
     let artifact_url = loop {
@@ -1634,7 +1824,9 @@ async fn run_task_extract(
         let poll = authed(client.get(&poll_url), auth)
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU task poll failed: {e}")))?;
+            .map_err(|e| {
+                AppError::message(format!("MinerU task poll failed: {}", e.without_url()))
+            })?;
         let poll = json_body(poll, "task poll").await?;
         let status = poll.get("status").and_then(Value::as_str).unwrap_or("");
         let job_progress = poll.get("progress");
@@ -1666,10 +1858,12 @@ async fn run_task_extract(
     if same_origin(base, &url) {
         request = authed(request, auth);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU result download failed: {e}")))?;
+    let response = request.send().await.map_err(|e| {
+        AppError::message(format!(
+            "MinerU result download failed: {}",
+            e.without_url()
+        ))
+    })?;
     let status = response.status();
     if !status.is_success() {
         return Err(AppError::message(format!(
@@ -1710,30 +1904,38 @@ async fn run_legacy_extract(
     credentials: &HostedProviderCredentials,
     progress: super::ProgressFn<'_>,
     cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
 ) -> Result<Vec<u8>, AppError> {
     progress("uploading", None, None);
-    let mut form = reqwest::multipart::Form::new().part(
-        "files",
-        reqwest::multipart::Part::bytes(pdf_bytes)
-            .file_name(file_name.to_string())
-            .mime_str("application/pdf")
-            .map_err(|e| AppError::message(format!("MinerU upload form failed: {e}")))?,
-    );
-    for (field, value) in legacy_form_fields(credentials) {
-        form = form.text(field, value);
-    }
-    let submit = authed(client.post(format!("{base}/tasks")), auth)
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("MinerU task submit failed: {e}")))?;
-    let submitted = json_body(submit, "task submit").await?;
-    let task_id = submitted
-        .get("task_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::message("Unexpected MinerU response: missing task_id"))?
-        .to_string();
+    if journal.begin("prepared", "legacy-submitting")? {
+        let mut form = reqwest::multipart::Form::new().part(
+            "files",
+            reqwest::multipart::Part::bytes(pdf_bytes)
+                .file_name(file_name.to_string())
+                .mime_str("application/pdf")
+                .map_err(|e| AppError::message(format!("MinerU upload form failed: {e}")))?,
+        );
+        for (field, value) in legacy_form_fields(credentials) {
+            form = form.text(field, value);
+        }
+        let submit = authed(client.post(format!("{base}/tasks")), auth)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::message(format!("MinerU task submit failed: {}", e.without_url()))
+            })?;
+        let submitted = json_body(submit, "task submit").await?;
+        let task_id = submitted
+            .get("task_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::message("Unexpected MinerU response: missing task_id"))?
+            .to_string();
 
+        journal.save("legacy-poll", json!({"id": task_id}))?;
+    }
+    require_stage(journal, "legacy-poll")?;
+    let task_id = receipt_string(journal, "id")?;
     let poll_url = format!("{base}/tasks/{task_id}");
     let started = Instant::now();
     loop {
@@ -1747,7 +1949,9 @@ async fn run_legacy_extract(
         let poll = authed(client.get(&poll_url), auth)
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU task poll failed: {e}")))?;
+            .map_err(|e| {
+                AppError::message(format!("MinerU task poll failed: {}", e.without_url()))
+            })?;
         let poll = json_body(poll, "task poll").await?;
         let status = poll.get("status").and_then(Value::as_str).unwrap_or("");
         match classify_extract_state(status) {
@@ -1772,7 +1976,12 @@ async fn run_legacy_extract(
     let response = authed(client.get(format!("{poll_url}/result")), auth)
         .send()
         .await
-        .map_err(|e| AppError::message(format!("MinerU result download failed: {e}")))?;
+        .map_err(|e| {
+            AppError::message(format!(
+                "MinerU result download failed: {}",
+                e.without_url()
+            ))
+        })?;
     let status = response.status();
     if !status.is_success() {
         return Err(AppError::message(format!(
@@ -1812,12 +2021,12 @@ async fn probe(
         .json(&json!({ "files": [] }))
         .send()
         .await
-        .map_err(|e| AppError::message(format!("MinerU probe failed: {e}")))?;
+        .map_err(|e| AppError::message(format!("MinerU probe failed: {}", e.without_url())))?;
     let status = response.status();
     let text = response
         .text()
         .await
-        .map_err(|e| AppError::message(format!("MinerU probe read failed: {e}")))?;
+        .map_err(|e| AppError::message(format!("MinerU probe read failed: {}", e.without_url())))?;
     let value: Value = serde_json::from_str(&text).map_err(|_| {
         let snippet = http::http_err_snippet(&text);
         AppError::message(format!("MinerU probe failed (HTTP {status}): {snippet}"))
@@ -1849,7 +2058,7 @@ async fn probe_self_hosted(
             .query(&[("limit", "1")])
             .send()
             .await
-            .map_err(|e| AppError::message(format!("MinerU probe failed: {e}")))?;
+            .map_err(|e| AppError::message(format!("MinerU probe failed: {}", e.without_url())))?;
         let status = response.status();
         if status == StatusCode::UNAUTHORIZED {
             return Err(AppError::message(

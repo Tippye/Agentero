@@ -35,7 +35,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { BUILTIN_PROVIDER_ID } from "@/lib/core/builtin";
-import { notifyError } from "@/lib/core/notify";
+import { errorMessage, notifyError } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { hasSecret, isSecretMask, maskSecret } from "@/lib/core/secret-mask";
 import { isTauri } from "@/lib/core/tauri";
@@ -112,10 +112,12 @@ export function TranslatePane({
 	settings,
 	patch,
 	onOpenAgentSettings,
+	apiOnly = false,
 }: {
 	settings: AppSettings;
 	patch: (p: Partial<AppSettings>) => void;
 	onOpenAgentSettings?: () => void;
+	apiOnly?: boolean;
 }) {
 	const { t } = useTranslation("settings");
 	const tr = settings.translate;
@@ -140,10 +142,10 @@ export function TranslatePane({
 	// The built-in channel stays implemented, but it is no longer offered here.
 	// A stored selection is moved to the free default so the picker is not blank.
 	useEffect(() => {
-		if (tr.provider !== BUILTIN_PROVIDER_ID) return;
+		if (apiOnly || tr.provider !== BUILTIN_PROVIDER_ID) return;
 		patchTranslate({ provider: DEFAULT_TRANSLATE_SETTINGS.provider });
-	}, [tr.provider, patchTranslate]);
-	const showAgent = tr.provider === "agent";
+	}, [apiOnly, tr.provider, patchTranslate]);
+	const showAgent = !apiOnly && tr.provider === "agent";
 	const getProviderConfig = useCallback(
 		(id: CommercialTranslateProviderId): TranslateProviderConfig =>
 			tr.providerConfigs[id] ?? EMPTY_TRANSLATE_PROVIDER_CONFIG,
@@ -156,12 +158,13 @@ export function TranslatePane({
 	const providers = useMemo(
 		() =>
 			listSelectableProviders().filter((s) => {
-				if (s.id === BUILTIN_PROVIDER_ID) return false;
+				if (s.id === BUILTIN_PROVIDER_ID || (apiOnly && s.id === "agent"))
+					return false;
 				if (!isCommercialTranslateProvider(s.id)) return true;
-				if (tr.provider === s.id) return true;
+				if (apiOnly || tr.provider === s.id) return true;
 				return isCommercialProviderConfigured(s.id, getProviderConfig(s.id));
 			}),
-		[getProviderConfig, tr.provider],
+		[apiOnly, getProviderConfig, tr.provider],
 	);
 	/** Free-MT probe status (Agent never probed here). */
 	const [probeMap, setProbeMap] = useState<FreeMtProbeMap>({});
@@ -323,21 +326,17 @@ export function TranslatePane({
 				apiKey: displayMask,
 			};
 
+			try {
+				await saveSettingsAsync({ ...settings, translate: nextTranslate });
+			} catch (error) {
+				notifyError(errorMessage(error));
+				return;
+			}
 			setConfigDrafts((prev) => {
 				const next = { ...prev };
 				delete next[providerId];
 				return next;
 			});
-
-			try {
-				// Write real key (or mask-merge) to Host before probe.
-				await saveSettingsAsync({
-					...settings,
-					translate: nextTranslate,
-				});
-			} catch {
-				// Still try probe / mask UI below.
-			}
 
 			// React state shows same-length `*` only; second save merges mask → keep secret.
 			patch({
@@ -388,10 +387,12 @@ export function TranslatePane({
 			<SettingsGroup>
 				<SettingsRow label={t("translate.provider.label")}>
 					<Select
-						value={tr.provider}
-						onValueChange={(v) =>
-							patchTranslate({ provider: v as TranslateProviderId })
-						}
+						value={apiOnly && tr.provider === "agent" ? "" : tr.provider}
+						onValueChange={(v) => {
+							if (apiOnly && (v === "agent" || v === BUILTIN_PROVIDER_ID))
+								return;
+							patchTranslate({ provider: v as TranslateProviderId });
+						}}
 						onOpenChange={(open) => {
 							if (!open) return;
 							runFreeMtProbe();

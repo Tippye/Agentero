@@ -6,6 +6,8 @@ export type PdfViewerRuntime = "desktop" | "mobile";
 export type PdfViewerCapabilities = Readonly<{
 	ask: boolean;
 	addToChat: boolean;
+	/** Mobile processing uses remote APIs, including explicit desktop previews. */
+	apiOnly?: boolean;
 	layoutAnalysis: boolean;
 	layoutTranslation: boolean;
 	smartHighlights: boolean;
@@ -26,8 +28,9 @@ const DESKTOP_CAPABILITIES: PdfViewerCapabilities = Object.freeze({
 const MOBILE_CAPABILITIES: PdfViewerCapabilities = Object.freeze({
 	ask: false,
 	addToChat: false,
-	layoutAnalysis: false,
-	layoutTranslation: false,
+	apiOnly: true,
+	layoutAnalysis: true,
+	layoutTranslation: true,
 	smartHighlights: false,
 	latex: false,
 	menuContributions: false,

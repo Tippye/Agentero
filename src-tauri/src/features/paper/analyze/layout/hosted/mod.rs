@@ -13,9 +13,12 @@ use tauri::{AppHandle, Emitter};
 
 pub mod commands;
 pub mod engine;
+mod journal;
 pub mod mineru;
 pub mod openai_compatible;
 pub mod paddle;
+#[cfg(test)]
+mod test_server;
 
 /// Cloud-job progress callback: `(phase, extracted_pages, total_pages)`.
 pub(crate) type ProgressFn<'a> = &'a (dyn Fn(&str, Option<u64>, Option<u64>) + Send + Sync);

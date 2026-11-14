@@ -133,6 +133,41 @@ fn linked_actor_files_are_not_followed_or_overwritten() {
     assert!(!outside.path().join("replica-id").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn actor_sync_stays_within_the_app_config_root_on_creation_and_reload() {
+    let sandbox = tempfile::tempdir().unwrap();
+    let config = sandbox.path().join("app.agentero");
+    fs::create_dir(&config).unwrap();
+    let directory = config.join("ink");
+    let mut synced = Vec::new();
+    let mut sync = |directory: &Path| {
+        sync_actor_directories_with(directory, |path| {
+            // Model Android's /data/user/0 boundary, and perform actual fsync
+            // for every admitted directory. The old third ancestor fails here.
+            if !path.starts_with(&config) {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            fs::File::open(path)?.sync_all()?;
+            synced.push(path.to_path_buf());
+            Ok(())
+        })
+    };
+    let actor = load_or_create_actor_with(&directory, &mut sync).unwrap();
+    assert_eq!(
+        load_or_create_actor_with(&directory, &mut sync).unwrap(),
+        actor
+    );
+    assert_eq!(
+        synced,
+        [directory.clone(), config.clone(), directory.clone(), config]
+    );
+    assert_eq!(
+        read_actor(&directory.join("replica-id")).unwrap(),
+        Some(actor)
+    );
+}
+
 #[test]
 fn actor_postpublication_sync_failure_retains_identity_for_exact_retry() {
     let dir = tempfile::tempdir().unwrap();

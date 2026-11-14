@@ -97,6 +97,7 @@ function mergePass(
 
 /** Retry terminal errors individually without changing paragraph identity. */
 export async function runLayoutRegionTranslate(options: {
+	apiOnly?: boolean;
 	items: LayoutTranslateItem[];
 	signal?: AbortSignal;
 	concurrency?: number;
@@ -112,6 +113,7 @@ export async function runLayoutRegionTranslate(options: {
 		concurrency: number | undefined,
 	): Promise<LayoutTranslateItem[]> => {
 		const result = await runCoreLayoutRegionTranslate({
+			apiOnly: options.apiOnly,
 			items: seed.map((item) => ({ ...item })),
 			signal: options.signal,
 			concurrency,

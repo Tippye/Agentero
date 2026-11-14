@@ -21,7 +21,7 @@ use crate::features::paper::analyze::layout::hosted::{
 
 /// Provider credentials resolved by the command layer (Host-held key; the
 /// WebView only ever sends a `*` mask).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct HostedProviderCredentials {
     pub api_key: Option<String>,
     pub base_url: Option<String>,

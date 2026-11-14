@@ -132,6 +132,8 @@
 		"read": "Read",
 		"compare": "Compare",
 		"discuss": "Discuss",
+		"showPaperList": "Show paper list",
+		"hidePaperList": "Hide paper list",
 		"resizeLibrary": "Resize library and reader",
 		"resizeDiscussion": "Resize reader and Agent",
 		"resizeNotes": "Resize PDF and notes"

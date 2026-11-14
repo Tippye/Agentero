@@ -62,6 +62,9 @@ describe("standard Ink PDF copy", () => {
 		}
 		const engine = new PdfiumNative(
 			await init({
+				// Emscripten's WASI environment requires an ASCII program name;
+				// Node's absolute test-runner path can contain non-ASCII folders.
+				thisProgram: "pdfium-ink-test",
 				wasmBinary: readFileSync(
 					fileURLToPath(import.meta.resolve("@embedpdf/pdfium/pdfium.wasm")),
 				),

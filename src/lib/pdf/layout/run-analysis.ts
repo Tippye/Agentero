@@ -5,6 +5,7 @@ import type {
 	LayoutAnalysisScope,
 	LayoutTask,
 } from "@embedpdf/plugin-layout-analysis";
+import i18n from "@/i18n";
 import { events } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 
@@ -32,6 +33,7 @@ import {
 	paddlePageToRegions,
 } from "@/lib/pdf/layout/paddle";
 import {
+	isProviderReady,
 	isRemoteLayoutProvider,
 	layoutProviderFor,
 	type RemoteLayoutProviderDescriptor,
@@ -48,9 +50,22 @@ import type {
 	PdfLayoutDocumentResult,
 	PdfLayoutRegion,
 } from "@/lib/pdf/layout/types";
+import { isApiOnlyPdfProcessing } from "@/lib/pdf/processing-policy";
 import { loadSettings } from "@/lib/settings/store";
 
+/** Validate before opening models, enqueueing work, or uploading PDF bytes. */
+export function assertRemoteLayoutProvider(): RemoteLayoutProviderDescriptor {
+	const settings = loadSettings().layout;
+	const provider = layoutProviderFor(settings.backend);
+	if (provider && isRemoteLayoutProvider(provider)) {
+		const config = settings.providerConfigs[provider.id];
+		if (config && isProviderReady(provider, config)) return provider;
+	}
+	throw new Error(i18n.t("viewer:pdf.apiOnly.layoutProviderRequired"));
+}
+
 export type RunLayoutAnalysisOptions = {
+	apiOnly?: boolean;
 	/**
 	 * When true, ignore `source/layout.json` and re-run PP-DocLayoutV3 (PDF→JSON).
 	 * When false (default), load the sidecar if present and only re-run
@@ -325,6 +340,7 @@ export async function runDocumentLayoutAnalysis(
 	options: RunLayoutAnalysisOptions = {},
 ): Promise<LayoutTaskLike | null> {
 	const started = performance.now();
+	const apiOnly = isApiOnlyPdfProcessing(options.apiOnly);
 	const onDone = options.onDone;
 	options = {
 		...options,
@@ -368,7 +384,7 @@ export async function runDocumentLayoutAnalysis(
 				// No textLayerExtracted flag: walk the text layer once, including
 				// boxes that already have text, then write it back. A flagged
 				// sidecar only merges in memory and does not show analyzing.
-				const needsText = layoutSidecarNeedsTextLayer(cached);
+				const needsText = !apiOnly && layoutSidecarNeedsTextLayer(cached);
 				if (needsText) {
 					setUi(
 						{
@@ -462,6 +478,15 @@ export async function runDocumentLayoutAnalysis(
 		}
 	}
 
+	const provider = apiOnly
+		? assertRemoteLayoutProvider()
+		: layoutProviderFor(loadSettings().layout.backend);
+	if (
+		apiOnly &&
+		(!options.paperAbsPath || !options.totalPages || options.totalPages <= 0)
+	) {
+		throw new Error(i18n.t("viewer:pdf.apiOnly.layoutProviderRequired"));
+	}
 	const analyzingMessage = options.paperLabel?.trim() || "Analyzing layout…";
 
 	setUi(
@@ -473,9 +498,7 @@ export async function runDocumentLayoutAnalysis(
 		true,
 	);
 
-	// Remote layout backend (Settings → Layout): whole-PDF async job.
-	// Falls back to local ONNX when the paper folder / page count is unknown.
-	const provider = layoutProviderFor(loadSettings().layout.backend);
+	// Remote layout backend: whole-PDF async job. Only desktop permits fallback.
 	if (
 		provider &&
 		isRemoteLayoutProvider(provider) &&
@@ -491,6 +514,10 @@ export async function runDocumentLayoutAnalysis(
 		});
 	}
 
+	// Remote prerequisites are mandatory on mobile; never fall into local ONNX.
+	if (apiOnly) {
+		throw new Error(i18n.t("viewer:pdf.apiOnly.layoutProviderRequired"));
+	}
 	try {
 		const s = await ensureLayoutModel();
 		if (s && !s.ready) {

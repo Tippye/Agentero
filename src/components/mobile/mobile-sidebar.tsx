@@ -5,7 +5,9 @@ import {
 	Circle,
 	Cloud,
 	Folder,
+	Languages,
 	Laptop,
+	Layers3,
 	LogOut,
 	QrCode,
 	X,
@@ -25,6 +27,7 @@ import type { BridgeClientStatus } from "@/lib/bridge/client";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
+import { openMobileProcessingSettings } from "@/lib/mobile/processing-settings";
 
 export function MobileSidebar({
 	open,
@@ -49,7 +52,7 @@ export function MobileSidebar({
 	syncDisabled?: boolean;
 	navigation?: ReactNode;
 }) {
-	const { t } = useTranslation("mobile");
+	const { t } = useTranslation(["mobile", "settings"]);
 	const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 	const [expandedDevice, setExpandedDevice] = useState(true);
 
@@ -157,6 +160,25 @@ export function MobileSidebar({
 						<Cloud className="size-5 text-muted-foreground" />
 						{t("sync.title")}
 					</Button>
+					{(["translate", "layout"] as const).map((section) => (
+						<Button
+							key={section}
+							type="button"
+							variant="outline"
+							className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
+							onClick={() => {
+								openMobileProcessingSettings(section);
+								onClose();
+							}}
+						>
+							{section === "translate" ? (
+								<Languages className="size-5 text-muted-foreground" />
+							) : (
+								<Layers3 className="size-5 text-muted-foreground" />
+							)}
+							{t(`settings:nav.${section}`)}
+						</Button>
+					))}
 					{onBackground ? (
 						<Button
 							type="button"

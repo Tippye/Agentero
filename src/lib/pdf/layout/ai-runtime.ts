@@ -1,8 +1,10 @@
 import type { AiRuntime } from "@embedpdf/ai";
 import { createAiRuntime } from "@embedpdf/ai/web";
 
+import i18n from "@/i18n";
 import { isTauri } from "@/lib/core/tauri";
 import { layoutModelLocalUrl } from "@/lib/pdf/layout/model";
+import { isApiOnlyPdfProcessing } from "@/lib/pdf/processing-policy";
 
 /**
  * Shared browser AI runtime for EmbedPDF layout analysis.
@@ -16,7 +18,20 @@ import { layoutModelLocalUrl } from "@/lib/pdf/layout/model";
  */
 let runtime: AiRuntime | null = null;
 
-export function getPdfAiRuntime(): AiRuntime {
+const apiOnlyRuntime = new Proxy({} as AiRuntime, {
+	get(_target, prop) {
+		if (prop === "destroy") return () => Promise.resolve();
+		if (prop === "getBackend") return () => null;
+		if (prop === "isModelLoaded") return () => false;
+		if (prop === "unloadModel") return () => {};
+		return () => {
+			throw new Error(i18n.t("viewer:pdf.apiOnly.layoutProviderRequired"));
+		};
+	},
+});
+
+export function getPdfAiRuntime(apiOnly = false): AiRuntime {
+	if (isApiOnlyPdfProcessing(apiOnly)) return apiOnlyRuntime;
 	if (!runtime) {
 		const models = isTauri()
 			? {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { enterApiOnlyPdfProcessing } from "@/lib/pdf/processing-policy";
 import {
 	getAgentTranslateSessionId,
 	setAgentTranslateSessionId,
@@ -137,6 +137,22 @@ describe("runSelectionTranslate", () => {
 		runTranslate.mockReset();
 		notifyError.mockReset();
 		providerId = "agent";
+	});
+
+	it("rejects a stale Agent setting in the mobile shell before ACP resolution or dispatch", async () => {
+		const h = harness(record("mobile"));
+		const release = enterApiOnlyPdfProcessing();
+		try {
+			await runSelectionTranslate(h.options);
+		} finally {
+			release();
+		}
+		expect(resolveAgent).not.toHaveBeenCalled();
+		expect(runOnce).not.toHaveBeenCalled();
+		expect(runTranslate).not.toHaveBeenCalled();
+		expect(h.failures).toHaveLength(1);
+		expect(h.getStops()).toBe(1);
+		expect(notifyError).toHaveBeenCalledOnce();
 	});
 
 	it("streams an agent run, commits the trimmed result, and rewrites the session cache", async () => {

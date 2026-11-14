@@ -54,7 +54,6 @@ import {
 	type ParseResultScope,
 } from "@/lib/paper/reparse";
 import {
-	layoutBackendsAfterClearingProvider,
 	persistLayoutProviderConfig,
 	probeLayoutProvider,
 } from "@/lib/pdf/layout/provider-config";
@@ -106,16 +105,19 @@ export function LayoutPane({
 	patch,
 	vaultPath,
 	hostContext,
+	apiOnly = false,
 }: {
 	settings: AppSettings;
 	patch: (p: Partial<AppSettings>) => void;
 	vaultPath?: string | null;
 	hostContext: SettingsHostContext;
+	apiOnly?: boolean;
 }) {
 	const { t } = useTranslation(["settings", "common"]);
 	const layout = settings.layout;
 	const isLocalVault = hostContext.kind === "local";
-	const canManageResults = Boolean(vaultPath) && isLocalVault && isTauri();
+	const canManageResults =
+		!apiOnly && Boolean(vaultPath) && isLocalVault && isTauri();
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [dialogMode, setDialogMode] = useState<"clear" | "reparse">("clear");
 	const [scope, setScope] = useState<ParseResultScope>("all");
@@ -129,7 +131,9 @@ export function LayoutPane({
 			layoutProviderCard(descriptor),
 		),
 		...Object.values(PARSER_PROVIDERS),
-	]).filter(isProviderCardConfigurable);
+	])
+		.filter(isProviderCardConfigurable)
+		.filter((card) => !apiOnly || card.id === "paddle" || card.id === "mineru");
 	const isProviderConfigured = (id: LayoutProviderId) => {
 		const card = cards.find((candidate) => candidate.id === id);
 		const config = layout.providerConfigs[id];
@@ -141,21 +145,24 @@ export function LayoutPane({
 	const noProviderReady = !hasReadyProvider(cards, layout.providerConfigs);
 	const backendOptions = Object.values(LAYOUT_PROVIDERS).filter(
 		(descriptor) => {
+			if (apiOnly)
+				return descriptor.id === "paddle" || descriptor.id === "mineru";
 			if (!isRemoteLayoutProvider(descriptor)) return true;
 			if (descriptor.id === layout.backend) return true;
 			return isProviderConfigured(descriptor.id);
 		},
 	);
 	const parserBackendOptions = PARSER_BACKENDS.filter((backend) => {
+		if (apiOnly) return backend === "paddle" || backend === "mineru";
 		if (backend === BUILTIN_PROVIDER_ID) return false;
 		if (backend === "local") return true;
 		return backend === layout.parserBackend || isProviderConfigured(backend);
 	});
 	// The built-in parser stays implemented, but it is no longer offered here.
 	useEffect(() => {
-		if (layout.parserBackend !== BUILTIN_PROVIDER_ID) return;
+		if (apiOnly || layout.parserBackend !== BUILTIN_PROVIDER_ID) return;
 		patch({ layout: { ...layout, parserBackend: "local" } });
-	}, [layout, patch]);
+	}, [apiOnly, layout, patch]);
 	// OpenAI-compatible is a catch-all: keep it collapsed under "Other" so the
 	// recommended Paddle / MinerU path stays uncluttered (issue #656).
 	const primaryCards = cards.filter((card) => card.id !== "openaiCompatible");
@@ -168,7 +175,7 @@ export function LayoutPane({
 	}, []);
 
 	const handleConfirm = useCallback(async () => {
-		if (!vaultPath) return;
+		if (apiOnly || !vaultPath) return;
 		setBusy(true);
 		try {
 			const result =
@@ -194,7 +201,7 @@ export function LayoutPane({
 		} finally {
 			setBusy(false);
 		}
-	}, [dialogMode, scope, vaultPath, t]);
+	}, [apiOnly, dialogMode, scope, vaultPath, t]);
 
 	const confirmLabel =
 		dialogMode === "clear"
@@ -208,10 +215,13 @@ export function LayoutPane({
 			<SettingsGroup>
 				<SettingsRow label={t("layout.backend.label")} htmlFor="layout-backend">
 					<Select
-						value={layout.backend}
+						value={apiOnly && layout.backend === "local" ? "" : layout.backend}
 						disabled={backendOptions.length <= 1}
 						onValueChange={(value) => {
-							if (isLayoutBackend(value)) {
+							if (
+								isLayoutBackend(value) &&
+								(!apiOnly || value === "paddle" || value === "mineru")
+							) {
 								patch({ layout: { ...layout, backend: value } });
 							}
 						}}
@@ -245,10 +255,19 @@ export function LayoutPane({
 					htmlFor="layout-parser-backend"
 				>
 					<Select
-						value={layout.parserBackend}
+						value={
+							apiOnly &&
+							layout.parserBackend !== "paddle" &&
+							layout.parserBackend !== "mineru"
+								? ""
+								: layout.parserBackend
+						}
 						disabled={parserBackendOptions.length <= 1}
 						onValueChange={(value) => {
-							if (isParserBackend(value)) {
+							if (
+								isParserBackend(value) &&
+								(!apiOnly || value === "paddle" || value === "mineru")
+							) {
 								patch({ layout: { ...layout, parserBackend: value } });
 							}
 						}}
@@ -277,7 +296,7 @@ export function LayoutPane({
 				</SettingsRow>
 			</SettingsGroup>
 
-			{noProviderReady ? (
+			{noProviderReady && !apiOnly ? (
 				<p className="mt-3 px-0.5 text-muted-foreground text-xs">
 					{t("layout.menusHint")}
 				</p>
@@ -287,9 +306,11 @@ export function LayoutPane({
 				<h3 className="mb-2 px-0.5 font-medium text-sm">
 					{t("layout.providerConfig.section")}
 				</h3>
-				<p className="mb-2 px-0.5 text-muted-foreground text-xs">
-					{t("layout.providerConfig.sectionHint")}
-				</p>
+				{!apiOnly && (
+					<p className="mb-2 px-0.5 text-muted-foreground text-xs">
+						{t("layout.providerConfig.sectionHint")}
+					</p>
+				)}
 				<div className="grid gap-2">
 					{primaryCards.map((card) => (
 						<ProviderConfigCard
@@ -297,6 +318,7 @@ export function LayoutPane({
 							provider={card}
 							settings={settings}
 							patch={patch}
+							apiOnly={apiOnly}
 						/>
 					))}
 				</div>
@@ -335,100 +357,104 @@ export function LayoutPane({
 				) : null}
 			</div>
 
-			<div className="flex justify-end gap-2">
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					disabled={!canManageResults || busy}
-					onClick={() => openDialog("clear")}
-				>
-					<Trash2 data-icon="inline-start" className="size-3.5" />
-					{t("layout.clearResults.clear")}
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					disabled={!canManageResults || busy}
-					onClick={() => openDialog("reparse")}
-				>
-					<RefreshCw data-icon="inline-start" className="size-3.5" />
-					{t("layout.clearResults.clearAndReparse")}
-				</Button>
-			</div>
-
-			<Dialog
-				open={dialogOpen}
-				onOpenChange={(open) => {
-					if (!open && !busy) setDialogOpen(false);
-				}}
-			>
-				<DialogContent
-					showCloseButton={false}
-					className="sm:max-w-xs"
-					aria-describedby={undefined}
-				>
-					<DialogHeader>
-						<DialogTitle>
-							{dialogMode === "clear"
-								? t("layout.clearResults.dialog.clearTitle")
-								: t("layout.clearResults.dialog.reparseTitle")}
-						</DialogTitle>
-					</DialogHeader>
-
-					<div className="space-y-1.5 py-1">
-						<Label className="text-xs text-muted-foreground">
-							{t("layout.clearResults.dialog.scopeLabel")}
-						</Label>
-						<Select
-							value={scope}
-							onValueChange={(v) => setScope(v as ParseResultScope)}
-							disabled={busy}
-						>
-							<SelectTrigger size="sm" className="w-full">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="layout">
-									{t("layout.clearResults.scope.layout")}
-								</SelectItem>
-								<SelectItem value="paper">
-									{t("layout.clearResults.scope.paper")}
-								</SelectItem>
-								<SelectItem value="all">
-									{t("layout.clearResults.scope.all")}
-								</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-
-					<DialogFooter className="gap-2 sm:gap-0">
+			{!apiOnly && (
+				<>
+					<div className="flex justify-end gap-2">
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							disabled={busy}
-							onClick={() => setDialogOpen(false)}
+							disabled={!canManageResults || busy}
+							onClick={() => openDialog("clear")}
 						>
-							{t("common:cancel")}
+							<Trash2 data-icon="inline-start" className="size-3.5" />
+							{t("layout.clearResults.clear")}
 						</Button>
 						<Button
 							type="button"
-							variant="destructive"
+							variant="outline"
 							size="sm"
-							disabled={busy}
-							onClick={() => void handleConfirm()}
+							disabled={!canManageResults || busy}
+							onClick={() => openDialog("reparse")}
 						>
-							{busy
-								? dialogMode === "clear"
-									? t("layout.clearResults.clearing")
-									: t("layout.clearResults.reparsing")
-								: confirmLabel}
+							<RefreshCw data-icon="inline-start" className="size-3.5" />
+							{t("layout.clearResults.clearAndReparse")}
 						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+					</div>
+
+					<Dialog
+						open={dialogOpen}
+						onOpenChange={(open) => {
+							if (!open && !busy) setDialogOpen(false);
+						}}
+					>
+						<DialogContent
+							showCloseButton={false}
+							className="sm:max-w-xs"
+							aria-describedby={undefined}
+						>
+							<DialogHeader>
+								<DialogTitle>
+									{dialogMode === "clear"
+										? t("layout.clearResults.dialog.clearTitle")
+										: t("layout.clearResults.dialog.reparseTitle")}
+								</DialogTitle>
+							</DialogHeader>
+
+							<div className="space-y-1.5 py-1">
+								<Label className="text-xs text-muted-foreground">
+									{t("layout.clearResults.dialog.scopeLabel")}
+								</Label>
+								<Select
+									value={scope}
+									onValueChange={(v) => setScope(v as ParseResultScope)}
+									disabled={busy}
+								>
+									<SelectTrigger size="sm" className="w-full">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="layout">
+											{t("layout.clearResults.scope.layout")}
+										</SelectItem>
+										<SelectItem value="paper">
+											{t("layout.clearResults.scope.paper")}
+										</SelectItem>
+										<SelectItem value="all">
+											{t("layout.clearResults.scope.all")}
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+
+							<DialogFooter className="gap-2 sm:gap-0">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={busy}
+									onClick={() => setDialogOpen(false)}
+								>
+									{t("common:cancel")}
+								</Button>
+								<Button
+									type="button"
+									variant="destructive"
+									size="sm"
+									disabled={busy}
+									onClick={() => void handleConfirm()}
+								>
+									{busy
+										? dialogMode === "clear"
+											? t("layout.clearResults.clearing")
+											: t("layout.clearResults.reparsing")
+										: confirmLabel}
+								</Button>
+							</DialogFooter>
+						</DialogContent>
+					</Dialog>
+				</>
+			)}
 		</div>
 	);
 }
@@ -437,8 +463,10 @@ function ProviderConfigCard({
 	provider,
 	settings,
 	patch,
+	apiOnly = false,
 }: {
 	provider: ProviderCardDescriptor;
+	apiOnly?: boolean;
 	settings: AppSettings;
 	patch: (p: Partial<AppSettings>) => void;
 }) {
@@ -526,32 +554,22 @@ function ProviderConfigCard({
 			};
 			const ready = isProviderReady(provider, config);
 
-			if (!ready) {
-				// Optimistic UI: hide from backend selects before Host round-trip.
-				const cleared = layoutBackendsAfterClearingProvider(
-					layout,
-					provider.id,
-				);
-				patch({
-					layout: {
-						...layout,
-						...cleared,
-						providerConfigs: {
-							...layout.providerConfigs,
-							[provider.id]: { ...stored, ...config },
-						},
-					},
-				});
-				setDraft({});
-				setStatus("idle");
+			let displayLayout: AppSettings["layout"];
+			try {
+				({ displayLayout } = await persistLayoutProviderConfig({
+					settings,
+					provider: provider.id,
+					config,
+					ready,
+					throwOnError: true,
+					...(apiOnly
+						? { backend: layout.backend, parserBackend: layout.parserBackend }
+						: {}),
+				}));
+			} catch (error) {
+				notifyError(errorMessage(error));
+				return;
 			}
-
-			const { displayLayout } = await persistLayoutProviderConfig({
-				settings,
-				provider: provider.id,
-				config,
-				ready,
-			});
 			patch({ layout: displayLayout });
 			setDraft({});
 			if (!ready) {
@@ -561,6 +579,7 @@ function ProviderConfigCard({
 			runProbe(apiKey);
 		},
 		[
+			apiOnly,
 			displayBaseUrl,
 			displayModel,
 			displayPrompt,
@@ -572,7 +591,6 @@ function ProviderConfigCard({
 			provider,
 			runProbe,
 			settings,
-			stored,
 		],
 	);
 
