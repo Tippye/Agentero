@@ -95,6 +95,8 @@ async function fixture() {
 it("keeps bibliography out of detected, table and fallback IR while retaining body citations and appendices", async () => {
 	const engine = new PdfiumNative(
 		await init({
+			// WASI requires an ASCII name, independent of the checkout path.
+			thisProgram: "pdfium-translation-references-test",
 			wasmBinary: readFileSync(
 				fileURLToPath(import.meta.resolve("@embedpdf/pdfium/pdfium.wasm")),
 			),

@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { createPdfiumEngine } from "@embedpdf/engines/pdfium-direct-engine";
+import {
+	browserImageDataToBlobConverter,
+	PdfEngine,
+	PdfiumNative,
+} from "@embedpdf/engines/pdfium";
+import { init } from "@embedpdf/pdfium";
 import { PDFDocument } from "pdf-lib";
 import { expect, it, vi } from "vitest";
 import { getPdfPageCount } from "@/lib/pdf/page-count";
@@ -17,9 +22,14 @@ vi.mock("@/lib/pdf/layout/headless-analyze", () => ({
 it("balances native document and tracked WASM allocations with the real PDFium engine", async () => {
 	const require = createRequire(import.meta.url);
 	const wasm = await readFile(require.resolve("@embedpdf/pdfium/pdfium.wasm"));
-	const engine = await createPdfiumEngine(
-		`data:application/wasm;base64,${wasm.toString("base64")}`,
-		{ fontFallback: null },
+	// Use the factory's public components so its real executor/orchestrator
+	// remain intact while supplying the Node-only WASI program name.
+	const engine = new PdfEngine(
+		new PdfiumNative(
+			await init({ thisProgram: "pdfium-page-count-test", wasmBinary: wasm }),
+			{ fontFallback: null },
+		),
+		{ imageConverter: browserImageDataToBlobConverter },
 	);
 	mocks.engine.mockResolvedValue(engine);
 	const pdf = await PDFDocument.create();
