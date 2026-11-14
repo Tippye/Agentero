@@ -319,8 +319,8 @@ afterEach(async () => {
 });
 
 describe("tablet composition of mature sync settings", () => {
-	it("exposes an accessible sync entry from the tablet menu without requiring pairing", async () => {
-		const openSync = vi.fn();
+	it("exposes an accessible settings entry from the tablet menu without requiring pairing", async () => {
+		const openSettings = vi.fn();
 		const closeMenu = vi.fn();
 		await act(async () => {
 			root.render(
@@ -333,13 +333,13 @@ describe("tablet composition of mature sync settings", () => {
 						onClose: closeMenu,
 						onStatus: vi.fn(),
 						onPairAnother: vi.fn(),
-						onSync: openSync,
+						onSettings: openSettings,
 					}),
 				),
 			);
 		});
-		await click("Cloud sync");
-		expect(openSync).toHaveBeenCalledTimes(1);
+		await click("Settings");
+		expect(openSettings).toHaveBeenCalledTimes(1);
 		expect(closeMenu).toHaveBeenCalledTimes(1);
 		expect(host.get).not.toHaveBeenCalled();
 		expect(host.auth).not.toHaveBeenCalled();

@@ -32,8 +32,15 @@ const state = vi.hoisted(() => ({
 		imported: 0,
 		errors: [] as string[],
 	})),
+	settings: null as { open: boolean; section: string } | null,
+	plaza: null as { path: string; reloadKey: number; active: boolean } | null,
 }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: state.t }) }));
+// Keep the real plugin bridge: `@/i18n` (pulled in by the Plaza sources) needs
+// `initReactI18next`; only the translation hook is pinned to the key echo.
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({ t: state.t }),
+}));
 vi.mock("@/components/mobile/hooks/use-mobile-route", () => ({
 	useMobileRoute: ({
 		onRestore,
@@ -64,11 +71,44 @@ vi.mock("@/components/mobile/mobile-paper-info", () => ({
 	MobilePaperInfo: () => null,
 }));
 vi.mock("@/components/mobile/mobile-plaza-page", () => ({
-	MobilePlazaPage: () => null,
+	MobilePlazaPage: (props: {
+		path: string;
+		reloadKey: number;
+		active: boolean;
+	}) => {
+		state.plaza = props;
+		return null;
+	},
 }));
-// Processing forms/runtime have their own focused integration suites.
-vi.mock("@/components/mobile/mobile-processing-settings", () => ({
-	MobileProcessingSettings: () => null,
+// The settings surface has its own focused integration suite; here it is only a
+// probe so workspace tests can assert the page opens without remounting panes.
+vi.mock("@/components/mobile/mobile-settings-page", () => ({
+	MobileSettingsPage: ({
+		open,
+		section,
+		onClose,
+	}: {
+		open: boolean;
+		section: string;
+		onClose: () => void;
+	}) => {
+		state.settings = { open, section };
+		return open
+			? createElement(
+					"section",
+					{ "data-settings-page": section },
+					createElement(
+						"button",
+						{
+							type: "button",
+							"aria-label": "close-settings",
+							onClick: onClose,
+						},
+						"close-settings",
+					),
+				)
+			: null;
+	},
 }));
 vi.mock("@/lib/mobile/pdf-processing", () => ({
 	useMobilePdfProcessingRuntime: () => {},
@@ -233,12 +273,12 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 	MobileSidebar: ({
 		open,
 		navigation,
-		onSync,
+		onSettings,
 		onClose,
 	}: {
 		open: boolean;
 		navigation: ReactNode;
-		onSync: () => void;
+		onSettings: () => void;
 		onClose: () => void;
 	}) =>
 		open
@@ -251,28 +291,12 @@ vi.mock("@/components/mobile/mobile-sidebar", () => ({
 						{
 							type: "button",
 							onClick: () => {
-								onSync();
+								onSettings();
 								onClose();
 							},
 						},
-						"open-sync",
+						"open-settings",
 					),
-				)
-			: null,
-}));
-vi.mock("@/components/mobile/mobile-sync-panel", () => ({
-	MobileSyncPanel: ({
-		open,
-		onOpenChange,
-	}: {
-		open: boolean;
-		onOpenChange: (open: boolean) => void;
-	}) =>
-		open
-			? createElement(
-					"button",
-					{ type: "button", onClick: () => onOpenChange(false) },
-					"close-sync",
 				)
 			: null,
 }));
@@ -786,6 +810,25 @@ describe("stable tablet workspace DOM", () => {
 		const reader = container.querySelector("[data-pdf-document]");
 		await click("tabs.plaza");
 		expect(pane("plaza")?.hidden).toBe(false);
+		// The header owns the source picker and icon actions on the same row.
+		expect(
+			container.querySelector('[aria-label="plaza.source"]'),
+		).not.toBeNull();
+		expect(
+			container.querySelector('[aria-label="plaza.refresh"]'),
+		).not.toBeNull();
+		expect(
+			container.querySelector('[aria-label="plaza.openBrowser"]'),
+		).not.toBeNull();
+		expect(
+			container.querySelector('[aria-label="shortcuts:labels.magicWand"]'),
+		).toBeNull();
+		const firstPath = state.plaza?.path;
+		expect(firstPath).toBe("agentero:plaza/cool-papers");
+		expect(state.plaza?.reloadKey).toBe(0);
+		await click("plaza.refresh");
+		expect(state.plaza?.reloadKey).toBe(1);
+		expect(state.plaza?.path).toBe(firstPath);
 		await click("settings.menu");
 		await click("Paper first");
 		expect(pane("reader")?.hidden).toBe(false);
@@ -941,13 +984,17 @@ describe("stable tablet workspace DOM", () => {
 		]);
 	});
 
-	it("keeps the reader mounted for Agent navigation, sync and pairing while guarding dirty replacement/back", async () => {
+	it("keeps the reader mounted for Agent navigation, settings and pairing while guarding dirty replacement/back", async () => {
 		await resize(840);
 		await click("Paper first");
 		await ready();
 		const pdf = container.querySelector("[data-pdf-document]");
 		await click("workspace.compare");
 		await fill("test-notes", "keep this draft");
+		await click("change-reading-position");
+		const position = () =>
+			container.querySelector("[data-position]")?.textContent;
+		expect(position()).toBe("7:175");
 		await click("Paper second");
 		expect(state.pdf?.paperRelPath).toBe("papers/first");
 		await click("reader.back");
@@ -955,8 +1002,18 @@ describe("stable tablet workspace DOM", () => {
 		await click("tabs.agent");
 		await click("tabs.library");
 		await click("settings.menu");
-		await click("open-sync");
-		await click("close-sync");
+		await click("open-settings");
+		expect(container.querySelector("[data-settings-page]")).not.toBeNull();
+		expect(state.settings).toEqual({ open: true, section: "appearance" });
+		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(
+			container.querySelector<HTMLTextAreaElement>('[aria-label="test-notes"]')
+				?.value,
+		).toBe("keep this draft");
+		expect(position()).toBe("7:175");
+		await click("close-settings");
+		expect(container.querySelector("[data-settings-page]")).toBeNull();
+		expect(state.settings?.open).toBe(false);
 		await click("workspace.discuss");
 		const provider = container.querySelector<HTMLSelectElement>(
 			'[aria-label="remote.provider"]',
@@ -970,7 +1027,13 @@ describe("stable tablet workspace DOM", () => {
 		await click("connect.title");
 		await click("cancel-pairing");
 		expect(container.querySelector("[data-pdf-document]")).toBe(pdf);
+		expect(
+			container.querySelector<HTMLTextAreaElement>('[aria-label="test-notes"]')
+				?.value,
+		).toBe("keep this draft");
+		expect(position()).toBe("7:175");
 		expect(state.pdfMounts).toBe(1);
+		expect(state.notesMounts).toBe(1);
 	});
 
 	it("resizes through the public separator and restores the user's split after switching presets", async () => {

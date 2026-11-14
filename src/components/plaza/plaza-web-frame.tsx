@@ -105,54 +105,28 @@ export function PlazaWebFrame(props: PlazaWebFrameProps) {
 				homeUrl={props.homeUrl}
 				title={props.title}
 				className={props.className}
-				mobile={props.mobile}
 			/>
 		);
 	return <DesktopPlazaWebFrame {...props} />;
 }
 
+/**
+ * The mobile frame owns no toolbar: source picking, reload and "open in
+ * browser" live in the header controls, and reload remounts the page content.
+ */
 function MobilePlazaWebFrame({
 	homeUrl,
 	title,
 	className,
-	mobile,
 }: {
 	homeUrl: string;
 	title: string;
 	className?: string;
-	mobile: MobilePlazaActions;
 }) {
 	const { t } = useTranslation("mobile");
 	const [failed, setFailed] = useState(false);
-	const [epoch, setEpoch] = useState(0);
 	return (
 		<div className={cn("flex h-full min-h-0 min-w-0 flex-col", className)}>
-			<div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-				<p className="min-w-0 flex-1 text-muted-foreground text-xs">
-					{t("plaza.embedFallback")}
-				</p>
-				<Button
-					type="button"
-					variant="ghost"
-					className="min-h-11 min-w-11"
-					aria-label={t("plaza.reload")}
-					onClick={() => {
-						setFailed(false);
-						setEpoch((value) => value + 1);
-					}}
-				>
-					<RotateCw className="size-4" />
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					className="min-h-11 gap-2"
-					onClick={() => mobile.onOpenUrl(homeUrl)}
-				>
-					<ExternalLink className="size-4" />
-					{t("plaza.openBrowser")}
-				</Button>
-			</div>
 			{failed ? (
 				<div
 					role="status"
@@ -162,7 +136,6 @@ function MobilePlazaWebFrame({
 				</div>
 			) : (
 				<iframe
-					key={`${homeUrl}:${epoch}`}
 					title={title}
 					src={homeUrl}
 					sandbox="allow-scripts allow-same-origin allow-forms"

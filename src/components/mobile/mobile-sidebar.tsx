@@ -1,15 +1,12 @@
 import {
-	BatteryCharging,
 	Check,
 	ChevronDown,
 	Circle,
-	Cloud,
 	Folder,
-	Languages,
 	Laptop,
-	Layers3,
 	LogOut,
 	QrCode,
+	Settings,
 	X,
 } from "lucide-react";
 import {
@@ -27,7 +24,6 @@ import type { BridgeClientStatus } from "@/lib/bridge/client";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
-import { openMobileProcessingSettings } from "@/lib/mobile/processing-settings";
 
 export function MobileSidebar({
 	open,
@@ -36,9 +32,7 @@ export function MobileSidebar({
 	onStatus,
 	onDisconnect,
 	onPairAnother,
-	onSync,
-	onBackground,
-	syncDisabled = false,
+	onSettings,
 	navigation,
 }: {
 	open: boolean;
@@ -47,9 +41,7 @@ export function MobileSidebar({
 	onStatus: (status: BridgeClientStatus) => void;
 	onDisconnect: () => Promise<void>;
 	onPairAnother: () => void;
-	onSync: () => void;
-	onBackground?: () => void;
-	syncDisabled?: boolean;
+	onSettings: () => void;
 	navigation?: ReactNode;
 }) {
 	const { t } = useTranslation(["mobile", "settings"]);
@@ -151,48 +143,14 @@ export function MobileSidebar({
 						type="button"
 						variant="outline"
 						className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
-						disabled={syncDisabled}
 						onClick={() => {
-							onSync();
+							onSettings();
 							onClose();
 						}}
 					>
-						<Cloud className="size-5 text-muted-foreground" />
-						{t("sync.title")}
+						<Settings className="size-5 text-muted-foreground" />
+						{t("tabs.settings")}
 					</Button>
-					{(["translate", "layout"] as const).map((section) => (
-						<Button
-							key={section}
-							type="button"
-							variant="outline"
-							className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
-							onClick={() => {
-								openMobileProcessingSettings(section);
-								onClose();
-							}}
-						>
-							{section === "translate" ? (
-								<Languages className="size-5 text-muted-foreground" />
-							) : (
-								<Layers3 className="size-5 text-muted-foreground" />
-							)}
-							{t(`settings:nav.${section}`)}
-						</Button>
-					))}
-					{onBackground ? (
-						<Button
-							type="button"
-							variant="outline"
-							className="min-h-11 w-full justify-start gap-3 rounded-xl px-3"
-							onClick={() => {
-								onBackground();
-								onClose();
-							}}
-						>
-							<BatteryCharging className="size-5 text-muted-foreground" />
-							{t("background.title")}
-						</Button>
-					) : null}
 					{status.paired ? (
 						<section className="rounded-xl border bg-background shadow-raised">
 							<button

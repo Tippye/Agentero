@@ -16,7 +16,8 @@ const io = vi.hoisted(() => ({
 	remove: vi.fn(async () => {}),
 	readerMounts: 0,
 	backEnabled: false,
-	processingSettings: null as ComponentType | null,
+	settingsPage: null as ComponentType<Record<string, unknown>> | null,
+	settings: null as Record<string, unknown> | null,
 	runtimeMounts: 0,
 	runtimeUnmounts: 0,
 	paper: {
@@ -60,15 +61,23 @@ vi.mock("@/lib/vault/fs", async (original) => ({
 }));
 vi.mock("@/lib/core/notify", () => ({
 	notifyError: (...args: unknown[]) => io.error(...args),
+	errorMessage: (error: unknown) => String(error),
+}));
+// The real settings page asks for the app version when it opens.
+vi.mock("@tauri-apps/api/app", () => ({
+	getVersion: async () => "9.9.9",
 }));
 vi.mock("react-i18next", () => ({
 	initReactI18next: { type: "3rdParty", init() {} },
 	useTranslation: () => ({ t: (key: string) => key }),
 }));
-// Processing forms/runtime have their own focused integration suites.
-vi.mock("@/components/mobile/mobile-processing-settings", () => ({
-	MobileProcessingSettings: () =>
-		io.processingSettings ? h(io.processingSettings) : null,
+// The real settings page is enabled per-test (App-level integration below);
+// everywhere else it is a null boundary so import flows stay isolated.
+vi.mock("@/components/mobile/mobile-settings-page", () => ({
+	MobileSettingsPage: (props: Record<string, unknown>) => {
+		io.settings = props;
+		return io.settingsPage ? h(io.settingsPage, props) : null;
+	},
 }));
 vi.mock("@/lib/mobile/pdf-processing", () => ({
 	// Observe where MobileApp owns the runtime. Runtime behavior is tested separately.
@@ -169,11 +178,9 @@ vi.mock("@/components/mobile/mobile-plaza-page", () => ({
 vi.mock("@/components/mobile/mobile-pairing", () => ({
 	MobilePairing: () => null,
 }));
-vi.mock("@/components/mobile/mobile-sync-panel", () => ({
-	MobileSyncPanel: () => null,
-}));
+// The settings page renders the background pane on demand; keep it a boundary.
 vi.mock("@/components/mobile/mobile-background-settings", () => ({
-	MobileBackgroundSettings: () => null,
+	MobileBackgroundSettingsPanel: () => null,
 }));
 
 import MobileApp from "@/components/mobile/mobile-app";
@@ -217,7 +224,8 @@ beforeEach(() => {
 	io.vault = "/private/Vault-A";
 	io.readerMounts = 0;
 	io.backEnabled = false;
-	io.processingSettings = null;
+	io.settingsPage = null;
+	io.settings = null;
 	io.runtimeMounts = 0;
 	io.runtimeUnmounts = 0;
 	io.refresh = vi.fn(async () => {});
@@ -239,11 +247,15 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 
-it("opens real processing dialogs from the real Sidebar while keeping runtime ownership above reader navigation", async () => {
+it("opens the real settings page from the real Sidebar while keeping runtime ownership above reader navigation", {
+	timeout: 20000,
+}, async () => {
 	const actual = await vi.importActual<
-		typeof import("@/components/mobile/mobile-processing-settings")
-	>("@/components/mobile/mobile-processing-settings");
-	io.processingSettings = actual.MobileProcessingSettings;
+		typeof import("@/components/mobile/mobile-settings-page")
+	>("@/components/mobile/mobile-settings-page");
+	io.settingsPage = actual.MobileSettingsPage as ComponentType<
+		Record<string, unknown>
+	>;
 	await render();
 	const clickLabel = async (label: string) => {
 		const button = [
@@ -255,25 +267,49 @@ it("opens real processing dialogs from the real Sidebar while keeping runtime ow
 		if (!button) throw Error(`Missing button ${label}`);
 		await act(async () => button.click());
 	};
+	const settingsPage = () =>
+		document.querySelector<HTMLElement>('section[aria-label="settings:title"]');
 	expect(io.runtimeMounts).toBe(1);
 	await clickLabel("settings.menu");
+	await clickLabel("tabs.settings");
+	expect(io.settings?.open).toBe(true);
+	const page = settingsPage();
+	if (!page) throw Error("Real settings page missing");
+	expect(page.textContent).toContain("settings:title");
+	const navButtons = [...page.querySelectorAll("nav button")];
+	expect(navButtons.map((item) => item.textContent)).toEqual([
+		"settings:nav.appearance",
+		"settings:nav.translate",
+		"settings:nav.layout",
+		"settings:nav.sync",
+		"mobile:background.title",
+		"settings:nav.about",
+	]);
+	expect(
+		page.querySelector('nav button[aria-current="page"]')?.textContent,
+	).toBe("settings:nav.appearance");
+	expect(page.textContent).toContain("appearance.title");
 	await clickLabel("settings:nav.translate");
-	expect(
-		document.querySelector('[role="dialog"] #translate-cache-ir'),
-	).not.toBeNull();
-	await clickLabel("common:close");
-	await clickLabel("settings.menu");
+	const translate = settingsPage();
+	expect(translate?.textContent).toContain("translate.title");
+	expect(translate?.textContent).not.toContain("appearance.title");
+	expect(document.querySelector("#translate-cache-ir")).not.toBeNull();
 	await clickLabel("settings:nav.layout");
+	const layout = settingsPage();
+	expect(layout?.textContent).toContain("layout.title");
 	expect(
-		document.querySelector('[role="dialog"] #layout-provider-paddle-api-key'),
+		document.querySelector("#layout-provider-paddle-api-key"),
 	).not.toBeNull();
 	expect(
-		document.querySelector('[role="dialog"] #layout-provider-mineru-api-key'),
+		document.querySelector("#layout-provider-mineru-api-key"),
 	).not.toBeNull();
 	expect(
 		document.querySelector("#layout-provider-openaiCompatible-api-key"),
 	).toBeNull();
 	await clickLabel("common:close");
+	expect(settingsPage()).toBeNull();
+	expect(io.settings?.open).toBe(false);
+	expect(io.runtimeMounts).toBe(1);
 	const paper = [...host.querySelectorAll("button")].find((button) =>
 		button.textContent?.includes("Existing paper"),
 	);

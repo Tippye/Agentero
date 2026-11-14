@@ -5,13 +5,23 @@
 import { commands } from "@/lib/core/bindings";
 import { notifyError } from "@/lib/core/notify";
 import { isMobileApp, isTauri } from "@/lib/core/tauri";
-import { openMobileProcessingSettings } from "@/lib/mobile/processing-settings";
+import { openMobileSettings } from "@/lib/mobile/settings";
 import { getVaultPath } from "@/lib/vault/store";
 import { setSettingsOpenState, uiStore } from "./ui-store";
 
+/** Map desktop settings sections onto the mobile settings page. */
+function mobileSettingsSection(section?: string) {
+	return section === "translate" ||
+		section === "layout" ||
+		section === "sync" ||
+		section === "about"
+		? section
+		: ("appearance" as const);
+}
+
 export function openSettingsWindow(section?: string): void {
 	if (isMobileApp()) {
-		openMobileProcessingSettings(section === "layout" ? "layout" : "translate");
+		openMobileSettings(mobileSettingsSection(section));
 		return;
 	}
 	if (!isTauri()) return;
@@ -33,7 +43,7 @@ export function openSettingsWindow(section?: string): void {
 }
 
 export function closeSettingsWindow(): void {
-	if (!isTauri()) return;
+	if (isMobileApp() || !isTauri()) return;
 	void (async () => {
 		try {
 			const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
