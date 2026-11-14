@@ -57,7 +57,10 @@ internal class GenericInputDeviceStylusAdapter(activity: Activity) : StylusAdapt
 internal class StylusAdapterRegistry(activity: Activity, plugin: Plugin) {
     private val owner = WeakReference(activity)
     private val plugin = WeakReference(plugin)
-    private val adapters: List<StylusAdapter> = listOf(GenericInputDeviceStylusAdapter(activity))
+    private val adapters: List<StylusAdapter> = listOf(
+        GenericInputDeviceStylusAdapter(activity),
+        OplusPencilShortcutAdapter(activity) { shortcut -> emitShortcut(shortcut) },
+    )
     private var generation = 0uL
     private var targetToken: String? = null
     private var windowLabel: String? = null
@@ -95,6 +98,26 @@ internal class StylusAdapterRegistry(activity: Activity, plugin: Plugin) {
         }
         return state()
     }
+    /**
+     * OEM body shortcuts carry no pen coordinates, so they may only change the
+     * active tool. Rust re-checks the window and token before the WebView sees it.
+     */
+    private fun emitShortcut(shortcut: PencilShortcut) {
+        val token = targetToken ?: return
+        val label = windowLabel ?: return
+        val activity = owner.get() ?: return
+        if (activity.isDestroyed || activity.isFinishing || !focused()) return
+        plugin.get()?.trigger("stylus-event", JSObject().apply {
+            put("kind", "action"); put("windowLabel", label)
+            put("event", JSObject().apply {
+                put("action", shortcut.wire)
+                put("source", "nativeInputDevice")
+                put("adapterId", OplusPencilShortcutAdapter.ID)
+                put("targetToken", token)
+            })
+        })
+    }
+
     private fun emitPresence() {
         val token = targetToken ?: return
         val label = windowLabel ?: return
