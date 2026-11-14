@@ -20,7 +20,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InkController } from "@/lib/pdf/ink/controller";
 import { InkEditor } from "@/lib/pdf/ink/editor";
-import { bindInkInput, INK_LONG_PRESS_MS } from "@/lib/pdf/ink/input";
+import {
+	bindInkInput,
+	INK_LONG_PRESS_MS,
+	INK_PEN_HOVER_GUARD_MS,
+} from "@/lib/pdf/ink/input";
 import { createInkLongPressSelection } from "@/lib/pdf/ink/selection";
 
 const native = vi.hoisted(() => ({
@@ -156,6 +160,20 @@ function pointer(
 	page.dispatchEvent(event);
 	return event;
 }
+function hover(page: HTMLElement, x = 50, y = 60) {
+	page.dispatchEvent(
+		new PointerEvent("pointermove", {
+			bubbles: true,
+			cancelable: true,
+			pointerType: "pen",
+			pointerId: 9,
+			clientX: x,
+			clientY: y,
+			pressure: 0,
+			buttons: 0,
+		}),
+	);
+}
 describe("automatic stylus and long-press arbitration", () => {
 	it("draws with the first pen event from read mode and keeps zero pressure and one native commit", async () => {
 		const r = await reader();
@@ -264,6 +282,51 @@ describe("automatic stylus and long-press arbitration", () => {
 		expect(r.editor.getState().paletteRequest).toBe(1);
 		r.editor.applyStylusAction("select");
 		expect(r.editor.getState().mode).toBe("lasso");
+	});
+	it("keeps a hovering pen's resting hand from panning or selecting until the guard expires", async () => {
+		const r = await reader();
+		r.editor.setMode("pen");
+		hover(r.page);
+		pointer(r.page, "pointerdown", "touch", 2);
+		pointer(r.page, "pointermove", "touch", 2, 90, 100);
+		vi.advanceTimersByTime(INK_LONG_PRESS_MS + 1);
+		expect(r.viewport.scrollTo).not.toHaveBeenCalled();
+		expect(r.editor.getState().selection).toBeNull();
+		expect(r.editor.getState().draft).toBeNull();
+		pointer(r.page, "pointerup", "touch", 2);
+		vi.advanceTimersByTime(INK_PEN_HOVER_GUARD_MS);
+		pointer(r.page, "pointerdown", "touch", 3);
+		pointer(r.page, "pointermove", "touch", 3, 80, 90);
+		expect(r.viewport.scrollTo).toHaveBeenCalledWith({
+			x: 70,
+			y: 170,
+			behavior: "instant",
+		});
+	});
+	it("still inks a pen contact while a resting hand is suppressed", async () => {
+		const r = await reader();
+		r.editor.setMode("pen");
+		hover(r.page);
+		pointer(r.page, "pointerdown", "touch", 2);
+		pointer(r.page, "pointerdown", "pen", 1, 50, 60);
+		expect(r.editor.getState().draft?.stroke.points.length).toBe(1);
+		pointer(r.page, "pointermove", "pen", 1, 80, 90);
+		pointer(r.page, "pointerup", "pen", 1, 100, 110);
+		await Promise.resolve();
+		expect(r.apply).toHaveBeenCalledOnce();
+		expect(r.viewport.scrollTo).not.toHaveBeenCalled();
+	});
+	it("leaves finger navigation alone in read mode while a pen only hovers", async () => {
+		const r = await reader();
+		expect(r.editor.getState().mode).toBe("read");
+		hover(r.page);
+		pointer(r.page, "pointerdown", "touch", 2);
+		pointer(r.page, "pointermove", "touch", 2, 80, 90);
+		expect(r.viewport.scrollTo).toHaveBeenCalledWith({
+			x: 70,
+			y: 170,
+			behavior: "instant",
+		});
 	});
 });
 

@@ -10,6 +10,8 @@ export type InkViewport = {
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
 export const INK_LONG_PRESS_MS = 500;
+/** A pen in range keeps new finger gestures out of an active writing session. */
+export const INK_PEN_HOVER_GUARD_MS = 1000;
 const HOLD_SLOP_PX = 8;
 /** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {
@@ -56,6 +58,9 @@ export function bindInkInput(options: {
 	let palm = false,
 		disposed = false,
 		selecting = false;
+	let hoverGuardUntil = 0;
+	/** Fingers rejected during pen hover; they stay consumed until they lift. */
+	const suppressed = new Set<number>();
 	let queued: PointerEvent[] = [];
 	let frame = 0;
 	const originalTouchAction = target.style.touchAction;
@@ -78,6 +83,12 @@ export function bindInkInput(options: {
 	const consume = (event: Event) => {
 		event.preventDefault();
 		event.stopImmediatePropagation();
+	};
+	/** Hover deliveries have no contact; only a hovering pen arms the guard. */
+	const notePenHover = (event: PointerEvent) => {
+		if (event.pointerType !== "pen") return;
+		hoverGuardUntil =
+			event.buttons === 0 ? Date.now() + INK_PEN_HOVER_GUARD_MS : 0;
 	};
 	const clearHold = () => {
 		if (hold) clearTimeout(hold.timer);
@@ -200,6 +211,7 @@ export function bindInkInput(options: {
 	};
 	const down = (event: PointerEvent) => {
 		if (excluded(event)) return;
+		notePenHover(event);
 		if (event.pointerType === "pen") {
 			options.onPenDetected?.();
 			if (options.automaticPen && !editing()) editor.setMode("pen");
@@ -211,6 +223,17 @@ export function bindInkInput(options: {
 		clearHold();
 		held = null;
 		if (event.pointerType === "touch") {
+			// A resting hand must not pan, select, or start a stroke while a pen
+			// hovers for writing; the finger stays ignored until it lifts.
+			if (editing() && Date.now() < hoverGuardUntil) {
+				clearHold();
+				held = null;
+				pan = null;
+				suppressed.add(event.pointerId);
+				suppressMouseUntil = Date.now() + 1000;
+				consume(event);
+				return;
+			}
 			touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
 			if (stroke || palm) {
 				clearHold();
@@ -285,6 +308,11 @@ export function bindInkInput(options: {
 	};
 	const move = (event: PointerEvent) => {
 		if (!managed()) return;
+		notePenHover(event);
+		if (suppressed.has(event.pointerId)) {
+			consume(event);
+			return;
+		}
 		moveHold(event);
 		if (held === event.pointerId) {
 			consume(event);
@@ -325,6 +353,11 @@ export function bindInkInput(options: {
 	};
 	const end = (event: PointerEvent) => {
 		if (hold?.id === event.pointerId) clearHold();
+		if (suppressed.delete(event.pointerId)) {
+			release(event.pointerId);
+			if (managed()) consume(event);
+			return;
+		}
 		if (
 			event.type === "pointercancel" &&
 			(stroke?.id === event.pointerId ||
@@ -385,7 +418,13 @@ export function bindInkInput(options: {
 	const blur = () => {
 		cancel();
 		touches.clear();
+		suppressed.clear();
+		hoverGuardUntil = 0;
 		palm = false;
+	};
+	/** Pen leaving the digitizer ends hover protection immediately. */
+	const leave = (event: PointerEvent) => {
+		if (event.pointerType === "pen") hoverGuardUntil = 0;
 	};
 	const visibility = () => {
 		if (document.visibilityState !== "visible") blur();
@@ -395,6 +434,7 @@ export function bindInkInput(options: {
 	document.addEventListener("pointerup", end, true);
 	document.addEventListener("pointercancel", end, true);
 	target.addEventListener("lostpointercapture", lostCapture);
+	target.addEventListener("pointerleave", leave);
 	target.addEventListener("mousedown", mouse, true);
 	target.addEventListener("click", mouse, true);
 	target.addEventListener("contextmenu", mouse, true);
@@ -420,6 +460,7 @@ export function bindInkInput(options: {
 			document.removeEventListener("pointerup", end, true);
 			document.removeEventListener("pointercancel", end, true);
 			target.removeEventListener("lostpointercapture", lostCapture);
+			target.removeEventListener("pointerleave", leave);
 			target.removeEventListener("mousedown", mouse, true);
 			target.removeEventListener("click", mouse, true);
 			target.removeEventListener("contextmenu", mouse, true);
