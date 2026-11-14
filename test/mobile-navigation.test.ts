@@ -19,8 +19,7 @@ const state = vi.hoisted(() => ({
 	legacySkill: vi.fn(),
 	desktopVault: vi.fn(),
 	close: vi.fn(),
-	sync: vi.fn(),
-	background: vi.fn(),
+	settings: vi.fn(),
 	pair: vi.fn(),
 	t: (key: string) => key,
 }));
@@ -96,6 +95,7 @@ import {
 	mobilePaperTagCounts,
 	openMobilePlazaUrl,
 } from "@/lib/mobile/navigation";
+import { PLAZA_SOURCES } from "@/lib/plaza/sources";
 
 function paper(
 	id: string,
@@ -279,7 +279,7 @@ describe("mobile navigation and Plaza", () => {
 		);
 		expect(container.textContent).toContain("Last tagged paper");
 	});
-	it("preserves pairing, cloud sync and background callbacks and owns safe insets only on the drawer", async () => {
+	it("preserves pairing and settings callbacks and owns safe insets only on the drawer", async () => {
 		await render(
 			createElement(MobileSidebar, {
 				open: true,
@@ -288,26 +288,25 @@ describe("mobile navigation and Plaza", () => {
 				onStatus: vi.fn(),
 				onDisconnect: async () => {},
 				onPairAnother: state.pair,
-				onSync: state.sync,
-				onBackground: state.background,
+				onSettings: state.settings,
 			}),
 		);
 		expect(
 			container.querySelector("aside")?.classList.contains("mobile-safe-area"),
 		).toBe(true);
 		expect(container.querySelector("footer")?.className).toBe("border-t p-4");
-		await click("sync.title");
-		await click("background.title");
+		await click("tabs.settings");
 		await click("settings.addDevice");
-		expect(state.sync).toHaveBeenCalledOnce();
-		expect(state.background).toHaveBeenCalledOnce();
+		expect(state.settings).toHaveBeenCalledOnce();
 		expect(state.pair).toHaveBeenCalledOnce();
-		expect(state.close).toHaveBeenCalledTimes(3);
+		expect(state.close).toHaveBeenCalledTimes(2);
 	});
-	it("does not mount a Plaza panel or dispatch an import before explicit activation", async () => {
+	it("does not mount a Plaza panel before explicit activation and remounts it per source or reload", async () => {
 		const props = {
 			active: false,
 			vaultPath: "/private/Vault",
+			path: PLAZA_SOURCES[0].path,
+			reloadKey: 0,
 			onImportPaper: state.imported,
 		};
 		await render(createElement(MobilePlazaPage, props));
@@ -315,15 +314,38 @@ describe("mobile navigation and Plaza", () => {
 		expect(state.imported).not.toHaveBeenCalled();
 		await render(createElement(MobilePlazaPage, { ...props, active: true }));
 		expect(state.panel).toHaveBeenCalledOnce();
-		expect(state.panel.mock.calls[0][0].mobile.vaultPath).toBe(
-			"/private/Vault",
+		const mounted = state.panel.mock.calls[0][0];
+		expect(mounted.mobile.vaultPath).toBe("/private/Vault");
+		expect(mounted.mobile.onImportPaper).toBe(state.imported);
+		const panel = container.querySelector("[data-plaza-panel]");
+		expect(panel?.getAttribute("data-plaza-panel")).toBe(PLAZA_SOURCES[0].path);
+		await render(
+			createElement(MobilePlazaPage, {
+				...props,
+				active: true,
+				path: PLAZA_SOURCES[1].path,
+			}),
 		);
-		await click("navigation.import");
-		expect(state.imported).toHaveBeenCalledExactlyOnceWith("");
+		expect(
+			container
+				.querySelector("[data-plaza-panel]")
+				?.getAttribute("data-plaza-panel"),
+		).toBe(PLAZA_SOURCES[1].path);
+		const switched = container.querySelector("[data-plaza-panel]");
+		expect(switched).not.toBe(panel);
+		await render(
+			createElement(MobilePlazaPage, {
+				...props,
+				active: true,
+				path: PLAZA_SOURCES[1].path,
+				reloadKey: 1,
+			}),
+		);
+		expect(container.querySelector("[data-plaza-panel]")).not.toBe(switched);
 		await render(createElement(MobilePlazaPage, props));
 		expect(container.querySelector("[data-plaza-panel]")).toBeNull();
 	});
-	it("uses a sandboxed public web preview, with native browser fallback and no desktop Vault hooks", async () => {
+	it("uses a sandboxed public web preview without a mobile toolbar and no desktop Vault hooks", async () => {
 		await render(
 			createElement(PlazaWebFrame, {
 				homeUrl: "https://papers.cool/",
@@ -336,14 +358,14 @@ describe("mobile navigation and Plaza", () => {
 		expect(frame?.src).toBe("https://papers.cool/");
 		expect(frame?.getAttribute("sandbox")).not.toContain("allow-popups");
 		expect(state.desktopVault).not.toHaveBeenCalled();
-		await click("plaza.openBrowser");
-		expect(state.opened).toHaveBeenCalledExactlyOnceWith(
-			"https://papers.cool/",
-		);
+		expect(
+			container.querySelector('[aria-label="plaza.openBrowser"]'),
+		).toBeNull();
+		expect(container.querySelector('[aria-label="plaza.reload"]')).toBeNull();
 		await act(async () => frame?.dispatchEvent(new Event("error")));
 		expect(container.textContent).toContain("plaza.embedUnavailable");
-		await click("plaza.openBrowser");
-		expect(state.opened).toHaveBeenCalledTimes(2);
+		expect(container.querySelector("iframe")).toBeNull();
+		expect(state.opened).not.toHaveBeenCalled();
 	});
 	it("resets failed preview state when the source identity changes", async () => {
 		await render(

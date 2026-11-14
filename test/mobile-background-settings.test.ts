@@ -10,7 +10,6 @@ const service = vi.hoisted(() => ({
 	notifications: vi.fn(),
 	settings: vi.fn(),
 	changed: vi.fn(),
-	openChanged: vi.fn(),
 	error: vi.fn(),
 	t: (key: string) => key,
 }));
@@ -23,7 +22,7 @@ vi.mock("@/lib/mobile/background", () => ({
 	openMobileBackgroundSettings: service.settings,
 }));
 
-import { MobileBackgroundSettings } from "@/components/mobile/mobile-background-settings";
+import { MobileBackgroundSettingsPanel } from "@/components/mobile/mobile-background-settings";
 
 function nativeState(
 	overrides: Partial<BackgroundState> = {},
@@ -55,28 +54,30 @@ function deferred<T>() {
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 let disposed = false;
-async function render(open = true) {
+async function render(active = true) {
 	await act(async () =>
 		root.render(
-			createElement(MobileBackgroundSettings, {
-				open,
-				onOpenChange: service.openChanged,
+			createElement(MobileBackgroundSettingsPanel, {
+				active,
 				onStateChange: service.changed,
 			}),
 		),
 	);
 	await act(async () => {});
 }
-function dialog() {
-	return document.querySelector('[role="dialog"]');
+function panel(): HTMLElement {
+	const element = container.firstElementChild;
+	if (!(element instanceof HTMLElement))
+		throw new Error("Missing background panel");
+	return element;
 }
 function switchControl(): HTMLButtonElement {
-	const control = dialog()?.querySelector<HTMLButtonElement>('[role="switch"]');
+	const control = panel().querySelector<HTMLButtonElement>('[role="switch"]');
 	if (!control) throw new Error("Missing background switch");
 	return control;
 }
 function button(label: string): HTMLButtonElement {
-	const found = [...(dialog()?.querySelectorAll("button") ?? [])].find(
+	const found = [...panel().querySelectorAll("button")].find(
 		(item) =>
 			item.getAttribute("aria-label") === label || item.textContent === label,
 	);
@@ -90,7 +91,7 @@ async function toggle() {
 	await act(async () => switchControl().click());
 }
 function value(label: string) {
-	const term = [...(dialog()?.querySelectorAll("dt") ?? [])].find(
+	const term = [...panel().querySelectorAll("dt")].find(
 		(item) => item.textContent === label,
 	);
 	return term?.parentElement?.querySelector("dd")?.textContent;
@@ -118,10 +119,12 @@ afterEach(async () => {
 });
 
 describe("Android background settings use observed native state", () => {
-	it("reads only when open and never requests permission, enables or opens system settings on load", async () => {
+	it("reads only when active and never requests permission, enables or opens system settings on load", async () => {
 		await render(false);
 		expect(service.getState).not.toHaveBeenCalled();
-		expect(dialog()).toBeNull();
+		expect(service.changed).not.toHaveBeenCalled();
+		expect(panel().textContent).toContain("background.title");
+		expect(panel().querySelector('[role="switch"]')).toBeNull();
 		await act(async () => window.dispatchEvent(new Event("focus")));
 		expect(service.getState).not.toHaveBeenCalled();
 		await render();
@@ -130,6 +133,24 @@ describe("Android background settings use observed native state", () => {
 		expect(service.notifications).not.toHaveBeenCalled();
 		expect(service.configure).not.toHaveBeenCalled();
 		expect(service.settings).not.toHaveBeenCalled();
+	});
+	it("renders inline panel chrome without a dialog or a close button", async () => {
+		await render();
+		expect(panel().querySelector("h2")?.textContent).toBe("background.title");
+		expect(panel().textContent).toContain("background.description");
+		expect(document.querySelector('[role="dialog"]')).toBeNull();
+		expect(
+			[...panel().querySelectorAll("button")].some(
+				(item) => item.textContent === "background.close",
+			),
+		).toBe(false);
+		const refreshButton = button("background.refresh");
+		expect(refreshButton.disabled).toBe(false);
+		expect(refreshButton.querySelector("svg")).not.toBeNull();
+		service.getState.mockResolvedValueOnce(nativeState({ syncActive: true }));
+		await click("background.refresh");
+		expect(service.getState).toHaveBeenCalledTimes(2);
+		expect(value("background.sync")).toBe("background.running");
 	});
 	it("requests notification permission only after explicit enable and waits for fresh granted/deliverable state", async () => {
 		const prompt = nativeState({
@@ -149,6 +170,7 @@ describe("Android background settings use observed native state", () => {
 		expect(service.notifications).toHaveBeenCalledOnce();
 		expect(service.configure).not.toHaveBeenCalled();
 		expect(switchControl().disabled).toBe(true);
+		expect(button("background.refresh").disabled).toBe(true);
 		expect(switchControl().getAttribute("aria-checked")).toBe("false");
 		service.getState.mockResolvedValue(granted);
 		await act(async () => permission.resolve(granted));
@@ -300,12 +322,12 @@ describe("Android background settings use observed native state", () => {
 		expect(value("background.sync")).toBe("background.running");
 		expect(value("background.battery")).toBe("background.unrestricted");
 		expect(value("background.finiteTask")).toBe("background.running");
-		expect(dialog()?.textContent).toContain("background.finiteExpired");
+		expect(panel().textContent).toContain("background.finiteExpired");
 		expect(service.configure).not.toHaveBeenCalled();
 		expect(service.notifications).not.toHaveBeenCalled();
 		expect(service.changed).toHaveBeenLastCalledWith(changed);
 	});
-	it("opens battery settings only from a click and refreshes status when the dialog regains focus", async () => {
+	it("opens battery settings only from a click and refreshes status when the panel regains focus", async () => {
 		await render();
 		expect(service.settings).not.toHaveBeenCalled();
 		await click("background.batterySettings");
@@ -329,8 +351,8 @@ describe("Android background settings use observed native state", () => {
 		});
 		service.getState.mockResolvedValue(ios);
 		await render();
-		expect(dialog()?.querySelector('[role="switch"]')).toBeNull();
-		const content = dialog()?.textContent ?? "";
+		expect(panel().querySelector('[role="switch"]')).toBeNull();
+		const content = panel().textContent ?? "";
 		expect(content).not.toContain("background.enable");
 		expect(content).not.toContain("background.notificationSettings");
 		expect(content).not.toContain("background.batterySettings");
@@ -341,20 +363,22 @@ describe("Android background settings use observed native state", () => {
 		expect(service.notifications).not.toHaveBeenCalled();
 		expect(service.settings).not.toHaveBeenCalled();
 	});
-	it("drops callbacks from a closed view while letting an already-dispatched native configure finish", async () => {
+	it("resets, clears published state and drops late callbacks when the panel becomes inactive", async () => {
 		const configured = deferred<BackgroundState>();
 		service.configure.mockReturnValueOnce(configured.promise);
 		await render();
 		await toggle();
 		expect(service.configure).toHaveBeenCalledExactlyOnceWith(true);
-		await click("background.close");
-		expect(service.openChanged).toHaveBeenCalledWith(false);
 		await render(false);
+		expect(service.changed).toHaveBeenLastCalledWith(null);
+		expect(
+			service.changed.mock.calls.filter(([state]) => state === null),
+		).toHaveLength(1);
+		expect(panel().querySelector('[role="switch"]')).toBeNull();
 		const callbacks = service.changed.mock.calls.length;
 		await act(async () => configured.resolve(nativeState({ enabled: true })));
 		expect(service.configure).toHaveBeenCalledOnce();
 		expect(service.changed).toHaveBeenCalledTimes(callbacks);
-		expect(dialog()).toBeNull();
 		expect(service.error).not.toHaveBeenCalled();
 	});
 	it("drops all late native callbacks after unmount", async () => {

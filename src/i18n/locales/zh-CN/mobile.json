@@ -8,8 +8,7 @@
 	"plaza": {
 		"source": "发现来源",
 		"openBrowser": "在浏览器中打开",
-		"reload": "重新加载预览",
-		"embedFallback": "若预览不可用，可在浏览器中打开此网站。",
+		"refresh": "刷新广场",
 		"embedUnavailable": "预览不可用。",
 		"openFailed": "无法打开此链接。",
 		"loading": "正在加载广场…"
@@ -160,7 +159,11 @@
 		"refresh": "刷新论文库",
 		"search": "搜索论文",
 		"loading": "正在加载论文…",
-		"empty": "暂无论文"
+		"empty": "暂无论文",
+		"deletePaper": "删除 {{title}}",
+		"deletePaperTitle": "删除论文？",
+		"deletePaperDescription": "将“{{title}}”移入回收站？",
+		"deletePaperConfirm": "删除"
 	},
 	"reader": {
 		"title": "笔记",
