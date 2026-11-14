@@ -532,6 +532,7 @@
 			"probeIdle": "尚未检测",
 			"probeOk": "可用",
 			"probeFail": "不可用",
+			"probeError": "API 测试失败",
 			"probeProbing": "正在检测可用性…"
 		},
 		"errors": {
