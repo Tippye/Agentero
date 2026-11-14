@@ -53,6 +53,8 @@ export type ProbeCommercialMtOptions = {
 	/** Per-request timeout; default {@link TRANSLATE_PROBE_TIMEOUT_MS}. */
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	/** Host rejection detail, for the settings test button to show the cause. */
+	onError?: (id: CommercialTranslateProviderId, error: unknown) => void;
 };
 
 export function isCommercialProviderConfigured(
@@ -138,7 +140,9 @@ export async function probeCommercialMtProvider(
 			timeoutMs: opts.timeoutMs ?? TRANSLATE_PROBE_TIMEOUT_MS,
 		});
 		return text.trim().length > 0;
-	} catch {
+	} catch (error) {
+		// Switching providers aborts the UI interest, not a failure worth a toast.
+		if (!opts.signal?.aborted) opts.onError?.(id, error);
 		return false;
 	}
 }

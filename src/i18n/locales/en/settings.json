@@ -532,6 +532,7 @@
 			"probeIdle": "Not checked yet",
 			"probeOk": "Available",
 			"probeFail": "Unavailable",
+			"probeError": "API test failed",
 			"probeProbing": "Checking availability…"
 		},
 		"errors": {

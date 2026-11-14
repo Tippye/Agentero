@@ -263,6 +263,10 @@ export function TranslatePane({
 			void probeCommercialMtProvider(providerId, {
 				config,
 				signal: ac.signal,
+				onError: (error) =>
+					notifyError(t("translate.provider.probeError"), {
+						description: errorMessage(error),
+					}),
 			})
 				.then((ok) => {
 					if (ac.signal.aborted) return;
@@ -284,7 +288,7 @@ export function TranslatePane({
 					}
 				});
 		},
-		[getProviderConfig],
+		[getProviderConfig, t],
 	);
 
 	/** Confirm: persist drafts (key kept secret by Host), mask UI, then probe. */

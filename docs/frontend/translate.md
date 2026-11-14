@@ -14,7 +14,7 @@ Settings → **翻译**：
   - 将 API key 写入 Host `settings.json`（Unix 权限 `0600`）；WebView 只保留同长度 `*` 掩码，不再回显明文。
   - Host `settings_get` / `settings:changed` 对 key 按字符 redact 为 `*`；`settings_set` 收到纯 `*` 串时保留原密钥。
   - `translate_text` 在 key 缺省或为 `*` 掩码时从 Host 配置解析真实密钥。
-  - 随后做一次连通性 probe。卡片不承担「设为默认」选择。
+  - 随后做一次连通性 probe。卡片不承担「设为默认」选择。probe 失败时弹窗显示 Host 返回的真实原因（超时、DNS、TLS、鉴权、缺 key 等），不再只显示「不可用」，便于区分网络问题与配置问题；错误文本不含明文密钥。
   - OpenAI 兼容翻译要求服务支持 **Chat Completions** 格式：`POST {baseUrl}/chat/completions`，返回 `choices[0].message.content`。设置里填写 Base URL（例如 `https://api.openai.com/v1` 或服务商自己的 `/v1` 根地址），不要填写 Responses / Completions 端点；应用会自动追加 `/chat/completions`。
     用户配置说明见 [配置 OpenAI 兼容翻译](../usage/translate-openai-compatible.md)。
 - 默认服务为 Agent 时展示 Agent / 模型座。
