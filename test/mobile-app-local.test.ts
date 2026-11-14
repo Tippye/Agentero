@@ -20,10 +20,12 @@ const state = vi.hoisted(() => ({
 	dirty: null as ((dirty: boolean) => void) | null,
 	error: vi.fn(),
 	refresh: vi.fn(async (_rescan?: boolean) => {}),
-	trash: vi.fn(async () => ({
-		batchId: "batch",
-		rels: ["papers/example"],
+	deleted: vi.fn(async () => ({
+		permanent: true,
+		batchId: null,
+		paths: ["papers/example"],
 		count: 1,
+		removedRows: 1,
 	})),
 	settings: null as {
 		open: boolean;
@@ -128,7 +130,7 @@ vi.mock("@/components/mobile/hooks/use-pair-offer-links", () => ({
 
 vi.mock("@/lib/paper/api", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/paper/api")>()),
-	trashPaths: state.trash,
+	deletePaths: state.deleted,
 }));
 vi.mock("@/lib/core/notify", () => ({ notifyError: state.error }));
 vi.mock("@/lib/mobile/import-pdf", () => ({ importMobilePdfs: vi.fn() }));
@@ -320,7 +322,7 @@ beforeEach(async () => {
 	state.settings = null;
 	state.error.mockClear();
 	state.refresh.mockClear();
-	state.trash.mockClear();
+	state.deleted.mockClear();
 	host = document.createElement("div");
 	root = createRoot(host);
 	await act(async () => {
@@ -414,9 +416,9 @@ describe("mobile local-first shell", () => {
 		expect(host.textContent).toContain("open-local-paper");
 	});
 
-	it("trashes a paper folder through the native command and rescans the library", async () => {
+	it("permanently deletes a paper folder through the native command and rescans the library", async () => {
 		await click("delete-local-paper");
-		expect(state.trash).toHaveBeenCalledExactlyOnceWith("/private/Vault", [
+		expect(state.deleted).toHaveBeenCalledExactlyOnceWith("/private/Vault", [
 			"papers/example",
 		]);
 		expect(state.refresh).toHaveBeenCalledExactlyOnceWith(true);
@@ -428,6 +430,6 @@ describe("mobile local-first shell", () => {
 		await act(() => state.dirty?.(true));
 		await click("delete-local-paper");
 		expect(state.error).toHaveBeenCalledWith("reader.unsavedChanges");
-		expect(state.trash).not.toHaveBeenCalled();
+		expect(state.deleted).not.toHaveBeenCalled();
 	});
 });

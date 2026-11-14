@@ -65,6 +65,9 @@
 | `path_list_trash` | 列表（论文项带快照标题 `title`，UI 显示标题而非目录名 ID） |
 | `path_restore_item` | 恢复 |
 | `path_purge_item` / `path_purge_trash` | 永久删除 / 清空 |
+| `path_delete` | 永久删除（移动端删除，不写回收站） |
+
+移动端没有回收站恢复界面，文件树 / 论文库删除走 `path_delete`：直接删除文件并清掉 `papers/` 下的 catalog 行，不在 `.agentero/.trash/` 留下无法恢复的副本。桌面与 CLI 仍走可撤销的 `path_trash`。
 
 本地与远端 `path_trash` 共用 core `plan_trash` 和同一 `manifest.json` 结构；文件移动仍各自执行，远端 catalog 发布仍在 trash bridge 末尾。论文目录已经不在磁盘上时，删除仍清掉对应 catalog 行（以及同一 id、目录同样缺失的重复行），库列表不再留下「本地无 PDF」的空条目；这种删除没有回收站项。本地 `path_trash` 成功后会取消被删论文的全部排队/运行中 JobCenter 任务（`JobCenter::cancel_for_paper`），避免已删论文继续下载 / 解析。
 

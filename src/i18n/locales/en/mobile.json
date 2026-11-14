@@ -162,7 +162,7 @@
 		"empty": "No papers",
 		"deletePaper": "Delete {{title}}",
 		"deletePaperTitle": "Delete paper?",
-		"deletePaperDescription": "Move \"{{title}}\" to the recycle bin?",
+		"deletePaperDescription": "Permanently delete \"{{title}}\"? This cannot be undone.",
 		"deletePaperConfirm": "Delete"
 	},
 	"reader": {

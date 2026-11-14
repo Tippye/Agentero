@@ -126,6 +126,7 @@ fn mobile_registers_scoped_api_processing_without_local_process_controls() {
         "paper_update_meta",
         "paper_set_tags",
         "paper_sync_publication",
+        "path_delete",
         "easy_scholar_probe",
         "feeds_list",
         "feeds_add",
@@ -158,6 +159,13 @@ fn mobile_registers_scoped_api_processing_without_local_process_controls() {
     }
     for command in [
         "job_parse_body_enqueue",
+        // Mobile delete is permanent; there is no recycle-bin UI to empty or
+        // restore from, so the desktop trash commands stay unregistered.
+        "path_trash",
+        "path_list_trash",
+        "path_restore_item",
+        "path_purge_item",
+        "path_purge_trash",
         "paper_layout_model_ensure",
         "job_latex_compile_enqueue",
         "skill_install",

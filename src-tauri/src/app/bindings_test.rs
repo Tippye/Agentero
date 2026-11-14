@@ -136,6 +136,7 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::vault::rename::commands::wiki_external_rename_preview,
             crate::features::vault::rename::commands::wiki_apply_external_rename_repair,
             crate::features::vault::trash::commands::path_trash,
+            crate::features::vault::trash::commands::path_delete,
             crate::features::vault::trash::commands::path_list_trash,
             crate::features::vault::trash::commands::path_restore_item,
             crate::features::vault::trash::commands::path_purge_item,

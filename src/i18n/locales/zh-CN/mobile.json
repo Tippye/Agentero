@@ -162,7 +162,7 @@
 		"empty": "暂无论文",
 		"deletePaper": "删除 {{title}}",
 		"deletePaperTitle": "删除论文？",
-		"deletePaperDescription": "将“{{title}}”移入回收站？",
+		"deletePaperDescription": "永久删除“{{title}}”？此操作无法撤销。",
 		"deletePaperConfirm": "删除"
 	},
 	"reader": {
