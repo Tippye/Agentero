@@ -1445,7 +1445,9 @@ function PdfViewerInner({
 			!capabilities.latex
 		)
 			return;
-		if (displayMode !== "dualPane") {
+		// Mobile has no desktop translation tab; always use the overlay there even
+		// if the shared preference is still dualPane.
+		if (displayMode !== "dualPane" || capabilities.apiOnly) {
 			toggleLayoutTranslate();
 			return;
 		}
@@ -1473,6 +1475,7 @@ function PdfViewerInner({
 		);
 	}, [
 		capabilities.layoutTranslation,
+		capabilities.apiOnly,
 		capabilities.latex,
 		plainViewer,
 		displayMode,
@@ -2661,6 +2664,7 @@ function PdfViewerInner({
 					isRemotePaper={isRemotePaper}
 					onImportToLibrary={handleImportToLibrary}
 					importBusy={importBusy}
+					mobile={capabilities.apiOnly === true}
 					smartHighlightBusy={smartHighlightBusy}
 					onSmartHighlight={
 						capabilities.smartHighlights && smartHighlightEnabled

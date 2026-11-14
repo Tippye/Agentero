@@ -190,6 +190,7 @@ export function MobileReaderPage({
 										paperRelPath={paths.paperRelPath}
 										paperAbsPath={paths.paperAbsPath}
 										vaultPath={vaultPath}
+										reserveCommentRail={false}
 										isActive={active && pdfVisible}
 										initialReadingSnapshot={initialReadingSnapshot}
 										onReadingSnapshotChange={(snapshot, documentId) => {

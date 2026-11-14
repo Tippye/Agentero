@@ -126,6 +126,8 @@ fn mobile_registers_scoped_api_processing_without_local_process_controls() {
         "paper_update_meta",
         "paper_set_tags",
         "paper_sync_publication",
+        "paper_refs_parse",
+        "paper_refs_list",
         "path_delete",
         "easy_scholar_probe",
         "feeds_list",
