@@ -247,7 +247,15 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 | D-And-4 | 划掉应用后是否继续保活 | 不继续。行为可预期，远端任务不受影响 |
 | D-And-5 | 是否支持 HarmonyOS NEXT 等不兼容 Android 应用的系统 | 不在范围内 |
 
-## 7. 参考
+## 7. API 阅读与笔迹保存验证（2026-11-14）
+
+已合入共享移动阅读改动：宽档论文列表折叠、应用内 API 翻译/Paddle/MinerU 设置、显式排版与翻译任务、完成块/逐页 IR/原生外部任务回执恢复。Android actor identity 保存只 fsync 自身 ink 与应用配置目录，不再打开 `/data/user/0`；失败仍保留待保存笔迹。移动 renderer 仅获得私有 Vault/cache 文件权限，外部任务回执及其祖先操作由原生作用域拒绝。
+
+共享宿主全量 951 通过、10 项既有环境忽略；全量前端 3573 通过、10 项既有跳过；类型、依赖、绑定/事件契约及严格 Clippy 通过。原生 macOS 移动预览完成启动与私有库创建，控制服务不能激活/捕获其窗口，故不计为可见 PDF/笔硬件验收。API 恢复测试使用本地 HTTP fixture，未调用真实付费服务。
+
+Android merge `798d92092` 已完成 ARM64 release library 与完整 APK 构建。新的本地 [API reader 测试 APK](../../../artifacts/android/Agentero-0.15.5-api-reader-arm64-test.apk) 为 56,650,513 字节，SHA-256 `7d47cae395c8c3b92e25d3dacf79c0e59287516b42f17dab17a7021cbe21600e`；保留旧安装包。包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包内 library SHA 与本轮 release 输出一致。FileProvider 仍仅开放相机 Pictures 和导出 cache 子目录，PDF VIEW/content 与 SEND/MIME-only 边界保持。真实设备保存笔迹、缩放、前后台与真实 API 账号恢复尚未验收。
+
+## 8. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
