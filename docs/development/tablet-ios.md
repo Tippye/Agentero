@@ -207,7 +207,15 @@
 | D-iOS-4 | 是否为 Agent 完成通知建推送服务 | 首个版本不做；Bridge 通道后续随中继一起做 |
 | D-iOS-5 | 恢复随版本自动发布 TestFlight 的时机 | M1 出口后恢复内测发布 |
 
-## 7. 参考
+## 7. API 阅读共享代码同步（2026-11-14）
+
+已合入共享分支 `738b24d92`（iOS merge `221a3ce7b`）：宽档论文列表折叠、应用内 API 翻译与 Paddle/MinerU 设置、只在明确操作后解析/翻译、完成块/逐页 IR 缓存和原生外部任务回执恢复。关闭当前 reader 不注销应用级执行器；进程重启后用户手动继续。未知提交结果保留并拒绝自动重提，不创建新的付费 generation。现有 iOS 18.2、Inbox 与 Swift 生命周期配置保留。
+
+iOS Core 的既有 Library 数据根与 Tauri appDataDir 不完全相同；原生保护使用实际 core 数据根，对私有任务回执递归拒绝文件插件访问，祖先仅精确拒绝以阻止移动/删除绕过。静态移动文件权限收窄到精确 Vault/cache，动态 Vault 授权不再接受整个应用数据目录。API 密钥仍在原生私有设置中保存、掩码返回，不宣称迁入系统 Keychain。
+
+共享宿主 951 通过、10 项既有环境忽略；全量前端 3573 通过、10 项既有跳过；类型、依赖、绑定/事件与严格 Clippy 通过；共享 mobile Rust 路径完成 Android ARM64 完整构建。macOS 移动预览完成启动/建库，但控制服务无法激活或捕获窗口，未计可见 PDF 绘制验收。当前仍缺完整 Xcode/iPhoneOS SDK，未生成 IPA、未验证 iOS 目标或 Pencil/前后台真实 API；TestFlight 自动发布保持冻结。
+
+## 8. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - 现有 iOS 发布流程：[../test/ios-testflight.md](../test/ios-testflight.md)
