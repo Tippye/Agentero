@@ -281,7 +281,23 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；合并清单新增 `com.oplus.ipemanager.permission.receiver.DOUBLE_CLICK`，FileProvider 仍仅开放相机 Pictures 与导出 cache，PDF VIEW/SEND MIME-only 且无 SEND_MULTIPLE。dex 已确认包含笔身快捷适配器字符串。
 - 保留此前移动 UI、API reader 与 native Inbox 安装包。OPPO Pad mini + Pencil 3 Pro 真机事件、工具切换、悬停保护与后台拒绝仍待用户验收；笔端震动/材质触感/轻捏未实现。
 
-## 10. 参考
+## 10. 移动端永久删除重新打包验证（2026-11-15）
+
+移动端没有回收站恢复界面，论文行左滑删除改为永久删除（commit `29de07690`）：
+
+- 新增 `path_delete`，复用 core `delete_paths(..., permanent: true)`：直接删除论文目录及其下文件，不生成 `.agentero/.trash/` 副本，`papers/` 下 catalog 行随文件一起删除；拒绝 `papers` 根、`.agentero`、`..` 与越界路径，符号链接目录只删链接本身。
+- 删除后取消被删路径（含嵌套论文）的 JobCenter 任务，并在移动端显式通知同步调度器拉取一次快照；远端 Vault 不支持该命令。
+- 移动端命令白名单加入 `path_delete`，同时移除桌面回收站的 `path_trash` / `path_list_trash` / `path_restore_item` / `path_purge_item` / `path_purge_trash`。删除确认文案改为“永久删除…此操作无法撤销”；草稿未保存的当前论文仍拒绝删除。
+
+验证与产物：
+
+- TypeScript 通过，依赖图 1482 模块 / 8161 条边无违规；移动删除、滑动、工作区与 API 测试失败提示共 4 个文件 32 项通过。
+- Android 完整 ARM64 release 构建成功；包内 Rust library 含 `path_delete` 注册字符串，而 `path_trash` 等桌面回收站命令字符串未进入移动库，确认移动白名单只暴露永久删除。
+- 新 APK：[Agentero-0.15.5-permanent-delete-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-permanent-delete-arm64-test.apk)，56,744,721 字节，SHA-256 `c7d3f1349fe39c539c32069bb2108639eff495728cb0dc5a8936879135b814ff`；包内 library SHA-256 `1916442d6b7acc710a164b7a67203a68c34ff24336c8d2673b2265b0bb72113d` 与本轮 release 输出一致。
+- v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；FileProvider 仍只开放相机 Pictures 与导出 cache，PDF VIEW/SEND MIME-only 且无 SEND_MULTIPLE。
+- 保留此前手写笔、移动 UI、API reader 与 native Inbox 安装包。真机左滑删除、确认框、删除后列表刷新与文件消失仍待用户设备验收；删除不可恢复，操作前需确认。
+
+## 11. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
