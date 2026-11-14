@@ -255,7 +255,19 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 Android merge `798d92092` 已完成 ARM64 release library 与完整 APK 构建。新的本地 [API reader 测试 APK](../../../artifacts/android/Agentero-0.15.5-api-reader-arm64-test.apk) 为 56,650,513 字节，SHA-256 `7d47cae395c8c3b92e25d3dacf79c0e59287516b42f17dab17a7021cbe21600e`；保留旧安装包。包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包内 library SHA 与本轮 release 输出一致。FileProvider 仍仅开放相机 Pictures 和导出 cache 子目录，PDF VIEW/content 与 SEND/MIME-only 边界保持。真实设备保存笔迹、缩放、前后台与真实 API 账号恢复尚未验收。
 
-## 8. 参考
+## 8. 论文滑动操作、设置页与广场工具栏验证（2026-11-14）
+
+已合入共享移动 UI 改动（mobile `260d128af`，Android merge `2420f11c3`）：
+
+- 文献库论文行支持左滑露出操作层，本阶段只提供删除；删除经原生 `path_trash` 移入 Vault `.agentero/.trash/`，二次确认后刷新 Catalog，当前论文草稿未保存时拒绝删除。移动端暂未提供回收站恢复界面。
+- 设置页按电脑端结构聚合外观、翻译、排版解析、同步、后台运行与关于；侧栏只保留一个设置入口，旧的同步弹窗、处理设置弹窗和后台 Dialog 已移除。翻译/排版仍只走远程 API。
+- 广场标题、来源下拉、刷新图标与图标式打开浏览器合并到同一 header 行；广场内魔棒与内嵌网页的第二层工具条已删除。
+
+共享宿主本轮无 Rust 改动；全量前端 463 文件、3587 项通过、10 项既有跳过；TypeScript、依赖图（1482 模块、8161 条边）及 scoped BIOME 通过。新增覆盖包括真实 DOM 的论文行滑动/确认删除/草稿拒删、创作设置页分区切换与 apiOnly、真实 App 中设置页接入及 reader 不重挂载、广场控件与 header 重挂载，以及安全区宿主。真实设备触摸滑动、删除确认、回收站恢复、设置页滚动与广场 header 视觉仍未验收。
+
+Android 完整 ARM64 release 构建成功。新的本地 [移动 UI 测试 APK](../../../artifacts/android/Agentero-0.15.5-mobile-ui-arm64-test.apk) 为 56,654,609 字节，SHA-256 `90ade3c09726d103ec818de7d493d3b2ad1180fd46a9fa16dbdf1612f814d169`；保留此前 API reader 与 native Inbox 安装包。包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包内 library SHA-256 `0695db023b8865c60e5437c3df34f1c2ab4f5ab457aed4ef586ca35eb2edfd61` 与本轮 release 输出一致。FileProvider 仍仅开放相机 Pictures 与导出 cache 子目录，PDF VIEW/content 与 SEND MIME-only 边界保持。
+
+## 9. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
