@@ -31,6 +31,13 @@ vi.mock("@/components/mobile/mobile-paper-info", () => ({
 vi.mock("@/components/mobile/mobile-plaza-page", () => ({
 	MobilePlazaPage: () => null,
 }));
+// Processing forms/runtime have their own focused integration suites.
+vi.mock("@/components/mobile/mobile-processing-settings", () => ({
+	MobileProcessingSettings: () => null,
+}));
+vi.mock("@/lib/mobile/pdf-processing", () => ({
+	useMobilePdfProcessingRuntime: () => {},
+}));
 vi.mock("@/components/mobile/hooks/use-mobile-vault", () => ({
 	useMobileVault: () => ({
 		vaultPath: "/private/Vault",

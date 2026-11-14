@@ -4,6 +4,7 @@ import {
 	Info,
 	LoaderCircle,
 	Menu,
+	PanelLeft,
 	Plus,
 	RefreshCw,
 	Search,
@@ -50,6 +51,7 @@ import { MobilePaneGroup } from "@/components/mobile/mobile-pane-group";
 import { MobilePaperImport } from "@/components/mobile/mobile-paper-import";
 import { MobilePaperInfo } from "@/components/mobile/mobile-paper-info";
 import { MobilePlazaPage } from "@/components/mobile/mobile-plaza-page";
+import { MobileProcessingSettings } from "@/components/mobile/mobile-processing-settings";
 import { MobileReaderPage } from "@/components/mobile/mobile-reader-page";
 import { MobileSidebar } from "@/components/mobile/mobile-sidebar";
 import { MobileSyncPanel } from "@/components/mobile/mobile-sync-panel";
@@ -58,6 +60,12 @@ import type { MobileReaderMode } from "@/components/mobile/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SessionRef } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
@@ -73,6 +81,7 @@ import {
 } from "@/lib/mobile/import-pdf";
 import { filterMobilePapers } from "@/lib/mobile/navigation";
 import type { MobilePaperRegionContext } from "@/lib/mobile/paper-context";
+import { useMobilePdfProcessingRuntime } from "@/lib/mobile/pdf-processing";
 import type { MobileWindowRoute } from "@/lib/mobile/route";
 import {
 	canLeaveMobilePaper,
@@ -83,6 +92,7 @@ import type { PaperMetadata } from "@/lib/paper/types";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 
 export default function MobileApp() {
+	useMobilePdfProcessingRuntime();
 	const { t } = useTranslation(["mobile", "sidebar", "shortcuts"]);
 	const [tab, setTab] = useState<MobileTab>("library");
 	const [libraryQuery, setLibraryQuery] = useState("");
@@ -92,6 +102,7 @@ export default function MobileApp() {
 	const [infoPaper, setInfoPaper] = useState<PaperMetadata | null>(null);
 	const [paperInfoOpen, setPaperInfoOpen] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [paperListCollapsed, setPaperListCollapsed] = useState(false);
 	const [syncOpen, setSyncOpen] = useState(false);
 	const [backgroundOpen, setBackgroundOpen] = useState(false);
 	const [backgroundState, setBackgroundState] =
@@ -642,7 +653,40 @@ export default function MobileApp() {
 								>
 									<ArrowLeft className="size-4" />
 								</Button>
-								{widthClass !== "wide" && (
+								{widthClass === "wide" ? (
+									<TooltipProvider delayDuration={250}>
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-sm"
+													className="size-11"
+													aria-label={t(
+														paperListCollapsed
+															? "workspace.showPaperList"
+															: "workspace.hidePaperList",
+													)}
+													aria-controls="mobile-workspace-library"
+													aria-expanded={!paperListCollapsed}
+													onClick={() => {
+														markInteraction();
+														setPaperListCollapsed((collapsed) => !collapsed);
+													}}
+												>
+													<PanelLeft className="size-4" />
+												</Button>
+											</TooltipTrigger>
+											<TooltipContent side="bottom">
+												{t(
+													paperListCollapsed
+														? "workspace.showPaperList"
+														: "workspace.hidePaperList",
+												)}
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
+								) : (
 									<Button
 										type="button"
 										variant="ghost"
@@ -747,7 +791,7 @@ export default function MobileApp() {
 				<div className="min-h-0 flex-1 overflow-hidden">
 					<MobilePaneGroup
 						id="mobile-workspace"
-						layoutKey={`${widthClass}:${workspacePreset}:${tab}:${Boolean(selectedPaper)}`}
+						layoutKey={`${widthClass}:${workspacePreset}:${tab}:${Boolean(selectedPaper)}:${paperListCollapsed}`}
 						panes={[
 							{
 								id: "plaza",
@@ -771,7 +815,8 @@ export default function MobileApp() {
 							},
 							{
 								id: "library",
-								visible: layout.library,
+								visible:
+									layout.library && (!selectedPaper || !paperListCollapsed),
 								weight: 1.3,
 								separatorLabel: t("workspace.resizeLibrary"),
 								content: vaultPath ? (
@@ -1050,6 +1095,7 @@ export default function MobileApp() {
 				onOpenChange={setSyncOpen}
 				onSynced={rescanAfterSync}
 			/>
+			<MobileProcessingSettings />
 			<MobileBackgroundSettings
 				open={backgroundOpen}
 				onOpenChange={setBackgroundOpen}

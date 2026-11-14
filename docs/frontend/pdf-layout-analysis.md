@@ -2,7 +2,7 @@
 
 版面检测（默认浏览器内 ONNX PP-DocLayoutV3，可选远程 Provider：Paddle PP-StructureV3 / MinerU 云 API）→ 应用层 **文字角色 + 联图聚合 + 公式按编号框几何聚合（不解析编号文本）+ 置信度去重** → 右栏 **Figures**。
 
-> 该能力已落地并可随论文打开自动运行；大模型推理在低端设备上可能卡顿，分析结果仅写入可重建 sidecar，不改 PDF 二进制。
+> 桌面版可随论文打开自动运行；移动端只在用户明确点击解析/翻译后调用远程 API，打开或导入仅展示缓存，不初始化本地 ONNX/OCR 或回退。分析结果写入可重建 sidecar，不改 PDF 二进制。
 
 应用内拖入 PDF 与「魔棒 → 导入 PDF」共用导入入口。直接从文件管理器放入 Vault `papers/` 根目录的 PDF，在自动收录开启时也会建立独立资料文件夹（启动时补扫已有文件），复用相同的后续解析流程和设置中的版面引擎；结果保存在该资料的 `source/layout.json`，重启后读取缓存。远程引擎的文件大小限制仍然适用。
 
@@ -13,6 +13,16 @@
 | 持久化 | Paper PDF 写入 `{paper}/source/layout.json`（raw text-enriched regions）+ `{paper}/source/layout-index.json`（侧栏同构，供 CLI）；`layoutAnalysisStore` 仍是运行时 UI store |
 
 ---
+
+## 远程 API 的缓存与继续处理
+
+Paddle 与 MinerU（云端、3.x、4.0、4.1）复用原有解析适配器，在 Native 私有 `agentero_data_dir()/hosted-extractions` 保存任务回执和原始 extraction。身份包含 PDF 内容摘要、provider、规范 endpoint、账号摘要与 OCR/语言等选项，改名不重新提交，换账号或输入会隔离。普通 `source/layout.json` 缓存仍然优先；原始 API 结果在交给依赖 viewer 的文字/几何补全前落盘，关闭论文不会丢掉已下载结果。
+
+提交前耐久写入状态，收到 task/job/batch ID 后立即保存。已知 ID 恢复原上传、轮询和下载，成功原始结果直接复用，不重新创建远程任务。发送提交但没有确认响应/ID 时保留未知状态并报错，普通继续不会盲重提。超时、取消等待和进程退出不删除收据。明确的 `force` 绕过论文 sidecar 后仍复用原始 extraction，只重建本地映射；当前没有创建新付费 generation 的界面。未知状态需要在确认服务端情况后另行处理，不承诺上游 exactly-once。
+
+收据不进入 Vault 同步，不保存明文 API key。目录/文件分别为 0700/0600，原子写、校验摘要、进程内串行与 OS 文件锁保护重入；显式释放 OS 锁先于交还内存许可，避免复制描述符或派生进程仍持有旧锁。缺失 managed 收据、损坏缓存或不匹配版本均拒绝当作新请求。原生启动对实际数据根安装文件插件 deny，同时拒绝修改祖先路径，后续 Vault grant 无法重授。移动 renderer 的静态权限仅保留精确私有 Vault 与缓存，不覆盖配置、身份和任务回执。
+
+全文翻译继续使用已有完成块合并缓存、逐页 IR 与可选最终 PDF 缓存；进程重启后用户手动继续，只补未完成部分。同步文本 MT 没有可查询的远程 task ID，崩溃时正在请求的批次可能没有已确认结果；继续可重试缺失项，不承诺这类请求零重复计费。缓存没有自动淘汰策略，尤其不能把删除活动回执当成取消任务。协议验证使用本地 HTTP fixture，未调用真实付费服务，也不代替提供器、网络或 Android/iOS 设备验收。
 
 ## 流水线（一图）
 

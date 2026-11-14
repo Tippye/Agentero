@@ -6,6 +6,20 @@ use crate::core::log_util::{trunc, OpTimer};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_fs::FsExt;
 
+/// Keep API receipts and signed upload credentials out of renderer file access.
+/// Exact ancestor denies also stop moving/removing an allowed parent to bypass
+/// the recursive journal deny. `forbid_file` intentionally adds only the exact
+/// path pattern; `forbid_directory(false)` would deny its children as well.
+pub(crate) fn protect_hosted_storage<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let root = crate::core::paths::agentero_data_dir().join("hosted-extractions");
+    let scope = app.fs_scope();
+    scope.forbid_directory(&root, true)?;
+    for ancestor in root.ancestors().skip(1) {
+        scope.forbid_file(ancestor)?;
+    }
+    Ok(())
+}
+
 /// Extend the fs-plugin scope so the renderer can read/write this vault dir.
 ///
 /// The dialog plugin grants runtime scope for a picked folder, but that grant
@@ -31,9 +45,8 @@ pub fn vault_allow_fs_scope<R: Runtime>(app: AppHandle<R>, path: String) -> ApiR
     {
         use tauri::Manager;
         let private_path = (|| -> Result<bool, Box<dyn std::error::Error>> {
-            let path = p.canonicalize()?;
-            let root = app.path().app_data_dir()?.canonicalize()?;
-            Ok(path.starts_with(root))
+            let private = app.path().app_data_dir()?.join("Vault");
+            Ok(crate::features::paper::mobile::checked_vault(&path, Some(&private)).is_ok())
         })();
         if !matches!(private_path, Ok(true)) {
             let err =

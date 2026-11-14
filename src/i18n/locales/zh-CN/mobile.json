@@ -132,6 +132,8 @@
 		"read": "阅读",
 		"compare": "对照",
 		"discuss": "研讨",
+		"showPaperList": "展开论文列表",
+		"hidePaperList": "折叠论文列表",
 		"resizeLibrary": "调整文献库与阅读器宽度",
 		"resizeDiscussion": "调整阅读器与 Agent 宽度",
 		"resizeNotes": "调整 PDF 与笔记宽度"

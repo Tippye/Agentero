@@ -333,6 +333,7 @@ pub fn run() {
             cache: app.path().app_cache_dir()?,
             data: app.path().app_data_dir()?,
         })?;
+        vault_session::fs_scope::protect_hosted_storage(app.handle())?;
         manage_state(app.handle())?;
         // Bundled ACP adapter tier (offline fallback): record the packaged
         // adapters root before any catalog scan / spawn path can consult it.

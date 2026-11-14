@@ -22,10 +22,14 @@
 		{
 			"identifier": "fs:scope",
 			"allow": [
-				{ "path": "$APPDATA" },
-				{ "path": "$APPDATA/**" },
+				{ "path": "$APPDATA/Vault" },
+				{ "path": "$APPDATA/Vault/**" },
 				{ "path": "$APPCACHE" },
 				{ "path": "$APPCACHE/**" }
+			],
+			"deny": [
+				{ "path": "$APPDATA/hosted-extractions" },
+				{ "path": "$APPDATA/hosted-extractions/**" }
 			]
 		},
 		"dialog:default",

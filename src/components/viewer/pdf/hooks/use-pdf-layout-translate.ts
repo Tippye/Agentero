@@ -59,12 +59,18 @@ import {
 	observePaperTranslation,
 	type TranslationSnapshot,
 } from "@/lib/pdf/layout/translation-job";
+import {
+	assertApiTranslationSettings,
+	isApiOnlyPdfProcessing,
+} from "@/lib/pdf/processing-policy";
+import { loadSettings } from "@/lib/settings";
 import { openSettingsWindow } from "@/lib/shell/settings-window";
 import { displayTranslateError } from "@/lib/translate";
 
 export type UsePdfLayoutTranslateOptions = {
 	/** Host supports JobCenter translation and reflow; false prevents auto-starts too. */
 	enabled?: boolean;
+	apiOnly?: boolean;
 	reflowContext?: ReflowContext;
 	docId: string;
 	/** Translation-only panes hydrate completed overlays from the shared cache. */
@@ -368,6 +374,7 @@ function createTranslatePublishCoalescer(
 
 export function usePdfLayoutTranslate({
 	enabled = true,
+	apiOnly: explicitApiOnly = false,
 	reflowContext,
 	docId,
 	layoutRawRegions,
@@ -379,6 +386,7 @@ export function usePdfLayoutTranslate({
 	pdfBytes,
 }: UsePdfLayoutTranslateOptions): PdfLayoutTranslate {
 	const { t } = useTranslation("viewer");
+	const apiOnly = isApiOnlyPdfProcessing(explicitApiOnly);
 	const enabledRef = useRef(enabled);
 	enabledRef.current = enabled;
 	/** Progressive layout bulk-translate overlays (body text / abstract / header). */
@@ -523,11 +531,18 @@ export function usePdfLayoutTranslate({
 	 */
 	const enterWaitingLayout = useCallback(
 		(target: LayoutTranslateWaitTarget) => {
+			try {
+				assertApiTranslationSettings(loadSettings().translate, apiOnly);
+			} catch (error) {
+				notifyTranslateFailure(errorText(error));
+				return;
+			}
 			layoutTranslateWaitTargetRef.current = target;
 			if (paperAbsPath) {
 				enqueuePaperLayoutAnalysis({
 					paperAbsPath,
 					focus: true,
+					apiOnly,
 					onError: (error) => {
 						if (layoutTranslateWaitTargetRef.current !== target) return;
 						cancelWaitingLayout();
@@ -547,6 +562,7 @@ export function usePdfLayoutTranslate({
 		},
 		[
 			parsePendingForPaper,
+			apiOnly,
 			paperAbsPath,
 			cancelWaitingLayout,
 			notifyTranslateFailure,
@@ -654,6 +670,8 @@ export function usePdfLayoutTranslate({
 				}
 			};
 			try {
+				if (start)
+					assertApiTranslationSettings(loadSettings().translate, apiOnly);
 				const subscription = await observePaperTranslation({
 					vaultPath,
 					paperPath: paperRelPath,
@@ -742,6 +760,7 @@ export function usePdfLayoutTranslate({
 			paperAbsPath,
 			paperRelPath,
 			vaultPath,
+			apiOnly,
 			prepareReflow,
 			notifyTranslateFailure,
 			notifyTranslateItemErrors,
@@ -781,7 +800,7 @@ export function usePdfLayoutTranslate({
 						if (!raw?.length && paperAbsPath) {
 							const layout = await readLayoutSidecar(paperAbsPath);
 							if (ac.signal.aborted) return;
-							if (layout && !layoutSidecarNeedsTextLayer(layout)) {
+							if (layout && (apiOnly || !layoutSidecarNeedsTextLayer(layout))) {
 								raw = layout.regions;
 								setLayoutDocumentResult(
 									buildLayoutDocumentResult(
@@ -842,6 +861,7 @@ export function usePdfLayoutTranslate({
 			paperAbsPath,
 			layoutRawRegions,
 			docId,
+			apiOnly,
 			prepareReflow,
 		],
 	);
@@ -940,6 +960,7 @@ export function usePdfLayoutTranslate({
 			});
 			if (!needsRun) return;
 			const finalItems = await runLayoutRegionTranslate({
+				apiOnly,
 				items: hydration.items,
 				signal: ac.signal,
 				paperKey,
@@ -981,6 +1002,7 @@ export function usePdfLayoutTranslate({
 		paperAbsPath,
 		paperKey,
 		vaultPath,
+		apiOnly,
 		enterWaitingLayout,
 		prepareReflow,
 		notifyTranslateFailure,
@@ -1096,6 +1118,7 @@ export function usePdfLayoutTranslate({
 				});
 				if (!needsRun) return;
 				const finalPageItems = await runLayoutRegionTranslate({
+					apiOnly,
 					items: pageItems,
 					signal: ac.signal,
 					paperKey,
@@ -1158,6 +1181,7 @@ export function usePdfLayoutTranslate({
 			paperAbsPath,
 			paperKey,
 			vaultPath,
+			apiOnly,
 			enterWaitingLayout,
 			prepareReflow,
 			attachSharedTranslate,
@@ -1283,6 +1307,7 @@ export function usePdfLayoutTranslate({
 		});
 		void (async () => {
 			const finalItems = await runLayoutRegionTranslate({
+				apiOnly,
 				items: seed.map((item) => ({ ...item })),
 				signal: ac.signal,
 				paperKey,
@@ -1335,6 +1360,7 @@ export function usePdfLayoutTranslate({
 		paperAbsPath,
 		paperKey,
 		vaultPath,
+		apiOnly,
 		notifyTranslateFailure,
 		paperRelPath,
 		startSharedDocumentTranslate,
@@ -1397,6 +1423,7 @@ export function usePdfLayoutTranslate({
 		});
 		void (async () => {
 			const finalItems = await runLayoutRegionTranslate({
+				apiOnly,
 				items: seed.map((item) => ({ ...item })),
 				signal: ac.signal,
 				paperKey,
@@ -1448,6 +1475,7 @@ export function usePdfLayoutTranslate({
 		paperAbsPath,
 		paperKey,
 		vaultPath,
+		apiOnly,
 		notifyTranslateFailure,
 		paperRelPath,
 		startSharedDocumentTranslate,
@@ -1541,7 +1569,7 @@ export function usePdfLayoutTranslate({
 			if (cancelled || currentTicket !== ticket || !cached?.regions.length)
 				return;
 			// Legacy caches still need the viewer's text-layer enrichment.
-			if (layoutSidecarNeedsTextLayer(cached)) return;
+			if (!apiOnly && layoutSidecarNeedsTextLayer(cached)) return;
 			setLayoutDocumentResult(
 				buildLayoutDocumentResult(
 					docId,
@@ -1561,7 +1589,7 @@ export function usePdfLayoutTranslate({
 			cancelled = true;
 			unsubscribe();
 		};
-	}, [layoutTranslateJob.status, docId, paperAbsPath]);
+	}, [layoutTranslateJob.status, docId, paperAbsPath, apiOnly]);
 
 	// A queued job starts the moment layout regions land (parse finished —
 	// possibly in another tab via the sidecar file watcher).

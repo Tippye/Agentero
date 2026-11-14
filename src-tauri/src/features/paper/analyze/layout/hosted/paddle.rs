@@ -195,7 +195,9 @@ async fn submit_job(
             reqwest::multipart::Part::bytes(file_bytes)
                 .file_name(file_name)
                 .mime_str(mime)
-                .map_err(|e| AppError::message(format!("layout_remote: multipart: {e}")))?,
+                .map_err(|e| {
+                    AppError::message(format!("layout_remote: multipart: {}", e.without_url()))
+                })?,
         )
         .text("model", model.to_string())
         .text("optionalPayload", optional_payload);
@@ -205,12 +207,11 @@ async fn submit_job(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| AppError::message(format!("Paddle job submit failed: {e}")))?;
+        .map_err(|e| AppError::message(format!("Paddle job submit failed: {}", e.without_url())))?;
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|e| AppError::message(format!("Paddle response read failed: {e}")))?;
+    let text = response.text().await.map_err(|e| {
+        AppError::message(format!("Paddle response read failed: {}", e.without_url()))
+    })?;
     if !status.is_success() {
         let snippet = http::http_err_snippet(&text);
         return Err(AppError::message(format!(
@@ -254,12 +255,63 @@ pub(crate) async fn run_paddle_ocr_job(
     let (jobs_url, auth) = resolve_cloud_target(api_key)?;
     let client = http::client(CLOUD_REQUEST_TIMEOUT)?;
 
-    // 1) Submit the whole-document job (multipart file upload).
-    progress("uploading", None, None);
-    let job_id = submit_job(
-        &client, &jobs_url, &auth, file_bytes, file_name, mime, model,
+    let endpoint = super::journal::normalized_endpoint(&jobs_url)?;
+    let key = super::journal::identity(&[
+        b"paddle-v1",
+        endpoint.as_bytes(),
+        auth.as_bytes(),
+        &file_bytes,
+        mime.as_bytes(),
+        model.as_bytes(),
+    ]);
+    let mut journal = super::journal::Journal::open(key).await?;
+    run_paddle_with_receipt(
+        &client,
+        &jobs_url,
+        &auth,
+        file_bytes,
+        file_name,
+        mime,
+        model,
+        progress,
+        cancel,
+        &mut journal,
     )
-    .await?;
+    .await
+    .map_err(|error| super::journal::redact_error(error, &auth))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_paddle_with_receipt(
+    client: &reqwest::Client,
+    jobs_url: &str,
+    auth: &str,
+    file_bytes: Vec<u8>,
+    file_name: String,
+    mime: &str,
+    model: &str,
+    progress: super::ProgressFn<'_>,
+    cancel: super::CancelFn<'_>,
+    journal: &mut super::journal::Journal,
+) -> Result<(String, Option<Value>), AppError> {
+    if let Some(bytes) = journal.cached()? {
+        return serde_json::from_slice(&bytes)
+            .map_err(|_| AppError::message("Paddle cached result is invalid"));
+    }
+    if cancel() {
+        return Err(AppError::message(CANCELLED_MESSAGE));
+    }
+    // The durable unknown state precedes POST. A lost response never authorizes
+    // another paid submission, including after restart.
+    if journal.begin("prepared", "submitting")? {
+        progress("uploading", None, None);
+        let job_id = submit_job(client, jobs_url, auth, file_bytes, file_name, mime, model).await?;
+        journal.save("submitted", json!({"id": job_id}))?;
+    }
+    let job_id = journal.receipt()["id"]
+        .as_str()
+        .ok_or_else(|| AppError::message("Paddle receipt has no job ID; refusing resubmission"))?
+        .to_string();
 
     // 2) Poll until done (deadline guards a stuck job).
     let job_url = format!("{}/{}", jobs_url.trim_end_matches('/'), job_id);
@@ -274,15 +326,16 @@ pub(crate) async fn run_paddle_ocr_job(
         tokio::time::sleep(CLOUD_POLL_INTERVAL).await;
         let poll = client
             .get(&job_url)
-            .header("Authorization", &auth)
+            .header("Authorization", auth)
             .send()
             .await
-            .map_err(|e| AppError::message(format!("Paddle job poll failed: {e}")))?;
+            .map_err(|e| {
+                AppError::message(format!("Paddle job poll failed: {}", e.without_url()))
+            })?;
         let poll_status = poll.status();
-        let poll_text = poll
-            .text()
-            .await
-            .map_err(|e| AppError::message(format!("Paddle poll read failed: {e}")))?;
+        let poll_text = poll.text().await.map_err(|e| {
+            AppError::message(format!("Paddle poll read failed: {}", e.without_url()))
+        })?;
         if !poll_status.is_success() {
             let snippet = http::http_err_snippet(&poll_text);
             return Err(AppError::message(format!(
@@ -328,33 +381,27 @@ pub(crate) async fn run_paddle_ocr_job(
 
     // 3) Download the JSONL result; each line carries page results.
     progress("downloading", None, None);
-    let result_response = client
-        .get(&json_url)
-        .send()
-        .await
-        .map_err(|e| AppError::message(format!("Paddle result download failed: {e}")))?;
+    let result_response = client.get(&json_url).send().await.map_err(|e| {
+        AppError::message(format!(
+            "Paddle result download failed: {}",
+            e.without_url()
+        ))
+    })?;
     let result_status = result_response.status();
-    let result_text = result_response
-        .text()
-        .await
-        .map_err(|e| AppError::message(format!("Paddle result read failed: {e}")))?;
+    let result_text = result_response.text().await.map_err(|e| {
+        AppError::message(format!("Paddle result read failed: {}", e.without_url()))
+    })?;
     if !result_status.is_success() {
         return Err(AppError::message(format!(
             "Paddle result download failed (HTTP {result_status})"
         )));
     }
 
-    // Keep the raw JSONL for diagnosis (scale/field issues); best effort.
-    let debug_path = crate::core::paths::agentero_cache_dir().join("paddle-last-result.jsonl");
-    if let Some(parent) = debug_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Err(e) = std::fs::write(&debug_path, result_text.as_bytes()) {
-        log::warn!(target: "agentero::layout::hosted", "failed to write {debug_path:?}: {e}");
-    } else {
-        log::info!(target: "agentero::layout::hosted", "raw cloud result saved to {debug_path:?}");
-    }
-
+    // Store before layout/body parsing or any viewer lifecycle checks.
+    journal.complete(
+        &serde_json::to_vec(&(&result_text, &data_info))
+            .map_err(|e| AppError::message(e.to_string()))?,
+    )?;
     Ok((result_text, data_info))
 }
 
@@ -488,6 +535,84 @@ async fn probe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn interrupted_paddle_job_resumes_id_and_completed_cache_without_post() {
+        let server = super::super::test_server::Server::new(vec![
+            ("POST", "/jobs", 200, r#"{"data":{"jobId":"paid-1"}}"#),
+            ("GET", "/jobs/paid-1", 500, "temporary"),
+            (
+                "GET",
+                "/jobs/paid-1",
+                200,
+                r#"{"data":{"state":"done","resultUrl":{"jsonUrl":"$BASE/result"},"dataInfo":{"pages":[]}}}"#,
+            ),
+            ("GET", "/result", 200, "completed-jsonl"),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let key = super::super::journal::identity(&[b"paddle-fixture"]);
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = format!("{}/jobs", server.base);
+        let mut first = super::super::journal::Journal::open_in(root.path().into(), key.clone())
+            .await
+            .unwrap();
+        assert!(run_paddle_with_receipt(
+            &client,
+            &url,
+            "test",
+            b"pdf".to_vec(),
+            "paper.pdf".into(),
+            "application/pdf",
+            CLOUD_MODEL,
+            &|_, _, _| {},
+            &|| false,
+            &mut first
+        )
+        .await
+        .is_err());
+        drop(first);
+        let mut restored = super::super::journal::Journal::open_in(root.path().into(), key.clone())
+            .await
+            .unwrap();
+        let result = run_paddle_with_receipt(
+            &client,
+            &url,
+            "test",
+            b"pdf".to_vec(),
+            "paper.pdf".into(),
+            "application/pdf",
+            CLOUD_MODEL,
+            &|_, _, _| {},
+            &|| false,
+            &mut restored,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.0, "completed-jsonl");
+        drop(restored);
+        let mut restored = super::super::journal::Journal::open_in(root.path().into(), key)
+            .await
+            .unwrap();
+        assert_eq!(
+            run_paddle_with_receipt(
+                &client,
+                &url,
+                "test",
+                b"pdf".to_vec(),
+                "paper.pdf".into(),
+                "application/pdf",
+                CLOUD_MODEL,
+                &|_, _, _| {},
+                &|| false,
+                &mut restored
+            )
+            .await
+            .unwrap()
+            .0,
+            "completed-jsonl"
+        );
+        server.finish(4);
+    }
 
     #[test]
     fn jpeg_dimensions_reads_sof0() {

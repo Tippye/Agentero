@@ -1,5 +1,6 @@
 import i18n from "@/i18n";
 import { errorText } from "@/lib/core/error";
+import { assertApiTranslationSettings } from "@/lib/pdf/processing-policy";
 import { loadSettings } from "@/lib/settings";
 import { langsFromSettings } from "@/lib/translate/lang";
 import {
@@ -30,6 +31,19 @@ export async function runTranslate(
 	const providerId: TranslateProviderId =
 		opts.providerId ?? settings.translate.provider;
 
+	assertApiTranslationSettings(
+		{
+			provider: providerId,
+			providerConfigs:
+				opts.providerConfig && isCommercialTranslateProvider(providerId)
+					? {
+							...settings.translate.providerConfigs,
+							[providerId]: opts.providerConfig,
+						}
+					: settings.translate.providerConfigs,
+		},
+		opts.apiOnly,
+	);
 	const service = getTranslateService(providerId);
 	if (!service) {
 		throw new Error(`Unknown translation provider: ${providerId}`);

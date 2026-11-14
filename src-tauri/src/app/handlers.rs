@@ -463,8 +463,15 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::core::usage::commands::activity_record_events,
             crate::core::usage::commands::usage_clear,
             crate::app::logging::logs_clear,
-            // Native paper imports own their jobs; no renderer report/claim or
-            // arbitrary job kinds are admitted by the mobile surface.
+            // Native imports remain Host-owned. Renderer reports/claims are
+            // restricted to private-Vault remote layout/translation jobs.
+            crate::features::paper::analyze::layout::hosted::commands::layout_remote_analyze_pdf,
+            crate::features::paper::analyze::layout::hosted::commands::layout_remote_probe,
+            crate::features::jobs::commands::job_layout_analyze_enqueue,
+            crate::features::jobs::commands::job_layout_translate_enqueue,
+            crate::features::jobs::commands::job_layout_translate_claim,
+            crate::features::jobs::commands::job_report,
+            crate::features::jobs::commands::job_focus_paper,
             crate::features::jobs::commands::job_import_enqueue,
             crate::features::jobs::commands::job_list,
             crate::features::jobs::commands::job_cancel,

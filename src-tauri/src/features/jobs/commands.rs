@@ -21,6 +21,135 @@ macro_rules! try_job_paper {
     };
 }
 
+#[cfg(any(mobile, test))]
+fn mobile_job_kind_allowed(kind: JobKind) -> bool {
+    matches!(
+        kind,
+        JobKind::Import | JobKind::LayoutAnalyze | JobKind::LayoutTranslate
+    )
+}
+
+#[cfg(mobile)]
+fn mobile_processing_scope(
+    app: &tauri::AppHandle,
+    vault: &str,
+    require_layout: bool,
+    require_translation: bool,
+) -> Result<(), AppError> {
+    crate::features::paper::mobile::vault(app, vault)?;
+    let settings = app
+        .state::<crate::features::system::settings::AppSettingsStore>()
+        .get()?
+        .settings;
+    if require_layout && !matches!(settings.layout.backend.as_str(), "paddle" | "mineru") {
+        return Err(AppError::domain(
+            "mobile_api_required",
+            "Choose a remote PDF layout API in Settings",
+        ));
+    }
+    if require_translation && matches!(settings.translate.provider.trim(), "" | "agent" | "local") {
+        return Err(AppError::domain(
+            "mobile_api_required",
+            "Choose a translation API in Settings",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(mobile, test))]
+fn mobile_renderer_can_report(
+    label: &str,
+    kind: JobKind,
+    host: super::ExecHost,
+    vault: &Path,
+    private: &Path,
+) -> bool {
+    label == "main"
+        && matches!(kind, JobKind::LayoutAnalyze | JobKind::LayoutTranslate)
+        && host == super::ExecHost::Renderer
+        && vault == private
+}
+
+#[cfg(test)]
+#[test]
+fn mobile_processing_reports_cannot_claim_host_imports_other_windows_or_vaults() {
+    let private = Path::new("/app/Vault");
+    assert!(mobile_job_kind_allowed(JobKind::Import));
+    for kind in [JobKind::LayoutAnalyze, JobKind::LayoutTranslate] {
+        assert!(mobile_job_kind_allowed(kind));
+        assert!(mobile_renderer_can_report(
+            "main",
+            kind,
+            super::ExecHost::Renderer,
+            private,
+            private
+        ));
+        assert!(!mobile_renderer_can_report(
+            "settings",
+            kind,
+            super::ExecHost::Renderer,
+            private,
+            private
+        ));
+        assert!(!mobile_renderer_can_report(
+            "main",
+            kind,
+            super::ExecHost::Host,
+            private,
+            private
+        ));
+        assert!(!mobile_renderer_can_report(
+            "main",
+            kind,
+            super::ExecHost::Renderer,
+            Path::new("/other/Vault"),
+            private
+        ));
+    }
+    for kind in [
+        JobKind::Import,
+        JobKind::ParseBody,
+        JobKind::ModelDownload,
+        JobKind::LatexCompile,
+        JobKind::LibraryIo,
+    ] {
+        assert!(!mobile_renderer_can_report(
+            "main",
+            kind,
+            super::ExecHost::Renderer,
+            private,
+            private
+        ));
+        if kind != JobKind::Import {
+            assert!(!mobile_job_kind_allowed(kind));
+        }
+    }
+}
+
+#[cfg(mobile)]
+async fn mobile_renderer_job_scope(
+    window: &tauri::WebviewWindow,
+    center: &JobCenter,
+    job_id: &str,
+) -> Result<(), AppError> {
+    let private = crate::features::paper::mobile::private_vault(window.app_handle())?;
+    if !center.snapshot(job_id).await.is_some_and(|job| {
+        mobile_renderer_can_report(
+            window.label(),
+            job.kind,
+            job.host,
+            Path::new(&job.vault_path),
+            &private,
+        )
+    }) {
+        return Err(AppError::domain(
+            "mobile_job_scope",
+            "Only the main reader can report private-Vault API jobs",
+        ));
+    }
+    Ok(())
+}
+
 /// Shared enqueue args for kinds that take no extra parameters
 /// (ParseRefs / LayoutAnalyze / DownloadAssets).
 #[derive(Debug, Deserialize, specta::Type)]
@@ -436,7 +565,17 @@ pub async fn job_layout_translate_enqueue(
     center: State<'_, JobCenter>,
     args: JobEnqueueArgs,
 ) -> Result<ApiResult<JobSnapshot>, String> {
+    #[cfg(mobile)]
+    if let Err(error) = mobile_processing_scope(&app, &args.vault_path, false, true) {
+        return Ok(map_err(error));
+    }
     let (vault, path) = try_job_paper!(args);
+    #[cfg(mobile)]
+    if !vault.join(&path).join("source/layout.json").is_file() {
+        if let Err(error) = mobile_processing_scope(&app, &args.vault_path, true, true) {
+            return Ok(map_err(error));
+        }
+    }
     let active = center
         .list(Some(&vault), Some(&path))
         .await
@@ -495,6 +634,10 @@ pub async fn job_layout_translate_claim(
     center: State<'_, JobCenter>,
     args: JobLayoutTranslateClaimArgs,
 ) -> Result<ApiResult<bool>, String> {
+    #[cfg(mobile)]
+    if let Err(error) = mobile_renderer_job_scope(&window, &center, &args.job_id).await {
+        return Ok(map_err(error));
+    }
     Ok(ApiResult::ok(
         center
             .claim_layout_translate(&args.job_id, window.label())
@@ -509,6 +652,10 @@ pub async fn job_layout_analyze_enqueue(
     center: State<'_, JobCenter>,
     args: JobLayoutAnalyzeEnqueueArgs,
 ) -> Result<ApiResult<JobSnapshot>, String> {
+    #[cfg(mobile)]
+    if let Err(error) = mobile_processing_scope(&app, &args.vault_path, true, args.auto_translate) {
+        return Ok(map_err(error));
+    }
     let (vault, path) = try_job_paper!(args);
     if let Some(snapshot) = deferred_if_recognizing(
         &center,
@@ -905,6 +1052,10 @@ pub async fn job_focus_paper(
     center: State<'_, JobCenter>,
     args: JobFocusPaperArgs,
 ) -> Result<ApiResult<Vec<JobSnapshot>>, String> {
+    #[cfg(mobile)]
+    if let Err(error) = mobile_processing_scope(&app, &args.vault_path, false, false) {
+        return Ok(map_err(error));
+    }
     let (vault, path) = try_job_paper!(args);
     let promoted = center.promote_paper(&vault, &path).await;
     for snapshot in &promoted {
@@ -936,11 +1087,11 @@ pub async fn job_cancel(
             Err(error) => return Ok(map_err(error)),
         };
         if !center.snapshot(&job_id).await.is_some_and(|job| {
-            job.kind == JobKind::Import && Path::new(&job.vault_path) == private.as_path()
+            mobile_job_kind_allowed(job.kind) && Path::new(&job.vault_path) == private.as_path()
         }) {
             return Ok(map_err(AppError::domain(
                 "mobile_import_scope",
-                "Only private-Vault import jobs can be cancelled here",
+                "Only private-Vault import or API processing jobs can be cancelled here",
             )));
         }
     }
@@ -960,9 +1111,16 @@ pub async fn job_cancel(
 #[specta::specta]
 pub async fn job_report(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     center: State<'_, JobCenter>,
     args: JobReportArgs,
 ) -> Result<ApiResult<JobSnapshot>, String> {
+    #[cfg(desktop)]
+    let _ = window;
+    #[cfg(mobile)]
+    if let Err(error) = mobile_renderer_job_scope(&window, &center, &args.job_id).await {
+        return Ok(map_err(error));
+    }
     if center
         .snapshot(&args.job_id)
         .await
@@ -1023,7 +1181,7 @@ pub async fn job_list(
             .list(Some(&vault), args.path.as_deref())
             .await
             .into_iter()
-            .filter(|job| job.kind == JobKind::Import)
+            .filter(|job| mobile_job_kind_allowed(job.kind))
             .collect();
         return Ok(ApiResult::ok(jobs));
     }

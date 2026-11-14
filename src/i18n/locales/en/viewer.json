@@ -23,6 +23,10 @@
 		"unsaved": "Finish saving or discard the pending handwriting before leaving."
 	},
 	"pdf": {
+		"apiOnly": {
+			"layoutProviderRequired": "Configure a remote layout API provider before analyzing this paper.",
+			"translateProviderRequired": "Choose an API translation provider before translating on this device."
+		},
 		"empty": "No paper available.",
 		"loading": "Loading PDF…",
 		"loadError": "Failed to load PDF",

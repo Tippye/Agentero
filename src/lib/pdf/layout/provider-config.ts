@@ -58,6 +58,8 @@ export async function persistLayoutProviderConfig(opts: {
 	config: LayoutProviderConfig;
 	/** Card is usable without an apiKey (self-hosted endpoint). */
 	ready?: boolean;
+	/** Surface persistence failure so interactive forms can retain their draft. */
+	throwOnError?: boolean;
 	/** Also switch the active layout backend (onboarding / explicit override). */
 	backend?: LayoutBackend;
 	/** Also switch the body-parse engine (explicit override). */
@@ -83,8 +85,9 @@ export async function persistLayoutProviderConfig(opts: {
 	};
 	try {
 		await saveSettingsAsync({ ...opts.settings, layout: savedLayout });
-	} catch {
-		// Still mask the UI below.
+	} catch (error) {
+		if (opts.throwOnError) throw error;
+		// Legacy callers keep their existing optimistic display behavior.
 	}
 	const masked = isSecretMask(opts.config.apiKey)
 		? opts.config.apiKey

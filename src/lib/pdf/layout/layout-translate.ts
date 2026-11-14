@@ -38,6 +38,7 @@ import type {
 	LayoutTranslateSentence,
 	PdfLayoutRegion,
 } from "@/lib/pdf/layout/types";
+import { assertApiTranslationSettings } from "@/lib/pdf/processing-policy";
 import {
 	evictAgentTranslateSessionId,
 	getAgentTranslateSessionId,
@@ -959,6 +960,7 @@ export function parseNumberedTranslation(
  * fails, that chain does not store sentence pairs.
  */
 export async function runLayoutRegionTranslate(options: {
+	apiOnly?: boolean;
 	items: LayoutTranslateItem[];
 	signal?: AbortSignal;
 	concurrency?: number;
@@ -968,6 +970,11 @@ export async function runLayoutRegionTranslate(options: {
 }): Promise<LayoutTranslateItem[]> {
 	const started = performance.now();
 	let firstResult = false;
+	// Completed cache is display data, even if stale settings select Agent.
+	if (!hasPendingLayoutTranslateItems(options.items)) {
+		return options.items.map((item) => ({ ...item }));
+	}
+	assertApiTranslationSettings(loadSettings().translate, options.apiOnly);
 	const agentOpts = await resolveLayoutTranslateAgentOpts({
 		paperKey: options.paperKey,
 		vaultPath: options.vaultPath,
@@ -1075,7 +1082,7 @@ export async function runLayoutRegionTranslate(options: {
 							surface: "pdf-layout-bulk",
 						},
 					},
-					agentOpts,
+					{ ...agentOpts, apiOnly: options.apiOnly },
 				);
 			} catch (error) {
 				const message = errorText(error);
