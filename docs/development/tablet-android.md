@@ -267,7 +267,21 @@ Android merge `798d92092` 已完成 ARM64 release library 与完整 APK 构建�
 
 Android 完整 ARM64 release 构建成功。新的本地 [移动 UI 测试 APK](../../../artifacts/android/Agentero-0.15.5-mobile-ui-arm64-test.apk) 为 56,654,609 字节，SHA-256 `90ade3c09726d103ec818de7d493d3b2ad1180fd46a9fa16dbdf1612f814d169`；保留此前 API reader 与 native Inbox 安装包。包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包内 library SHA-256 `0695db023b8865c60e5437c3df34f1c2ab4f5ab457aed4ef586ca35eb2edfd61` 与本轮 release 输出一致。FileProvider 仍仅开放相机 Pictures 与导出 cache 子目录，PDF VIEW/content 与 SEND MIME-only 边界保持。
 
-## 9. 参考
+## 9. 手写笔适配重新打包验证（2026-11-15）
+
+Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52f03`、`21be5b815`、`b321357ac`）：
+
+- `PencilShortcuts.kt` 只接收厂商公开的 `com.oplus.ipemanager.action.PENCIL_DOUBLE_CLICK` 广播，按 `ipe_pencil_double_click` 系统设置映射橡皮/上一个工具/调色盘；没有引用 OEM SDK，也没有新增 IPC 或绑定。注册失败时能力报告为空，首次真正收到事件后才标记可用。
+- 共享 PDF 笔输入增加 1 秒悬停保护：书写模式下笔悬停时新落下的手指不启动平移、长按选择或笔迹，直到抬起；已开始的笔迹不受影响，阅读模式不冻结手指导航。
+
+验证与产物：
+
+- 前端 `pdf-stylus-input` 15 项与 `mobile-stylus` 5 项聚焦回归通过；Android 完整 ARM64 release 构建（含 Kotlin、Rust、资源与清单合并）成功；插件 JVM 策略测试 61 项通过（5 个测试类，0 失败）。
+- 新 APK：[Agentero-0.15.5-stylus-shortcuts-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-stylus-shortcuts-arm64-test.apk)，56,670,993 字节，SHA-256 `ae67c4b18961cfe9ace04d5883bd78adc12d7c46541ca689eebbb2d02c85ade1`。v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包内 library 与本轮 release 输出一致。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；合并清单新增 `com.oplus.ipemanager.permission.receiver.DOUBLE_CLICK`，FileProvider 仍仅开放相机 Pictures 与导出 cache，PDF VIEW/SEND MIME-only 且无 SEND_MULTIPLE。dex 已确认包含笔身快捷适配器字符串。
+- 保留此前移动 UI、API reader 与 native Inbox 安装包。OPPO Pad mini + Pencil 3 Pro 真机事件、工具切换、悬停保护与后台拒绝仍待用户验收；笔端震动/材质触感/轻捏未实现。
+
+## 10. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>

@@ -68,7 +68,7 @@ facade 测试覆盖当前 token 路由、跨文档旧清理、监听注册前取
 - `src/lib/pdf/ink/input.ts`：新增 `INK_PEN_HOVER_GUARD_MS` 与被抑制指针集合；`test/pdf-stylus-input.test.ts` 增加 3 项回归。
 - `AndroidManifest.xml`：新增厂商广播的发送方权限声明。
 
-已执行：`vitest run test/pdf-stylus-input.test.ts` 15 项通过（含新增 3 项），`tsc --noEmit` 无错误，`biome check` 对两个改动文件无告警。**未执行**：Android/Kotlin 编译、Rust 构建、真机运行——本机没有 JDK、Android SDK 与 cargo。Kotlin 侧结论来自公开 API 与静态审阅，必须由 CI 或装有工具链的机器构建后才能算通过。
+已执行：`vitest run test/pdf-stylus-input.test.ts test/mobile-stylus.test.ts` 20 项通过（含悬停保护新增 3 项），`tsc --noEmit` 无错误，`biome check` 对两个改动文件无告警；Android 完整 ARM64 release 构建（Kotlin 插件与应用、Rust、资源及清单合并）通过，`:tauri-plugin-agentero-mobile:testDebugUnitTest` 61 项 JVM 用例通过。签名 APK 的 dex 中已确认包含 `oplus-pencil-shortcut`、`PENCIL_DOUBLE_CLICK` 与 `ipe_pencil_double_click`，合并清单包含厂商发送方权限，FileProvider 与 PDF 分享边界未变化。**未执行**：OPPO Pad mini / Pencil 3 Pro 真机事件、工具切换、悬停保护与后台拒绝验收；真机结论仍待用户设备测试。
 
 真机验收（目标设备 **OPPO Pad mini + Pencil 3 Pro**，均为用户自备）：
 
