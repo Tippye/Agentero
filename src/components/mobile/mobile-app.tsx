@@ -91,7 +91,7 @@ import {
 	type MobileWorkspacePreset,
 	mobileWorkspaceLayout,
 } from "@/lib/mobile/workspace";
-import { trashPaths } from "@/lib/paper/api";
+import { deletePaths } from "@/lib/paper/api";
 import type { PaperMetadata } from "@/lib/paper/types";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 import { PLAZA_SOURCES } from "@/lib/plaza/sources";
@@ -364,7 +364,7 @@ export default function MobileApp() {
 		},
 		[t],
 	);
-	/** Trash the paper folder, then refresh; never delete while a draft is unsaved. */
+	/** Permanently delete the paper folder, then refresh; never while a draft is unsaved. */
 	const deletePaper = useCallback(
 		async (paper: PaperMetadata) => {
 			if (!vaultPath) return;
@@ -373,7 +373,7 @@ export default function MobileApp() {
 			if (open && !canLeaveReader()) return;
 			try {
 				const { paperRelPath } = mobilePaperPaths(vaultPath, paper);
-				await trashPaths(vaultPath, [paperRelPath]);
+				await deletePaths(vaultPath, [paperRelPath]);
 				if (open) closeReader();
 				await refresh(true);
 			} catch (error) {

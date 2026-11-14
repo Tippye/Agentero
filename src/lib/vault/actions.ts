@@ -15,9 +15,10 @@ import {
 	notifyWarning,
 } from "@/lib/core/notify";
 import { dirnameOf, displayPath } from "@/lib/core/path";
-import { isTauri } from "@/lib/core/tauri";
+import { isMobileApp, isTauri } from "@/lib/core/tauri";
 import { isPaperDirectory, isPapersRoot, isUnderPapers } from "@/lib/paper";
 import {
+	deletePaths,
 	isLibraryVirtualPath,
 	isTrashVirtualPath,
 	listTrash,
@@ -356,7 +357,10 @@ export function openSelectedInTerminal(): void {
 	})();
 }
 
-/** Delete vault paths into the recycle bin (`.agentero/.trash/`). */
+/**
+ * Delete vault paths: recycle bin on desktop, permanent on mobile (which has
+ * no recycle-bin UI to restore from).
+ */
 export async function trashPathsAndNotify(absPaths: string[]): Promise<void> {
 	const vaultPath = getVaultPath();
 	if (!vaultPath || !isTauri()) {
@@ -382,7 +386,11 @@ export async function trashPathsAndNotify(absPaths: string[]): Promise<void> {
 		const rels = valid
 			.map((p) => vaultRelativePath(vaultPath, p))
 			.filter((r): r is string => Boolean(r));
-		await trashPaths(vaultPath, rels);
+		if (isMobileApp()) {
+			await deletePaths(vaultPath, rels);
+		} else {
+			await trashPaths(vaultPath, rels);
+		}
 		for (const p of valid) closeTabsUnderPath(p);
 		// Optimistic prune so a concurrent remote list of the deleted path
 		// cannot leave a ghost folder while refresh rebuilds.

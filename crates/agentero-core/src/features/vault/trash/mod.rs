@@ -442,7 +442,7 @@ pub fn trash_paths(vault_root: &Path, rels: &[String]) -> Result<TrashResult, Ap
 }
 
 /// Result of a delete request (trash or permanent).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteResult {
     pub permanent: bool,

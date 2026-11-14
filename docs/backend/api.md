@@ -132,7 +132,7 @@ Host 通过 Tauri event 向前端推送事件。文件系统、任务和菜单�
 
 > **实现状态（V0.1）**  
 >
-> - 已实现：`vault_create`、`vault_ensure`（snake_case invoke 名）、`vault_allow_fs_scope`、`vault_tree_build` / `vault_tree_children`、`path_open_in_terminal`、`path_trash`（+ `path_list_trash` / `path_restore_item` / `path_purge_item` / `path_purge_trash`）、`window_new`、`set_locale`。  
+> - 已实现：`vault_create`、`vault_ensure`（snake_case invoke 名）、`vault_allow_fs_scope`、`vault_tree_build` / `vault_tree_children`、`path_open_in_terminal`、`path_trash`（+ `path_list_trash` / `path_restore_item` / `path_purge_item` / `path_purge_trash`）、`path_delete`（移动端永久删除）、`window_new`、`set_locale`。  
 > - 打开 Vault / 最近列表：当前主要由前端 `plugin-fs` + `localStorage`/`sessionStorage` 完成；本地树加载走 Host `vault_tree_build`（一次 IPC）；打开或恢复时会调用 `vault_ensure` 补种 bundled skills，并按 frontmatter `version` 安全升级未定制的第一方 Skill。Host 侧 `vault:open` / `vault:recent` 仍为规划契约。
 > - 实际 command 注册见 `src-tauri/src/lib.rs`。
 
@@ -323,6 +323,24 @@ Agent：`agent_run_once` / `agent_warm` 在 vault 为 `remote:…` 时经 SSH `b
   - `papers/` 下的项：**先移文件**，再快照并删除 catalog 行（含嵌套 paper），避免幽灵 catalog。
   - 跳过空 / 含 `..` / `.agentero` / `papers` 根 / 不存在的普通路径。`papers/` 下文件夹已经不在、catalog 仍有记录时，直接删掉这些记录（同一篇论文 id 下、文件夹同样缺失的隐藏重复行一并去掉），不进回收站。`count` 仍是实际移入回收站的项数；`rels` 额外包含这些只清 catalog 的路径，以便取消它们的后台任务。
   - 本地 Vault：删除成功后立即取消被删路径（含嵌套论文）的所有排队/运行中 JobCenter 任务（`JobCenter::cancel_for_paper`），逐个发 `job:changed(cancelled)` 并 `drain_and_spawn` 释放槽位——已删论文不会继续下载 / 解析 / 版面分析，任务面板对应行随之置为已取消。
+
+#### `path_delete`（移动端删除）
+
+永久删除：直接把文件 / 目录从 Vault 删掉，`papers/` 下的 catalog 行随文件一起删除，不生成 `.agentero/.trash/` 副本。移动端没有回收站恢复界面，删除不能依赖桌面回收站，否则副本会一直占空间且无法恢复；桌面删除仍走可撤销的 `path_trash`。
+
+- **`path_delete` 参数**
+
+```ts
+{
+  vaultPath: string;
+  rels: string[]; // 待永久删除的 Vault 相对路径
+}
+```
+
+- **`path_delete` 返回**（`ApiResult<{ permanent: boolean; batchId: null; count: number; paths: string[]; removedRows: number }>`）
+  - 复用 core `delete_paths(..., permanent: true)`：拒绝 `papers` 根、`.agentero`、含 `..` 或逃出 Vault 的路径；目录按递归删除，符号链接目录只删链接本身。
+  - `removedRows` 为删除的 catalog 行数；`paths` 为实际删除的相对路径。
+  - 成功后会取消被删路径（含嵌套论文）的 JobCenter 任务；移动端还会通知同步调度器拉取一次快照，让桌面端看到删除。远端 Vault 句柄不支持该命令（返回 `delete_remote`）。
 
 #### `path_list_trash` / `path_restore_item` / `path_purge_item` / `path_purge_trash`
 
@@ -1321,7 +1339,7 @@ Updater 模块与命令注册均排除 Android / iOS，与 Cargo 的 updater 插
 - **返回**：`{ ok: true; data: { count: number; rescanned: boolean } }`。`count` 是新写入的行数；`rescanned` 为真表示这次退回了全库扫描。
 - **前端**：`src/lib/paper/api.ts` → `ensurePaperRows`。文件监听在 `papers/` 下的外部变更走这里；应用自己刚提交的导入和改名只 `paper_list`。
 
-> **Catalog 行删除**：不再有独立的 `paper_delete` command；删除走 `path_trash`（`trashPaths`），catalog 行随回收站快照清理（底层 `papers::delete_under_path`，CLI `agentero paper rm` 亦复用）。
+> **Catalog 行删除**：不再有独立的 `paper_delete` command；桌面删除走 `path_trash`（`trashPaths`），catalog 行随回收站快照清理；移动端删除走 `path_delete`（`deletePaths`），catalog 行随文件直接删除（两者底层都是 `papers::delete_under_path`，CLI `agentero paper rm` 亦复用）。
 
 #### `paper_move`
 

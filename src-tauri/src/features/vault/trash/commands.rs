@@ -1,6 +1,7 @@
 //! Recycle-bin commands: undoable delete + restore (local + remote).
 
-use crate::core::error::{map_err, ApiResult};
+use crate::core::error::{map_err, ApiResult, AppError};
+use crate::core::fs::with_file_mutation;
 use crate::core::log_util::{trunc, OpTimer};
 use crate::core::remote::parse_remote_handle;
 use crate::features::jobs::{emit_job_changed, JobCenter};
@@ -9,6 +10,8 @@ use crate::features::vault::trash::remote_ops::RemoteTrashOps;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(mobile)]
+use tauri::Manager;
 use tauri::State;
 
 #[derive(Debug, Deserialize, specta::Type)]
@@ -91,6 +94,75 @@ pub async fn path_trash(
                 op.finish_err(&e);
                 Ok(map_err(e))
             }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PathDeleteArgs {
+    pub vault_path: String,
+    /// Vault-relative paths to delete permanently.
+    pub rels: Vec<String>,
+}
+
+/// Permanently delete files/folders without a recycle bin (mobile delete).
+///
+/// Mobile has no recycle-bin UI, so its paper/file delete must not leave
+/// copies under `.agentero/.trash/`. Catalog rows under `papers/` are removed
+/// together with their files. Desktop keeps the undoable `path_trash` path.
+#[tauri::command]
+#[specta::specta]
+pub async fn path_delete(
+    app: tauri::AppHandle,
+    center: State<'_, JobCenter>,
+    args: PathDeleteArgs,
+) -> Result<ApiResult<trash::DeleteResult>, String> {
+    let n = args.rels.len();
+    let op = OpTimer::start_with("path_delete", format!("count={n}"));
+    if parse_remote_handle(args.vault_path.trim()).is_some() {
+        let error = AppError::domain(
+            "delete_remote",
+            "remote vaults do not support permanent delete",
+        );
+        op.finish_err(&error);
+        return Ok(map_err(error));
+    }
+    let vault = PathBuf::from(args.vault_path.trim());
+    // Share sync's in-process mutation lane: a delete must not interleave with
+    // a pass applying remote writes to the same subtree.
+    match with_file_mutation(|| trash::delete_paths(&vault, &args.rels, true)) {
+        Ok(res) => {
+            // A deleted paper must not keep running/scheduling background
+            // work (parse, download, layout, …): cancel its jobs now.
+            let mut cancelled = 0usize;
+            for rel in &res.paths {
+                for snapshot in center.cancel_for_paper(&vault, rel).await {
+                    emit_job_changed(&app, snapshot);
+                    cancelled += 1;
+                }
+            }
+            if cancelled > 0 {
+                center.drain_and_spawn(&app).await;
+            }
+            #[cfg(mobile)]
+            {
+                // Deletions bypass `vault_remove_file`, so schedule the same
+                // post-mutation sync pass explicitly.
+                let sync = app.state::<crate::integration::sync::SyncService>();
+                for rel in &res.paths {
+                    sync.notify_path_changed(&app, &vault.join(rel));
+                }
+            }
+            op.finish_ok_extra(format!(
+                "count={} removed_rows={} jobs_cancelled={cancelled}",
+                res.count, res.removed_rows
+            ));
+            Ok(ApiResult::ok(res))
+        }
+        Err(e) => {
+            op.finish_err(&e);
+            Ok(map_err(e))
         }
     }
 }

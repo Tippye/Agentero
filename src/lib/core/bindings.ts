@@ -310,6 +310,14 @@ export const commands = {
 	wikiApplyExternalRenameRepair: (args: WikiApplyExternalRenameArgs) => typedError<ApiResult<WikiRenameResult>, string>(__TAURI_INVOKE("wiki_apply_external_rename_repair", { args })),
 	/**  Move files/folders into the vault recycle bin (undoable delete). */
 	pathTrash: (args: PathTrashArgs) => typedError<ApiResult<TrashResult>, string>(__TAURI_INVOKE("path_trash", { args })),
+	/**
+	 *  Permanently delete files/folders without a recycle bin (mobile delete).
+	 *
+	 *  Mobile has no recycle-bin UI, so its paper/file delete must not leave
+	 *  copies under `.agentero/.trash/`. Catalog rows under `papers/` are removed
+	 *  together with their files. Desktop keeps the undoable `path_trash` path.
+	 */
+	pathDelete: (args: PathDeleteArgs) => typedError<ApiResult<DeleteResult>, string>(__TAURI_INVOKE("path_delete", { args })),
 	/**  List every item currently in the recycle bin (Recycle Bin view). */
 	pathListTrash: (args: TrashVaultArgs) => typedError<ApiResult<TrashEntry[]>, string>(__TAURI_INVOKE("path_list_trash", { args })),
 	/**  Restore a single recycle-bin item to its original path. */
@@ -3032,6 +3040,17 @@ export type DecisionSettings = {
 	smartHighlight?: boolean,
 };
 
+/**  Result of a delete request (trash or permanent). */
+export type DeleteResult = {
+	permanent: boolean,
+	/**  Present for recycle-bin deletes; `None` for permanent deletes. */
+	batchId: string | null,
+	count: number,
+	paths: string[],
+	/**  Catalog rows removed under `papers/` (permanent deletes only). */
+	removedRows: number,
+};
+
 export type DepPolicy = "allSettled" | "allSucceeded";
 
 /**  Stable id the frontend keys rows and brand logos on. */
@@ -5127,6 +5146,12 @@ export type PaperUpdateMetaArgs = {
 
 /**  Which generated parse artifacts a bulk clear/reparse command touches. */
 export type ParseResultScope = "layout" | "paper" | "all";
+
+export type PathDeleteArgs = {
+	vaultPath: string,
+	/**  Vault-relative paths to delete permanently. */
+	rels: string[],
+};
 
 export type PathRestoreItemResult = {
 	/**  Vault-relative path the item was restored to. */

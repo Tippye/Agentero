@@ -98,6 +98,7 @@ macro_rules! common_commands {
             crate::features::vault::rename::commands::wiki_external_rename_preview,
             crate::features::vault::rename::commands::wiki_apply_external_rename_repair,
             crate::features::vault::trash::commands::path_trash,
+            crate::features::vault::trash::commands::path_delete,
             crate::features::vault::trash::commands::path_list_trash,
             crate::features::vault::trash::commands::path_restore_item,
             crate::features::vault::trash::commands::path_purge_item,
@@ -423,6 +424,9 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::app::vault_session::lifecycle::vault_release,
             crate::features::vault::commands::vault_tree_build,
             crate::features::vault::commands::vault_tree_children,
+            // Mobile has no recycle-bin UI: delete is permanent instead of
+            // leaving unmanaged copies under `.agentero/.trash/`.
+            crate::features::vault::trash::commands::path_delete,
             crate::features::markdown::wiki::commands::graph_get_backlinks,
             crate::features::markdown::wiki::commands::wiki_resolve,
             crate::features::markdown::wiki::commands::wiki_embed_read,

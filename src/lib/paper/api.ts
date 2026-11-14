@@ -7,6 +7,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import i18n from "@/i18n";
 import {
 	commands,
+	type DeleteResult,
 	type PaperMetaPatch as PaperMetaPatchWire,
 	type PaperRecord_Serialize as PaperRecordWire,
 	type PaperTag as PaperTagWire,
@@ -226,7 +227,24 @@ export async function savePaperPageCounts(
 	}
 }
 
-export type { TrashResult };
+export type { DeleteResult, TrashResult };
+
+/**
+ * Permanently delete vault-relative paths. Mobile has no recycle-bin UI, so
+ * its delete goes straight to disk instead of leaving copies under
+ * `.agentero/.trash/`; catalog rows under `papers/` disappear with the files.
+ */
+export async function deletePaths(
+	vaultPath: string,
+	rels: string[],
+): Promise<DeleteResult> {
+	if (!isTauri()) {
+		throw new Error(i18n.t("sidebar:fileTree.deleteDesktopOnly"));
+	}
+	return callApiResult(() => commands.pathDelete({ vaultPath, rels }), {
+		fallback: i18n.t("sidebar:fileTree.deleteFailed"),
+	});
+}
 
 /**
  * Move vault-relative paths into the recycle bin (`.agentero/.trash/`).
