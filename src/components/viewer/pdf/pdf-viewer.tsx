@@ -2777,6 +2777,7 @@ function PdfViewerInner({
 				<InkInputBridge
 					editor={inkEditor}
 					documentId={docId}
+					selection={selectionCap}
 					enabled={
 						inkEditable && isActive && !visualCropPending && !regionSelecting
 					}
