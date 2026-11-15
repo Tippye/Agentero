@@ -2,7 +2,7 @@ name: agentero
 options:
   bundleIdPrefix: com.poco-ai.agentero
   deploymentTarget:
-    iOS: 15.0
+    iOS: 18.2
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -40,6 +40,13 @@ targets:
       path: agentero_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: PDF
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
+        LSSupportsOpeningDocumentsInPlace: false
+        UIFileSharingEnabled: false
         UILaunchStoryboardName: LaunchScreen
         NSCameraUsageDescription: Agentero uses the camera to scan a pairing QR code from your computer.
         CFBundleURLTypes:
@@ -55,8 +62,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.3.2
-        CFBundleVersion: "0.3.2"
+        CFBundleShortVersionString: 0.15.5
+        CFBundleVersion: "0.15.5"
     entitlements:
       path: agentero_iOS/agentero_iOS.entitlements
     scheme:
@@ -92,6 +99,10 @@ targets:
       - sdk: UIKit.framework
       - sdk: WebKit.framework
     preBuildScripts:
+      # pnpm defaults verify-deps-before-run to "install", so this nested call
+      # re-runs `pnpm install`, which wants to purge node_modules and aborts
+      # inside Xcode's script phase (no TTY, and CI is not inherited there).
+      # Deps are already installed before the build, so skip the check.
       - script: pnpm --config.verify-deps-before-run=false tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code
         basedOnDependencyAnalysis: false

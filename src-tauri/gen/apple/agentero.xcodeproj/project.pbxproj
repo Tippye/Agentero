@@ -18,133 +18,352 @@
 		A381A8E4AF35E8D94A28588C /* assets in Resources */ = {isa = PBXBuildFile; fileRef = E8649D7A13AC9C45136A95B5 /* assets */; };
 		A417BB1124DF378DCA5649F6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BE718A5534C8B59E470D84E /* QuartzCore.framework */; };
 		B2AFB079FC3306EF23BD6E5E /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FBB990E23A23CEBE054AFA08 /* CoreGraphics.framework */; };
+		B2D5089AAB886DCC1441AE6C /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 260CC1950811AFF9090FAEB0 /* libapp.a */; };
 		C8C22D270F43B57ECABF6A86 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 06E89EF854E2DF388D3CE6BA /* libapp.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		00C12AAC684B77A15DB3ECB8 /* install_dirs.rs */ = {isa = PBXFileReference; path = install_dirs.rs; sourceTree = "<group>"; };
+		013FFF1491C63565480B7109 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		014C6BCC7A769CD1D711AE7A /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		015F63AD68398201377DE13B /* messages.rs */ = {isa = PBXFileReference; path = messages.rs; sourceTree = "<group>"; };
 		01A67FA819F0B63A0EF8385C /* menu.rs */ = {isa = PBXFileReference; path = menu.rs; sourceTree = "<group>"; };
-		0391C21BE5E5311412179D78 /* map.rs */ = {isa = PBXFileReference; path = map.rs; sourceTree = "<group>"; };
-		04547BF8D592C3727EE38FFA /* zotero_io.rs */ = {isa = PBXFileReference; path = zotero_io.rs; sourceTree = "<group>"; };
-		04A68747B124315923A04E6E /* heading_rename.rs */ = {isa = PBXFileReference; path = heading_rename.rs; sourceTree = "<group>"; };
-		0547969FBC2F4F160F2437EE /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		0636A945C519780E6D08E7F5 /* log_util.rs */ = {isa = PBXFileReference; path = log_util.rs; sourceTree = "<group>"; };
+		01E74722C24239A9F887DE5E /* provider.rs */ = {isa = PBXFileReference; path = provider.rs; sourceTree = "<group>"; };
+		027EFFA28A927CB13B8320A1 /* warm.rs */ = {isa = PBXFileReference; path = warm.rs; sourceTree = "<group>"; };
+		02846FFCD22D461F319C3DAB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		02B5424171AD1B77DC706E5C /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		04BF473F95C918671EAB35EE /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		051025665CDC419610010FA7 /* files.rs */ = {isa = PBXFileReference; path = files.rs; sourceTree = "<group>"; };
+		05913ABD82D89C6BDBDC5234 /* windows_path.rs */ = {isa = PBXFileReference; path = windows_path.rs; sourceTree = "<group>"; };
+		05A7CE485D27CEA42221DBD4 /* state.rs */ = {isa = PBXFileReference; path = state.rs; sourceTree = "<group>"; };
+		05B47E0CEBB3B1DE164E8DAB /* updates.rs */ = {isa = PBXFileReference; path = updates.rs; sourceTree = "<group>"; };
 		06519C1A5B6EC32ECD3A1E05 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		06D86E3BC767C22DF070BE82 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		06E89EF854E2DF388D3CE6BA /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
-		07B81C16D1DDF590C257EB1C /* permission.rs */ = {isa = PBXFileReference; path = permission.rs; sourceTree = "<group>"; };
-		0838672F0191C1517EED9220 /* client.rs */ = {isa = PBXFileReference; path = client.rs; sourceTree = "<group>"; };
+		07721E626D705DC31A518164 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		09080EBC89BCB6FEE284D5DA /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		0964BD7109FD62BAAC74C834 /* native.rs */ = {isa = PBXFileReference; path = native.rs; sourceTree = "<group>"; };
+		0979F552F39F6E856A5E9744 /* context_turn.rs */ = {isa = PBXFileReference; path = context_turn.rs; sourceTree = "<group>"; };
+		0A4EA9D812FB4DA98679AE43 /* remote_ops.rs */ = {isa = PBXFileReference; path = remote_ops.rs; sourceTree = "<group>"; };
+		0B1C9D23E45C697D6B91E422 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		0B5042D462A994CEF3505ACB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		0BA028FF3D101646D4EC562C /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		0BDD9FC3A900717318E0B534 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		0C4A362CCBEC7576272913B5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
-		0C51A04455EA40A1ED0BDA73 /* path.rs */ = {isa = PBXFileReference; path = path.rs; sourceTree = "<group>"; };
+		0CBB16613D5B930B2A48A059 /* mobile_deep_links.rs */ = {isa = PBXFileReference; path = mobile_deep_links.rs; sourceTree = "<group>"; };
+		0DD0607AB277346FF6552B6D /* doctor_agents.rs */ = {isa = PBXFileReference; path = doctor_agents.rs; sourceTree = "<group>"; };
+		0E05ECECE6D19130A82FE622 /* service.rs */ = {isa = PBXFileReference; path = service.rs; sourceTree = "<group>"; };
+		0E1BB17641C98328D75F287E /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		0E92C5F41C84C13362F6864D /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		0F7C79799E27FAB308BE4D75 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		0FAFD294C7E6C06D58FF0E0F /* journal.rs */ = {isa = PBXFileReference; path = journal.rs; sourceTree = "<group>"; };
+		0FD99E45A87CB263AD740686 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		1036A0FBAD0FD2BA50402053 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		103EFFBC50836556AD572626 /* lifecycle.rs */ = {isa = PBXFileReference; path = lifecycle.rs; sourceTree = "<group>"; };
+		10DC4BF5CA6B0BB47693AA42 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		11DAACAC59EF13B4FD1DBB1B /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		1376CFB03B69FC0B47831331 /* zotero_commands.rs */ = {isa = PBXFileReference; path = zotero_commands.rs; sourceTree = "<group>"; };
-		1774FBC23874C37BC4A7B68C /* events.rs */ = {isa = PBXFileReference; path = events.rs; sourceTree = "<group>"; };
-		1A3E602EE5DB0D09990AF263 /* sftp_fs.rs */ = {isa = PBXFileReference; path = sftp_fs.rs; sourceTree = "<group>"; };
-		1B9E840327FC1653A5780A49 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		1D96584FE51452F01D2C41AA /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		13568E57A6A2E111195159B2 /* layout_cache.rs */ = {isa = PBXFileReference; path = layout_cache.rs; sourceTree = "<group>"; };
+		13D1A09F555879F34B1A845E /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		13DE4870A3A9AC2B85DA3EEF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		1400ED8A1D881F3EAEED437F /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		1594C44150DED10B5E793B64 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		15DF301F5F3C89C7380E298E /* page.rs */ = {isa = PBXFileReference; path = page.rs; sourceTree = "<group>"; };
+		1603B768B660B440C789B83D /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		188655133841219EF7DFE712 /* crypto.rs */ = {isa = PBXFileReference; path = crypto.rs; sourceTree = "<group>"; };
+		1961B0110C17672246FEFB4C /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		19C8DD11BA647FBFC83EA6E1 /* citation.rs */ = {isa = PBXFileReference; path = citation.rs; sourceTree = "<group>"; };
+		1A3481F80B0980037E7F572F /* background.rs */ = {isa = PBXFileReference; path = background.rs; sourceTree = "<group>"; };
+		1A56D36261836DF78A24C634 /* mobile_webview.rs */ = {isa = PBXFileReference; path = mobile_webview.rs; sourceTree = "<group>"; };
+		1A9D94CD946FFF26CC9012C0 /* interaction.rs */ = {isa = PBXFileReference; path = interaction.rs; sourceTree = "<group>"; };
+		1CDC1CDAA3BD926B82A949A9 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		1D0D8CAFA83FFCFE9BF212C4 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		1E1A72CE9CA13DC44AD2EFAD /* root.rs */ = {isa = PBXFileReference; path = root.rs; sourceTree = "<group>"; };
+		1E20591804EC01622032C03D /* protocol.rs */ = {isa = PBXFileReference; path = protocol.rs; sourceTree = "<group>"; };
+		1EC9F48054C10E11E4A84F7F /* client_tests.rs */ = {isa = PBXFileReference; path = client_tests.rs; sourceTree = "<group>"; };
 		205CE721479EF5546D6D75BC /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		2179C6198A1366AEEC8B692B /* latex.rs */ = {isa = PBXFileReference; path = latex.rs; sourceTree = "<group>"; };
-		22BD8A7C03E73F2F0CBB9C8C /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		2390C3B6D7485AB8414FC22B /* acp.rs */ = {isa = PBXFileReference; path = acp.rs; sourceTree = "<group>"; };
+		20CBFE832135FFF178B3A8B4 /* command_util.rs */ = {isa = PBXFileReference; path = command_util.rs; sourceTree = "<group>"; };
+		20D188B20EF2B62EA8ADFC90 /* html_preview.rs */ = {isa = PBXFileReference; path = html_preview.rs; sourceTree = "<group>"; };
+		2117D89D911E893BC9127749 /* download.rs */ = {isa = PBXFileReference; path = download.rs; sourceTree = "<group>"; };
+		2127F0E53AB9974A1BD7A181 /* link.rs */ = {isa = PBXFileReference; path = link.rs; sourceTree = "<group>"; };
+		23541F8F2100A4458F778D6E /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		23A137479BC1B8A6262080E7 /* catalog_snapshot.rs */ = {isa = PBXFileReference; path = catalog_snapshot.rs; sourceTree = "<group>"; };
+		241B7DC0760C59438701100C /* mobile_documents.rs */ = {isa = PBXFileReference; path = mobile_documents.rs; sourceTree = "<group>"; };
 		25DFE88529B913A3FCE4CA51 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		260CC1950811AFF9090FAEB0 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
-		269691DF4D5D2259054FFF13 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		28C69513E43D0A9C47ED43FE /* targets.rs */ = {isa = PBXFileReference; path = targets.rs; sourceTree = "<group>"; };
+		279A8A87EE6589E691213D16 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		27B14532F0AE5B0F4A97BB8A /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		29A090902141F6EBEBF097C7 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		2B57F18ED94ADF6B21321E96 /* mineru.rs */ = {isa = PBXFileReference; path = mineru.rs; sourceTree = "<group>"; };
+		2D12A65C48B97C83AF3A22D3 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		2E14872E39C0706A619B7DCB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		2F5431BC962662D3C1C8CB2F /* registry.rs */ = {isa = PBXFileReference; path = registry.rs; sourceTree = "<group>"; };
+		2E6193FBA6D1351E65645CCF /* relay.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = relay.json; sourceTree = "<group>"; };
+		2F199BD978E69FD39CE7D820 /* registry.rs */ = {isa = PBXFileReference; path = registry.rs; sourceTree = "<group>"; };
+		30849433A46D4AFC5DAB1F88 /* tunnel.rs */ = {isa = PBXFileReference; path = tunnel.rs; sourceTree = "<group>"; };
+		31220E37DB55AC1121856B3D /* credentials.rs */ = {isa = PBXFileReference; path = credentials.rs; sourceTree = "<group>"; };
+		31DC79635892CC991CAE904D /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		3302831E7912A0C5E81E27EC /* db.rs */ = {isa = PBXFileReference; path = db.rs; sourceTree = "<group>"; };
+		332641C90F77A3621F16C114 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		3493CE7E51D34D5A7722FE73 /* scheduler.rs */ = {isa = PBXFileReference; path = scheduler.rs; sourceTree = "<group>"; };
 		349AF0072E775C19ABA1C260 /* agentero_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = agentero_iOS.entitlements; sourceTree = "<group>"; };
-		3532383C67E454D44F7171F6 /* paths.rs */ = {isa = PBXFileReference; path = paths.rs; sourceTree = "<group>"; };
-		38158A1CD6F56A22EFC30250 /* background_commands.rs */ = {isa = PBXFileReference; path = background_commands.rs; sourceTree = "<group>"; };
+		352C2063A873DF3CB5DD0E66 /* packages.rs */ = {isa = PBXFileReference; path = packages.rs; sourceTree = "<group>"; };
+		35952A8E2A89136F941A24BC /* mobile_connectivity.rs */ = {isa = PBXFileReference; path = mobile_connectivity.rs; sourceTree = "<group>"; };
+		381C1BB2937AE45131FC0FFB /* envelope.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = envelope.json; sourceTree = "<group>"; };
+		387D4607D7DF925CA7DFAE2E /* allowlist.rs */ = {isa = PBXFileReference; path = allowlist.rs; sourceTree = "<group>"; };
 		38ADF1CBAE2C78D68B1ACB23 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		3AD0264350FDAE5B4CB5488B /* service.rs */ = {isa = PBXFileReference; path = service.rs; sourceTree = "<group>"; };
+		3B1E2C9B03FBD74630518F38 /* app_handle.rs */ = {isa = PBXFileReference; path = app_handle.rs; sourceTree = "<group>"; };
+		3B36532D6564B49DED394AB5 /* remote_ops.rs */ = {isa = PBXFileReference; path = remote_ops.rs; sourceTree = "<group>"; };
+		3BAAD231EB41D02C96FD05FA /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		3C3B58CD0DFE0529A1EF3E9E /* remote_agent_journal.rs */ = {isa = PBXFileReference; path = remote_agent_journal.rs; sourceTree = "<group>"; };
 		3C6AC0B187CAE592ED56DDAC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		422655C56CD9D82DE466BB15 /* runtime.rs */ = {isa = PBXFileReference; path = runtime.rs; sourceTree = "<group>"; };
-		43ABE168D4C35A48F35B9C61 /* extract.rs */ = {isa = PBXFileReference; path = extract.rs; sourceTree = "<group>"; };
+		3CB6EA2F416F05C80B8E9AE1 /* api.rs */ = {isa = PBXFileReference; path = api.rs; sourceTree = "<group>"; };
+		3F05F5E728251F259EC93FE3 /* test_server.rs */ = {isa = PBXFileReference; path = test_server.rs; sourceTree = "<group>"; };
+		3F2EB1F9CECBC0052119C356 /* openui_guidance.generated.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = openui_guidance.generated.txt; sourceTree = "<group>"; };
+		3F756C7575C2B9C8B2FDCC69 /* protocol.rs */ = {isa = PBXFileReference; path = protocol.rs; sourceTree = "<group>"; };
+		40E7C86523B7E6DF3D722CA2 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		412D5DED5AC12517375A1D25 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		444354B0AACFFD5B45D41AB4 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		448FFA735808EDD93BA5268C /* agentero_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = agentero_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		45A833879DDC814229CD0D1F /* server.rs */ = {isa = PBXFileReference; path = server.rs; sourceTree = "<group>"; };
-		4631FCDC2B7FA1B9E9138675 /* papers.rs */ = {isa = PBXFileReference; path = papers.rs; sourceTree = "<group>"; };
+		45042D58CBB40A3344D5928D /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		45197AD660EF8D0E44F71622 /* feedback.rs */ = {isa = PBXFileReference; path = feedback.rs; sourceTree = "<group>"; };
+		45C4195A8CE560F443573900 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		4743F00BF19A4BC162B9D80E /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		48011F01AB627447C8EB1B83 /* models.rs */ = {isa = PBXFileReference; path = models.rs; sourceTree = "<group>"; };
-		48A1FC968BE8EC6011F4B487 /* index.rs */ = {isa = PBXFileReference; path = index.rs; sourceTree = "<group>"; };
 		4911E3420A819B97517853B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
-		49FA24ABEC1E70A8F1821C08 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		4BCFE8F59E7EB37EAFE69776 /* templates.rs */ = {isa = PBXFileReference; path = templates.rs; sourceTree = "<group>"; };
-		4DB79820DC6A067452537215 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		50B0DBFB0A7BE1220EBBB01F /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		496697BCF6BD070F74138ED1 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		496E963920BF40205F0CF492 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		49849210822F5A4A6B07B79B /* scene.rs */ = {isa = PBXFileReference; path = scene.rs; sourceTree = "<group>"; };
+		4AE4A6F5F8479B9DC743A43D /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		4CE4CEB5EF0F025B31CF08A3 /* delegate_mcp.rs */ = {isa = PBXFileReference; path = delegate_mcp.rs; sourceTree = "<group>"; };
+		4CEA4894DA60102CD91E0E41 /* tests.rs */ = {isa = PBXFileReference; path = tests.rs; sourceTree = "<group>"; };
+		4DA4288118027448BFF2F1CC /* gates.rs */ = {isa = PBXFileReference; path = gates.rs; sourceTree = "<group>"; };
+		4E20F1FC9896C1867DD9CCD1 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		4F8E4FCFAE4EDBBC1969825B /* pinch-zoom.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "pinch-zoom.js"; sourceTree = "<group>"; };
+		4FABCD015030A9B46080868D /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		4FE94EDD1F1BAC0FD14F8E26 /* runner.rs */ = {isa = PBXFileReference; path = runner.rs; sourceTree = "<group>"; };
+		5060CF3BAB5708AFC0C0935D /* paddle.rs */ = {isa = PBXFileReference; path = paddle.rs; sourceTree = "<group>"; };
+		51209C6C02A1F261DBBF41B9 /* pool.rs */ = {isa = PBXFileReference; path = pool.rs; sourceTree = "<group>"; };
+		513E9111E9CB0E33A4116FB6 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		519C3CD66A8AD1D0B1688944 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		5201FCF7BA9948ECEBFB9911 /* ink.rs */ = {isa = PBXFileReference; path = ink.rs; sourceTree = "<group>"; };
+		52300722187F0E0BE1669E2D /* dsh.rs */ = {isa = PBXFileReference; path = dsh.rs; sourceTree = "<group>"; };
 		52ECAA33068C5902650A4BB9 /* handlers.rs */ = {isa = PBXFileReference; path = handlers.rs; sourceTree = "<group>"; };
-		567D8F8412F6FBD20D3B8BE0 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		5714021DBFE0692FBF971D81 /* rename.rs */ = {isa = PBXFileReference; path = rename.rs; sourceTree = "<group>"; };
+		541C8B02BF6745C8E10D62EF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		54B88A4ABF6B31E068ED77E9 /* protocol.rs */ = {isa = PBXFileReference; path = protocol.rs; sourceTree = "<group>"; };
+		55660D4CD62E74E1BC0A07EB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		55B1C29A3A2F70C5C9055E58 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		55B3A067870419AD80E85732 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		5636F58C7DCF666073837AC8 /* crypto.rs */ = {isa = PBXFileReference; path = crypto.rs; sourceTree = "<group>"; };
+		56A7F2C92DCEC64816DF6091 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		577E6CDAF32AA9E7228447A5 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		579B92F2ECE67733EA75C7FB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		5B9E05FCB2F64B18A8A8F74A /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		5825D90A0A61D6F6349F4969 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		593AFD6DFCE5AB942919F05E /* project.rs */ = {isa = PBXFileReference; path = project.rs; sourceTree = "<group>"; };
+		5954145D99BFA625FF8B8CA0 /* paddle.rs */ = {isa = PBXFileReference; path = paddle.rs; sourceTree = "<group>"; };
+		59714790C24D2A849236FF99 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		597452A4A4D6E731E7C2F6BE /* account.rs */ = {isa = PBXFileReference; path = account.rs; sourceTree = "<group>"; };
+		5BE41F5D2D46B69B468770BA /* network_tests.rs */ = {isa = PBXFileReference; path = network_tests.rs; sourceTree = "<group>"; };
 		5BE718A5534C8B59E470D84E /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
-		5D4A69B589B2301872075328 /* session.rs */ = {isa = PBXFileReference; path = session.rs; sourceTree = "<group>"; };
-		5D53C529E1CA75AA736370D8 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		5E9694125517807CB2316840 /* trash_bridge.rs */ = {isa = PBXFileReference; path = trash_bridge.rs; sourceTree = "<group>"; };
-		66F68AA0EB0740028433A298 /* arxiv_proxy.rs */ = {isa = PBXFileReference; path = arxiv_proxy.rs; sourceTree = "<group>"; };
-		6B1E60E948E454CA4F9E40F6 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		5C2F650CE7A82A78B621B0F9 /* credentials_tests.rs */ = {isa = PBXFileReference; path = credentials_tests.rs; sourceTree = "<group>"; };
+		5DD3CC18295FA396E34853BB /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		5E4C9C8860F6B631E55C16E6 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		610E0A0328C75A1B09BF344E /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		614F03DD077079A7D4CC736C /* rpc.rs */ = {isa = PBXFileReference; path = rpc.rs; sourceTree = "<group>"; };
+		64D7CC4803BD690DB8540E45 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		66086FF9CBFD49C8669A0D4F /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		66CC669DCD7C66D10AB9219C /* native_picker.rs */ = {isa = PBXFileReference; path = native_picker.rs; sourceTree = "<group>"; };
+		66EF3EB4F5C4593CBC25EF85 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		67E67394F756B52493FFA81B /* host.rs */ = {isa = PBXFileReference; path = host.rs; sourceTree = "<group>"; };
+		67EA643D4230388790596126 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		6833D49A599C600573323AE2 /* types.rs */ = {isa = PBXFileReference; path = types.rs; sourceTree = "<group>"; };
+		685017D0D33F06D5B3A583AC /* skills.rs */ = {isa = PBXFileReference; path = skills.rs; sourceTree = "<group>"; };
+		68690724B01FBD1919E70F5A /* noise-ik.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "noise-ik.json"; sourceTree = "<group>"; };
+		6AA123B21CF5BF8EE31C9169 /* extract.rs */ = {isa = PBXFileReference; path = extract.rs; sourceTree = "<group>"; };
+		6B4C87696151FF6FD053E85F /* runner.rs */ = {isa = PBXFileReference; path = runner.rs; sourceTree = "<group>"; };
+		6C1093755AE332F3427D8A50 /* pinch_zoom.rs */ = {isa = PBXFileReference; path = pinch_zoom.rs; sourceTree = "<group>"; };
+		6C10A2AE250AAC8428FE2CF7 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		6C159538BB9713104D62A871 /* trash_bridge.rs */ = {isa = PBXFileReference; path = trash_bridge.rs; sourceTree = "<group>"; };
 		6C18A761F41CE6DE1AA0AA85 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
-		6EEFB1DBE267B0098673CF9D /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		70C0C25EB49CD1C56A6B184B /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		70D8AAF23DD9079DC28D44AE /* assets.rs */ = {isa = PBXFileReference; path = assets.rs; sourceTree = "<group>"; };
-		7200A91387D2588884A4E9CB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		72FC8C72262F5175ACFB4B42 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		769B67891107FD003FF08D2E /* skills.rs */ = {isa = PBXFileReference; path = skills.rs; sourceTree = "<group>"; };
-		7886599063DB8A4BF36E58AA /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		78C503907D0091FF9A7E4890 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		799E8235D760FBA1EFE44CAA /* state.rs */ = {isa = PBXFileReference; path = state.rs; sourceTree = "<group>"; };
-		7AC39FE0E5848E7240D7A305 /* bib.rs */ = {isa = PBXFileReference; path = bib.rs; sourceTree = "<group>"; };
-		7BC179B92A43A84D9617F226 /* zotero_db.rs */ = {isa = PBXFileReference; path = zotero_db.rs; sourceTree = "<group>"; };
-		7E8818847C499F77381C03CF /* relay.rs */ = {isa = PBXFileReference; path = relay.rs; sourceTree = "<group>"; };
+		6C40D8C2803835104BA9142B /* types.rs */ = {isa = PBXFileReference; path = types.rs; sourceTree = "<group>"; };
+		6D190D43B235A9544C88F152 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		6D20CF64DC5479A052551652 /* client.rs */ = {isa = PBXFileReference; path = client.rs; sourceTree = "<group>"; };
+		6DD5F1FA9091F2F3F8E42B18 /* mineru.rs */ = {isa = PBXFileReference; path = mineru.rs; sourceTree = "<group>"; };
+		6EE6ADB262CB876B6ED34005 /* modelscope.rs */ = {isa = PBXFileReference; path = modelscope.rs; sourceTree = "<group>"; };
+		6F3E67A73258836D1533A3D4 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		703CE15AB9B44B135357EED2 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		70F7C85E01D007C277089CCB /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		71542E710495B94643EEFD42 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		716CD76E11BA05A06C169E60 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		73550DB2D43CBCA6433A5A58 /* paper_commit.rs */ = {isa = PBXFileReference; path = paper_commit.rs; sourceTree = "<group>"; };
+		74CCDE1560A458A5D276564A /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		7511C7B3C0587D1AFC25F00C /* THIRD_PARTY_LICENSES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_LICENSES.md; sourceTree = "<group>"; };
+		75BAC58C56C8F7E3CBA32E8E /* session.rs */ = {isa = PBXFileReference; path = session.rs; sourceTree = "<group>"; };
+		7637AE39110B8FA177F177B0 /* mobile.rs */ = {isa = PBXFileReference; path = mobile.rs; sourceTree = "<group>"; };
+		7688EFB10FF1DBB19875A8FE /* windows.rs */ = {isa = PBXFileReference; path = windows.rs; sourceTree = "<group>"; };
+		795A8BA2381701A3A22E145B /* version_check.rs */ = {isa = PBXFileReference; path = version_check.rs; sourceTree = "<group>"; };
+		7987951ED299EAF6CFD3E466 /* session.rs */ = {isa = PBXFileReference; path = session.rs; sourceTree = "<group>"; };
+		7BC2A49E4FAAB1224C2DA138 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		7BFE3AAC871FB353AEA1A867 /* bridge.rs */ = {isa = PBXFileReference; path = bridge.rs; sourceTree = "<group>"; };
+		7EFFC3DD0AE705B4E8EF5251 /* run.rs */ = {isa = PBXFileReference; path = run.rs; sourceTree = "<group>"; };
 		7F18C7D46513E61C7C08323E /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
-		8356DA0F4B6876ED7A9F51A2 /* online.rs */ = {isa = PBXFileReference; path = online.rs; sourceTree = "<group>"; };
+		7F242854F169C8B48FD00F38 /* background_tests.rs */ = {isa = PBXFileReference; path = background_tests.rs; sourceTree = "<group>"; };
+		7F4D6BBCEFF9D2B1FC0A5F55 /* launch.rs */ = {isa = PBXFileReference; path = launch.rs; sourceTree = "<group>"; };
+		7FB4C9CFE98E86161EE5BBD0 /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
+		7FC925F067826D36AFB7E82E /* import.rs */ = {isa = PBXFileReference; path = import.rs; sourceTree = "<group>"; };
+		805F96F91205211581A7BC22 /* win-word.ps1 */ = {isa = PBXFileReference; path = "win-word.ps1"; sourceTree = "<group>"; };
+		814AC16B1E9060805D7C5D84 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		816F50B8920DA1492473BAE6 /* pwc.rs */ = {isa = PBXFileReference; path = pwc.rs; sourceTree = "<group>"; };
+		83D3446B2371D18D8049B2AB /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		84BFF7ABC45F33340AB32BCF /* identity.rs */ = {isa = PBXFileReference; path = identity.rs; sourceTree = "<group>"; };
 		84FE92145FB562656E9DC6C1 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
-		89FA7822A2FD316BC448F196 /* embed.rs */ = {isa = PBXFileReference; path = embed.rs; sourceTree = "<group>"; };
-		922D5F9C431C41DB7BE8AB68 /* local.rs */ = {isa = PBXFileReference; path = local.rs; sourceTree = "<group>"; };
-		928826F4FC371E10BBE4DA0F /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		8624480C11344CEB7F3529EC /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		875AA447CE3D9BE344018823 /* sync.rs */ = {isa = PBXFileReference; path = sync.rs; sourceTree = "<group>"; };
+		87BDC97F65399A554EB0DA6C /* chain_resolve.rs */ = {isa = PBXFileReference; path = chain_resolve.rs; sourceTree = "<group>"; };
+		87D6544883BD9CC66CF478F7 /* citation.rs */ = {isa = PBXFileReference; path = citation.rs; sourceTree = "<group>"; };
+		886983254A1899610382FEFD /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		89365F48F242E1A51424965A /* driver.rs */ = {isa = PBXFileReference; path = driver.rs; sourceTree = "<group>"; };
+		8A33EA2E7AE152B2CC16DCCA /* host.rs */ = {isa = PBXFileReference; path = host.rs; sourceTree = "<group>"; };
+		8A86F840E34A0ACCBE8B7872 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		8B43BED58FDABE35074071D3 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		8D0B40A0D1DFF68BB6733945 /* context_mcp.rs */ = {isa = PBXFileReference; path = context_mcp.rs; sourceTree = "<group>"; };
+		8D1B1C39A1476C7F2A6FC838 /* lifecycle_tests.rs */ = {isa = PBXFileReference; path = lifecycle_tests.rs; sourceTree = "<group>"; };
+		8DA1FF49DE30D2E7BCDBAE53 /* grok_models.rs */ = {isa = PBXFileReference; path = grok_models.rs; sourceTree = "<group>"; };
+		8FA90D633A78BE0ADC4A118C /* interaction.rs */ = {isa = PBXFileReference; path = interaction.rs; sourceTree = "<group>"; };
+		900C6C58B47BFB9B8E2D0368 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		9067CD7BF702A1327A88C273 /* agent_exec.rs */ = {isa = PBXFileReference; path = agent_exec.rs; sourceTree = "<group>"; };
+		90FD6A53C375031D95673432 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		91949C94491CD2E2B3472E5A /* ask_user.rs */ = {isa = PBXFileReference; path = ask_user.rs; sourceTree = "<group>"; };
+		91C8AABC5467D9A7F36B2542 /* import_bridge.rs */ = {isa = PBXFileReference; path = import_bridge.rs; sourceTree = "<group>"; };
+		926E66F69E19DAD1CBAD883C /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		9274CD93CC15CE3A35FB26E8 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		93642ADFE41E0D79987E1F93 /* acp_tests.rs */ = {isa = PBXFileReference; path = acp_tests.rs; sourceTree = "<group>"; };
-		9441A15D5F5262436FF7057F /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		97AE709A06B0B1EA64F9F3CD /* parse.rs */ = {isa = PBXFileReference; path = parse.rs; sourceTree = "<group>"; };
-		9A5F8C50C3EAE0B339E1DA63 /* prompts.rs */ = {isa = PBXFileReference; path = prompts.rs; sourceTree = "<group>"; };
-		9AF41E5811FC99B7A697CDAC /* models.rs */ = {isa = PBXFileReference; path = models.rs; sourceTree = "<group>"; };
-		9B715423902F01D12C9C6107 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		9BAAD754F1CDE6263B7112E5 /* cache.rs */ = {isa = PBXFileReference; path = cache.rs; sourceTree = "<group>"; };
-		9EB8DBD020927633A047E48A /* catalog_mirror.rs */ = {isa = PBXFileReference; path = catalog_mirror.rs; sourceTree = "<group>"; };
-		A3B742E70225AB9AB97EAEEA /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		A66205396461FEC9318CE2D6 /* protocol.rs */ = {isa = PBXFileReference; path = protocol.rs; sourceTree = "<group>"; };
-		A84D56AAAF718BBC4CA78F2A /* tree.rs */ = {isa = PBXFileReference; path = tree.rs; sourceTree = "<group>"; };
-		AA7E510349C6751267D46E46 /* import.rs */ = {isa = PBXFileReference; path = import.rs; sourceTree = "<group>"; };
-		ADC3572383F2DB5FC59073C8 /* resolve.rs */ = {isa = PBXFileReference; path = resolve.rs; sourceTree = "<group>"; };
-		B00090326ACEACD56AC735F1 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		B022071FD65F7C41F5DD6393 /* background_tasks.rs */ = {isa = PBXFileReference; path = background_tasks.rs; sourceTree = "<group>"; };
-		B1CD5902A88FA166CF2DB770 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		9374564783B7E08AC2B4EC50 /* stored_account.rs */ = {isa = PBXFileReference; path = stored_account.rs; sourceTree = "<group>"; };
+		93FED9D02B3F5D2826D1E92F /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		954FAEAEDCF8D067F200C9AE /* pi_trust.rs */ = {isa = PBXFileReference; path = pi_trust.rs; sourceTree = "<group>"; };
+		96B5FE5037E81969E7202883 /* service.rs */ = {isa = PBXFileReference; path = service.rs; sourceTree = "<group>"; };
+		96BFE8B05A10FC71BFDFF0B2 /* control.rs */ = {isa = PBXFileReference; path = control.rs; sourceTree = "<group>"; };
+		972F9A4B7412068F2BEC55D5 /* tests.rs */ = {isa = PBXFileReference; path = tests.rs; sourceTree = "<group>"; };
+		992DD69ECA7791ED8EB4DFED /* mac-word.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "mac-word.js"; sourceTree = "<group>"; };
+		9C07A038283427FDEC893B1E /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		9DC9986C08698408A3B4012E /* remote.rs */ = {isa = PBXFileReference; path = remote.rs; sourceTree = "<group>"; };
+		A13911F9475257D8BDBD6105 /* config.rs */ = {isa = PBXFileReference; path = config.rs; sourceTree = "<group>"; };
+		A16653CE5FC65297E17609CB /* remote_host.rs */ = {isa = PBXFileReference; path = remote_host.rs; sourceTree = "<group>"; };
+		A2EDE96E883DD62974EC4179 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		A46D7C5FE6FF612A9DE718E4 /* cloud.rs */ = {isa = PBXFileReference; path = cloud.rs; sourceTree = "<group>"; };
+		A551B64EAACD3C7020D2D676 /* native-typert.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "native-typert.json"; sourceTree = "<group>"; };
+		A63708389F4360A5117F2AF1 /* journal.rs */ = {isa = PBXFileReference; path = journal.rs; sourceTree = "<group>"; };
+		A7116630206504038493D2DA /* catalog_mirror.rs */ = {isa = PBXFileReference; path = catalog_mirror.rs; sourceTree = "<group>"; };
+		A92372D07C1F2080A4138AE3 /* client_commands.rs */ = {isa = PBXFileReference; path = client_commands.rs; sourceTree = "<group>"; };
+		A9758E7C127FFFE9D5C53F27 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		A9A08C66F9EEF19BE40B694E /* fs_scope.rs */ = {isa = PBXFileReference; path = fs_scope.rs; sourceTree = "<group>"; };
+		A9C28962AC6C147C6A799668 /* stream.rs */ = {isa = PBXFileReference; path = stream.rs; sourceTree = "<group>"; };
+		AB2084CDD10553EF02716800 /* envelope.rs */ = {isa = PBXFileReference; path = envelope.rs; sourceTree = "<group>"; };
+		AB398ED842D2376E3D354589 /* doctor.rs */ = {isa = PBXFileReference; path = doctor.rs; sourceTree = "<group>"; };
+		ADBE1ACDA7A5712BBA42C8B5 /* service_tests.rs */ = {isa = PBXFileReference; path = service_tests.rs; sourceTree = "<group>"; };
+		ADF110C80FD7290221DEA443 /* identity_tests.rs */ = {isa = PBXFileReference; path = identity_tests.rs; sourceTree = "<group>"; };
+		AE0BEBF54E0BD9936659CE05 /* remote_agent.rs */ = {isa = PBXFileReference; path = remote_agent.rs; sourceTree = "<group>"; };
+		AE2AFC208F933E433A2F8DFA /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		AEEF0FB9554A86F147C1E207 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		B04AA105BC4BFA9267A6070C /* scratch.rs */ = {isa = PBXFileReference; path = scratch.rs; sourceTree = "<group>"; };
+		B1F8F3A936AFD632D8450B8E /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		B21074CA8322301D9A16F490 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		B9BA24BE98CCE335969D3C7F /* crypto.rs */ = {isa = PBXFileReference; path = crypto.rs; sourceTree = "<group>"; };
-		C2C86AFD7330DD7668056E55 /* host.rs */ = {isa = PBXFileReference; path = host.rs; sourceTree = "<group>"; };
-		C5B0C9A31C75E4C60E870B96 /* agent_catalog.rs */ = {isa = PBXFileReference; path = agent_catalog.rs; sourceTree = "<group>"; };
-		C994BD8105AEF36B9F3F5999 /* launch.rs */ = {isa = PBXFileReference; path = launch.rs; sourceTree = "<group>"; };
-		CA341351714A65458AF81019 /* skill_import.rs */ = {isa = PBXFileReference; path = skill_import.rs; sourceTree = "<group>"; };
-		D0C464432807F88694164887 /* schema.rs */ = {isa = PBXFileReference; path = schema.rs; sourceTree = "<group>"; };
-		D19E44BEFEF33BAFE25B79A3 /* blob_cache.rs */ = {isa = PBXFileReference; path = blob_cache.rs; sourceTree = "<group>"; };
-		D1B8280EAD04BE532083736C /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		D92EA82BB2D87C48F84885E8 /* client_commands.rs */ = {isa = PBXFileReference; path = client_commands.rs; sourceTree = "<group>"; };
-		DC81C1B39CC025A51A943D6E /* identity.rs */ = {isa = PBXFileReference; path = identity.rs; sourceTree = "<group>"; };
-		DCE0CDB8CDA04B4BF2B3E67D /* error.rs */ = {isa = PBXFileReference; path = error.rs; sourceTree = "<group>"; };
+		B25368F3D32B657D7E350F75 /* bindings_test.rs */ = {isa = PBXFileReference; path = bindings_test.rs; sourceTree = "<group>"; };
+		B2C36DF69E63C03076E2AB43 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		B411C2591C70A03406EC132F /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		B43EBEA124AA94C79ABA766F /* mobile_capabilities_tests.rs */ = {isa = PBXFileReference; path = mobile_capabilities_tests.rs; sourceTree = "<group>"; };
+		B5D71E86D8A687C59936D58F /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		B67EA29F8C15E0229A7F6F4E /* templates.rs */ = {isa = PBXFileReference; path = templates.rs; sourceTree = "<group>"; };
+		B7537A7AF2A108B0F6FD9F58 /* bundled.rs */ = {isa = PBXFileReference; path = bundled.rs; sourceTree = "<group>"; };
+		B757D5A685117090B3580827 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		B79747F0E8E9E37E1DB921EF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		B9B79BC7F2D18CFA56A7F604 /* server.rs */ = {isa = PBXFileReference; path = server.rs; sourceTree = "<group>"; };
+		BA01C37D019609C4DED9D0F1 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		BC82545B394F53EA85E68FC1 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		BDFAFE7B78EB83C68D9431C1 /* lifecycle.rs */ = {isa = PBXFileReference; path = lifecycle.rs; sourceTree = "<group>"; };
+		BE472577026476F496B1B4EF /* service.rs */ = {isa = PBXFileReference; path = service.rs; sourceTree = "<group>"; };
+		BEC3D78C7D5C43BE37501612 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C05044EC9D7BCE4539C440B1 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C0A43395B27BF61782BD0E13 /* huggingface.rs */ = {isa = PBXFileReference; path = huggingface.rs; sourceTree = "<group>"; };
+		C12234F1C3315C55158064F9 /* doctor.rs */ = {isa = PBXFileReference; path = doctor.rs; sourceTree = "<group>"; };
+		C197CABEF34330C1015DC9F0 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C2FD74C34B58C0AE96BD1F11 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		C3569A13AF70BEC2BC787EEA /* native_tests.rs */ = {isa = PBXFileReference; path = native_tests.rs; sourceTree = "<group>"; };
+		C36F9E7F0DEBFC19AB1DAC7C /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C389258E8B5B91D2880628ED /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C3E936EB3146FEB3EB4ED75C /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		C4398E297D2DB6A921DA03B7 /* pi.rs */ = {isa = PBXFileReference; path = pi.rs; sourceTree = "<group>"; };
+		C43C07C491F818CD77EF7833 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C4A618B48D7AE28BA949996F /* ios_inbox.rs */ = {isa = PBXFileReference; path = ios_inbox.rs; sourceTree = "<group>"; };
+		C4B49B144810C25B89001AC5 /* dsh_history.rs */ = {isa = PBXFileReference; path = dsh_history.rs; sourceTree = "<group>"; };
+		C56B99D36E721A3D2812F628 /* events.rs */ = {isa = PBXFileReference; path = events.rs; sourceTree = "<group>"; };
+		C609883E62AC47C8FDF0EF1D /* broker.rs */ = {isa = PBXFileReference; path = broker.rs; sourceTree = "<group>"; };
+		C684544A0ECC08DB9EED8C79 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C6EC70F0A408D3C53BA84130 /* relay.rs */ = {isa = PBXFileReference; path = relay.rs; sourceTree = "<group>"; };
+		C76ABCF5FD20638FEA881FE4 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		C77E8171D4B42148E336C384 /* pull.rs */ = {isa = PBXFileReference; path = pull.rs; sourceTree = "<group>"; };
+		C870114B4E15D7273E61F6D8 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		CA4556B21ABD4E60FFC41011 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		CA73AE00E2AE2A1438DED776 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		CCEB61E258DF8DE02E7B7388 /* store.rs */ = {isa = PBXFileReference; path = store.rs; sourceTree = "<group>"; };
+		CD027740E667919DF6A2DDDF /* lifecycle.rs */ = {isa = PBXFileReference; path = lifecycle.rs; sourceTree = "<group>"; };
+		CF31D568462AC6B92CA3BA10 /* native_model.rs */ = {isa = PBXFileReference; path = native_model.rs; sourceTree = "<group>"; };
+		CFA30AB877BA19E3CC711974 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		CFEAD223C8D8172153CBC6BF /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		D0E2FE3905B477ADDCCB4179 /* ink_tests.rs */ = {isa = PBXFileReference; path = ink_tests.rs; sourceTree = "<group>"; };
+		D0E8906EC9B94A0C5A4D69A3 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		D1D5817A8AB180915DE3ED61 /* client.rs */ = {isa = PBXFileReference; path = client.rs; sourceTree = "<group>"; };
+		D24865010B8D4A572F0531FE /* credentials.rs */ = {isa = PBXFileReference; path = credentials.rs; sourceTree = "<group>"; };
+		D26CB0786620B0C59B71F5A7 /* host_hooks.rs */ = {isa = PBXFileReference; path = host_hooks.rs; sourceTree = "<group>"; };
+		D31514640AB79EBE8AAE8B71 /* native.rs */ = {isa = PBXFileReference; path = native.rs; sourceTree = "<group>"; };
+		D373065847CE42E537D89938 /* windows.rs */ = {isa = PBXFileReference; path = windows.rs; sourceTree = "<group>"; };
+		D44D8403DA9A8AC593D55AFF /* remote_agent_journal_tests.rs */ = {isa = PBXFileReference; path = remote_agent_journal_tests.rs; sourceTree = "<group>"; };
+		D555FDA69000113D00A872CF /* targets.rs */ = {isa = PBXFileReference; path = targets.rs; sourceTree = "<group>"; };
+		D5CA4B0C1A853B31855FC5D8 /* blob_cache.rs */ = {isa = PBXFileReference; path = blob_cache.rs; sourceTree = "<group>"; };
+		D6B87B321057B289AF8B9004 /* relay.rs */ = {isa = PBXFileReference; path = relay.rs; sourceTree = "<group>"; };
+		D6D9C97074FB15DCCDDDE3A3 /* remote.rs */ = {isa = PBXFileReference; path = remote.rs; sourceTree = "<group>"; };
+		D71C66E2CFD6F92E6F01111B /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		D99C3C3233BF0CB413C9A9D4 /* terminal.rs */ = {isa = PBXFileReference; path = terminal.rs; sourceTree = "<group>"; };
+		DB8BB454C74CF905B25E93F9 /* gateway.rs */ = {isa = PBXFileReference; path = gateway.rs; sourceTree = "<group>"; };
+		DBACA286A8E4B8C9A30D8DBF /* history.rs */ = {isa = PBXFileReference; path = history.rs; sourceTree = "<group>"; };
+		DE80A0C5F67C4A7EC83EEDF5 /* job_runners.rs */ = {isa = PBXFileReference; path = job_runners.rs; sourceTree = "<group>"; };
+		E10A2FBE3C1C1F9112F2C436 /* updater.rs */ = {isa = PBXFileReference; path = updater.rs; sourceTree = "<group>"; };
+		E10B741AC2DE170EFC8C5315 /* device.rs */ = {isa = PBXFileReference; path = device.rs; sourceTree = "<group>"; };
+		E16D65794626DF7F31E3528A /* push.rs */ = {isa = PBXFileReference; path = push.rs; sourceTree = "<group>"; };
+		E23936C39A3D979500EB6C0B /* events_contract.rs */ = {isa = PBXFileReference; path = events_contract.rs; sourceTree = "<group>"; };
 		E2E158C8C6823C05F63A95C6 /* logging.rs */ = {isa = PBXFileReference; path = logging.rs; sourceTree = "<group>"; };
+		E31578E89D0A88BFC60FABAE /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		E499B03A381820FDE4E37EB9 /* presets.rs */ = {isa = PBXFileReference; path = presets.rs; sourceTree = "<group>"; };
+		E4A90E1F86C9D0179B34858E /* arxiv.rs */ = {isa = PBXFileReference; path = arxiv.rs; sourceTree = "<group>"; };
+		E59B922FE3985B8DD199EDEF /* lifecycle.rs */ = {isa = PBXFileReference; path = lifecycle.rs; sourceTree = "<group>"; };
+		E6EB271B4AEF0B27A0FBED00 /* slot.rs */ = {isa = PBXFileReference; path = slot.rs; sourceTree = "<group>"; };
+		E82A00BE45076CD5E72A9374 /* service.rs */ = {isa = PBXFileReference; path = service.rs; sourceTree = "<group>"; };
 		E8649D7A13AC9C45136A95B5 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
-		E917CBFF1C37954F1BBC4B55 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
-		EA429C75C0C152716C0049F3 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		E97D08D9571CE6FDD0402544 /* bookmarks.rs */ = {isa = PBXFileReference; path = bookmarks.rs; sourceTree = "<group>"; };
+		EB25A36AD2B54968BC214CC0 /* apply.rs */ = {isa = PBXFileReference; path = apply.rs; sourceTree = "<group>"; };
 		EB41903CB481A117B9349A14 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
-		EB513571E93ACEA1A722B0A9 /* agent_exec.rs */ = {isa = PBXFileReference; path = agent_exec.rs; sourceTree = "<group>"; };
-		EBC5D6B66B4FA88D0B2601B2 /* discover.rs */ = {isa = PBXFileReference; path = discover.rs; sourceTree = "<group>"; };
-		EF7A33ED89608F3EF77A7A10 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		ECF99B923619527999F00CB7 /* ssh_config.rs */ = {isa = PBXFileReference; path = ssh_config.rs; sourceTree = "<group>"; };
+		ED5423A1614D9D6EAF050D0C /* diagnostics.rs */ = {isa = PBXFileReference; path = diagnostics.rs; sourceTree = "<group>"; };
+		EE87BFE5919E5A4D0BE941A7 /* tools.rs */ = {isa = PBXFileReference; path = tools.rs; sourceTree = "<group>"; };
 		EFBB64AE47CA43A6ED42FD60 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		F00D73D13BE9710D4D80F7C1 /* openai_vlm.rs */ = {isa = PBXFileReference; path = openai_vlm.rs; sourceTree = "<group>"; };
+		F29E72A1457A9EA06EE622B7 /* openai_compatible.rs */ = {isa = PBXFileReference; path = openai_compatible.rs; sourceTree = "<group>"; };
+		F33CAD25A43280B078C10D73 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		F340FBEEDB67A8448096F0AB /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
-		F738F24C73DF2E78A50BC47E /* bbl.rs */ = {isa = PBXFileReference; path = bbl.rs; sourceTree = "<group>"; };
-		FB1BCD6F19904D86DE5396FB /* import_bridge.rs */ = {isa = PBXFileReference; path = import_bridge.rs; sourceTree = "<group>"; };
+		F348C70B28B71A49E2E8B767 /* provider.rs */ = {isa = PBXFileReference; path = provider.rs; sourceTree = "<group>"; };
+		F34C657F870D98A1A5E0E0FA /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		F367F7693E13A4CEFF88911E /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		F3DA4153609164CC4D56B388 /* policy.rs */ = {isa = PBXFileReference; path = policy.rs; sourceTree = "<group>"; };
+		F3E5A3459E922BB5575DC9B1 /* proxy.rs */ = {isa = PBXFileReference; path = proxy.rs; sourceTree = "<group>"; };
+		F5A0E5DF0C97A37EA6C6203C /* engine.rs */ = {isa = PBXFileReference; path = engine.rs; sourceTree = "<group>"; };
+		F68BA78A9F48ECC9A110B81B /* tests.rs */ = {isa = PBXFileReference; path = tests.rs; sourceTree = "<group>"; };
+		F6B2927553CA0226151EE05C /* proxy.rs */ = {isa = PBXFileReference; path = proxy.rs; sourceTree = "<group>"; };
+		F6F4DDEE17D7201C96E19CB4 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		F72A1E89CEBE833226371850 /* handlers.rs */ = {isa = PBXFileReference; path = handlers.rs; sourceTree = "<group>"; };
+		F8DCEBAB1B8EC89DBB538EC4 /* discovery.rs */ = {isa = PBXFileReference; path = discovery.rs; sourceTree = "<group>"; };
 		FBB990E23A23CEBE054AFA08 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
-		FBE6BEE6B25A17D6ED026428 /* messages.rs */ = {isa = PBXFileReference; path = messages.rs; sourceTree = "<group>"; };
-		FDB11612B9FB881FD4B0C7C1 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		FC0298476429CEC8BF912BD5 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		FC523A9649B1DF23E7B7396A /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		FC94145C6E67B7BCFD4339FD /* citation.rs */ = {isa = PBXFileReference; path = citation.rs; sourceTree = "<group>"; };
+		FE545D56D37598883CC84098 /* recovery_tests.rs */ = {isa = PBXFileReference; path = recovery_tests.rs; sourceTree = "<group>"; };
+		FEFC4801D45A3D816FC4701C /* sftp_fs.rs */ = {isa = PBXFileReference; path = sftp_fs.rs; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -166,6 +385,16 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		00497193F1BD48E03A8E01C2 /* vault_session */ = {
+			isa = PBXGroup;
+			children = (
+				A9A08C66F9EEF19BE40B694E /* fs_scope.rs */,
+				103EFFBC50836556AD572626 /* lifecycle.rs */,
+				5E4C9C8860F6B631E55C16E6 /* mod.rs */,
+			);
+			path = vault_session;
+			sourceTree = "<group>";
+		};
 		004A87C6ABDD50FE7ADFEFE1 /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
@@ -177,63 +406,130 @@
 		020519B1C80F785487BA205D /* core */ = {
 			isa = PBXGroup;
 			children = (
-				DCE0CDB8CDA04B4BF2B3E67D /* error.rs */,
-				00C12AAC684B77A15DB3ECB8 /* install_dirs.rs */,
-				0636A945C519780E6D08E7F5 /* log_util.rs */,
+				3B1E2C9B03FBD74630518F38 /* app_handle.rs */,
 				EFBB64AE47CA43A6ED42FD60 /* mod.rs */,
-				3532383C67E454D44F7171F6 /* paths.rs */,
-				683A3FC311A193E6A61AF509 /* fs */,
+				3F8EE1869A55279E185A13DF /* telemetry */,
+				218CA5C255E07B4655CC3E48 /* usage */,
 			);
 			path = core;
 			sourceTree = "<group>";
 		};
-		07578D248FF08C7E13902020 /* watcher */ = {
+		04185F00592B182AD9B3C9C2 /* markdown */ = {
 			isa = PBXGroup;
 			children = (
-				B1CD5902A88FA166CF2DB770 /* commands.rs */,
-				70C0C25EB49CD1C56A6B184B /* mod.rs */,
+				B411C2591C70A03406EC132F /* mod.rs */,
+				2D5A58CF380AA4CA2F36C893 /* search */,
+				10B482B9EF7DFEBB1E429AD5 /* tables */,
+				E7C346628A80D825781154CB /* wiki */,
+			);
+			path = markdown;
+			sourceTree = "<group>";
+		};
+		04C9C4C848C525C1D9D0F2C1 /* connector */ = {
+			isa = PBXGroup;
+			children = (
+				70F7C85E01D007C277089CCB /* commands.rs */,
+				7FC925F067826D36AFB7E82E /* import.rs */,
+				1961B0110C17672246FEFB4C /* mod.rs */,
+				B9B79BC7F2D18CFA56A7F604 /* server.rs */,
+				05A7CE485D27CEA42221DBD4 /* state.rs */,
+				D555FDA69000113D00A872CF /* targets.rs */,
+			);
+			path = connector;
+			sourceTree = "<group>";
+		};
+		0721B37E468750978DAE1E31 /* watcher */ = {
+			isa = PBXGroup;
+			children = (
+				BA01C37D019609C4DED9D0F1 /* commands.rs */,
+				E31578E89D0A88BFC60FABAE /* mod.rs */,
 			);
 			path = watcher;
 			sourceTree = "<group>";
 		};
-		093F22298F32F250CEA0FFC8 /* bridge */ = {
+		09F28095C9F5378B3F28D00B /* system */ = {
 			isa = PBXGroup;
 			children = (
-				D92EA82BB2D87C48F84885E8 /* client_commands.rs */,
-				0838672F0191C1517EED9220 /* client.rs */,
-				4DB79820DC6A067452537215 /* commands.rs */,
-				B9BA24BE98CCE335969D3C7F /* crypto.rs */,
-				C2C86AFD7330DD7668056E55 /* host.rs */,
-				DC81C1B39CC025A51A943D6E /* identity.rs */,
-				FBE6BEE6B25A17D6ED026428 /* messages.rs */,
-				EA429C75C0C152716C0049F3 /* mod.rs */,
-				A66205396461FEC9318CE2D6 /* protocol.rs */,
-				7E8818847C499F77381C03CF /* relay.rs */,
+				F367F7693E13A4CEFF88911E /* mod.rs */,
+				E10A2FBE3C1C1F9112F2C436 /* updater.rs */,
+				713F3E1A9ECE88F1842AF521 /* builtin */,
+				794B0D26988CAEB88C6FD29A /* desktop_apps */,
+				2EC927AC163B1122EEB60AAB /* network */,
+				2248D0E12E01E3CABF9249F2 /* settings */,
 			);
-			path = bridge;
+			path = system;
+			sourceTree = "<group>";
+		};
+		0C68B691ADE81C07B42095D2 /* analyze */ = {
+			isa = PBXGroup;
+			children = (
+				45C4195A8CE560F443573900 /* mod.rs */,
+				96F5B183E6ADDE4751518B2F /* body_engines */,
+				40AE0DA3C089E90AE223B725 /* layout */,
+				2CD972D6AF6A9A44EE646F75 /* refs */,
+			);
+			path = analyze;
+			sourceTree = "<group>";
+		};
+		0D2D3453671C64E479FE6381 /* hosted */ = {
+			isa = PBXGroup;
+			children = (
+				74CCDE1560A458A5D276564A /* commands.rs */,
+				F5A0E5DF0C97A37EA6C6203C /* engine.rs */,
+				A63708389F4360A5117F2AF1 /* journal.rs */,
+				2B57F18ED94ADF6B21321E96 /* mineru.rs */,
+				610E0A0328C75A1B09BF344E /* mod.rs */,
+				F29E72A1457A9EA06EE622B7 /* openai_compatible.rs */,
+				5954145D99BFA625FF8B8CA0 /* paddle.rs */,
+				3F05F5E728251F259EC93FE3 /* test_server.rs */,
+				1FE96DE47810F3CF16F68F3C /* mineru */,
+			);
+			path = hosted;
+			sourceTree = "<group>";
+		};
+		0E8EB441D14E72CE5BECA8DD /* finder_service */ = {
+			isa = PBXGroup;
+			children = (
+				013FFF1491C63565480B7109 /* commands.rs */,
+				716CD76E11BA05A06C169E60 /* mod.rs */,
+			);
+			path = finder_service;
+			sourceTree = "<group>";
+		};
+		10B482B9EF7DFEBB1E429AD5 /* tables */ = {
+			isa = PBXGroup;
+			children = (
+				AE2AFC208F933E433A2F8DFA /* commands.rs */,
+				1594C44150DED10B5E793B64 /* mod.rs */,
+			);
+			path = tables;
 			sourceTree = "<group>";
 		};
 		11AE55904520986220D69CAC /* features */ = {
 			isa = PBXGroup;
 			children = (
-				66F68AA0EB0740028433A298 /* arxiv_proxy.rs */,
+				D26CB0786620B0C59B71F5A7 /* host_hooks.rs */,
+				BDFAFE7B78EB83C68D9431C1 /* lifecycle.rs */,
 				0B5042D462A994CEF3505ACB /* mod.rs */,
 				A5754A49724EBA47377C8784 /* agent */,
-				093F22298F32F250CEA0FFC8 /* bridge */,
-				65203E33FBF5BD09BBE57C33 /* catalog */,
-				A1ACBBB54A3F6EDB6C59324D /* connector */,
-				3BE1A9004D057B8E66B6E38D /* import */,
-				384D982F07B8A2E1C5B1B99E /* refs */,
-				279DA5F375D85E5E1E925911 /* remote */,
-				551012B837A246755A8B9CE2 /* search */,
-				C13330E420C3CB3BCA143D47 /* settings */,
-				7B7FAB452E5C6577F4A57831 /* terminal */,
+				241E4A6C06274B943BAE7333 /* compile */,
+				402B05089177A69BC0A175E1 /* decision */,
+				98AA7E8890C1DDFE7D44A56B /* jev */,
+				63C1DEB36390F3138A2C1E4B /* jobs */,
+				04185F00592B182AD9B3C9C2 /* markdown */,
+				F3CA84CF4577BBFD7B5B8478 /* mobile_background */,
+				5181ABE922E14A06AA2EE928 /* mobile_route */,
+				DCCEE32B8BCBD34B6415E3AB /* mobile_stylus */,
+				55D7813249BB2FBA1901F88D /* paper */,
+				8E3A6D8C6D09264C470AA057 /* pdf */,
+				B154175056CB860FBC894CC5 /* remote_agent */,
+				DB191D78861B12A6C675BE06 /* rtex */,
+				09F28095C9F5378B3F28D00B /* system */,
 				311FDD6FCD2032900CFD08A3 /* translate */,
-				E4AD9617AE7BAE8D353EA574 /* trash */,
 				65BA213E7700B16D0B51AA8F /* vault */,
-				07578D248FF08C7E13902020 /* watcher */,
-				EC79DCB2D0540F95AF4B15FC /* wiki */,
-				5F6BDE55F690F547523674A7 /* window */,
+				CBBCF67D546E9BFA7F116D7F /* web */,
+				BFC190E941D53CCAF5B79FA3 /* writing */,
+				1AA280556D73523A650E9826 /* zhihu */,
 			);
 			path = features;
 			sourceTree = "<group>";
@@ -246,6 +542,82 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
+		1AA280556D73523A650E9826 /* zhihu */ = {
+			isa = PBXGroup;
+			children = (
+				6F3E67A73258836D1533A3D4 /* commands.rs */,
+				9C07A038283427FDEC893B1E /* mod.rs */,
+			);
+			path = zhihu;
+			sourceTree = "<group>";
+		};
+		1BCCB7580B81D65411197389 /* bridge */ = {
+			isa = PBXGroup;
+			children = (
+				A92372D07C1F2080A4138AE3 /* client_commands.rs */,
+				1EC9F48054C10E11E4A84F7F /* client_tests.rs */,
+				6D20CF64DC5479A052551652 /* client.rs */,
+				07721E626D705DC31A518164 /* commands.rs */,
+				5636F58C7DCF666073837AC8 /* crypto.rs */,
+				67E67394F756B52493FFA81B /* host.rs */,
+				ADF110C80FD7290221DEA443 /* identity_tests.rs */,
+				84BFF7ABC45F33340AB32BCF /* identity.rs */,
+				015F63AD68398201377DE13B /* messages.rs */,
+				0F7C79799E27FAB308BE4D75 /* mod.rs */,
+				1E20591804EC01622032C03D /* protocol.rs */,
+				D6B87B321057B289AF8B9004 /* relay.rs */,
+			);
+			path = bridge;
+			sourceTree = "<group>";
+		};
+		1C0A153E3C9D9BF7A7A85195 /* ingest */ = {
+			isa = PBXGroup;
+			children = (
+				0B1C9D23E45C697D6B91E422 /* commands.rs */,
+				09080EBC89BCB6FEE284D5DA /* mod.rs */,
+			);
+			path = ingest;
+			sourceTree = "<group>";
+		};
+		1FE96DE47810F3CF16F68F3C /* mineru */ = {
+			isa = PBXGroup;
+			children = (
+				6AA123B21CF5BF8EE31C9169 /* extract.rs */,
+				FE545D56D37598883CC84098 /* recovery_tests.rs */,
+			);
+			path = mineru;
+			sourceTree = "<group>";
+		};
+		202B89B33943EC940AAD4D4D /* remote_agent */ = {
+			isa = PBXGroup;
+			children = (
+				7F242854F169C8B48FD00F38 /* background_tests.rs */,
+				1A3481F80B0980037E7F572F /* background.rs */,
+				8D1B1C39A1476C7F2A6FC838 /* lifecycle_tests.rs */,
+				E59B922FE3985B8DD199EDEF /* lifecycle.rs */,
+				9374564783B7E08AC2B4EC50 /* stored_account.rs */,
+			);
+			path = remote_agent;
+			sourceTree = "<group>";
+		};
+		218CA5C255E07B4655CC3E48 /* usage */ = {
+			isa = PBXGroup;
+			children = (
+				66086FF9CBFD49C8669A0D4F /* commands.rs */,
+				13DE4870A3A9AC2B85DA3EEF /* mod.rs */,
+			);
+			path = usage;
+			sourceTree = "<group>";
+		};
+		2248D0E12E01E3CABF9249F2 /* settings */ = {
+			isa = PBXGroup;
+			children = (
+				412D5DED5AC12517375A1D25 /* commands.rs */,
+				814AC16B1E9060805D7C5D84 /* mod.rs */,
+			);
+			path = settings;
+			sourceTree = "<group>";
+		};
 		22DF74595460FEB2CA267F90 /* debug */ = {
 			isa = PBXGroup;
 			children = (
@@ -254,22 +626,18 @@
 			path = debug;
 			sourceTree = "<group>";
 		};
-		279DA5F375D85E5E1E925911 /* remote */ = {
+		241E4A6C06274B943BAE7333 /* compile */ = {
 			isa = PBXGroup;
 			children = (
-				C5B0C9A31C75E4C60E870B96 /* agent_catalog.rs */,
-				EB513571E93ACEA1A722B0A9 /* agent_exec.rs */,
-				D19E44BEFEF33BAFE25B79A3 /* blob_cache.rs */,
-				9EB8DBD020927633A047E48A /* catalog_mirror.rs */,
-				D1B8280EAD04BE532083736C /* commands.rs */,
-				FB1BCD6F19904D86DE5396FB /* import_bridge.rs */,
-				C994BD8105AEF36B9F3F5999 /* launch.rs */,
-				6B1E60E948E454CA4F9E40F6 /* mod.rs */,
-				5D4A69B589B2301872075328 /* session.rs */,
-				1A3E602EE5DB0D09990AF263 /* sftp_fs.rs */,
-				5E9694125517807CB2316840 /* trash_bridge.rs */,
+				ED5423A1614D9D6EAF050D0C /* diagnostics.rs */,
+				FC523A9649B1DF23E7B7396A /* mod.rs */,
+				593AFD6DFCE5AB942919F05E /* project.rs */,
+				1E1A72CE9CA13DC44AD2EFAD /* root.rs */,
+				4FE94EDD1F1BAC0FD14F8E26 /* runner.rs */,
+				EE87BFE5919E5A4D0BE941A7 /* tools.rs */,
+				6833D49A599C600573323AE2 /* types.rs */,
 			);
-			path = remote;
+			path = compile;
 			sourceTree = "<group>";
 		};
 		2895D9E0B6D0DAAEF79CD911 /* Externals */ = {
@@ -278,6 +646,33 @@
 				004A87C6ABDD50FE7ADFEFE1 /* arm64 */,
 			);
 			path = Externals;
+			sourceTree = "<group>";
+		};
+		2CD972D6AF6A9A44EE646F75 /* refs */ = {
+			isa = PBXGroup;
+			children = (
+				C3E936EB3146FEB3EB4ED75C /* commands.rs */,
+				64D7CC4803BD690DB8540E45 /* mod.rs */,
+			);
+			path = refs;
+			sourceTree = "<group>";
+		};
+		2D5A58CF380AA4CA2F36C893 /* search */ = {
+			isa = PBXGroup;
+			children = (
+				926E66F69E19DAD1CBAD883C /* commands.rs */,
+				31DC79635892CC991CAE904D /* mod.rs */,
+			);
+			path = search;
+			sourceTree = "<group>";
+		};
+		2EC927AC163B1122EEB60AAB /* network */ = {
+			isa = PBXGroup;
+			children = (
+				29A090902141F6EBEBF097C7 /* commands.rs */,
+				40E7C86523B7E6DF3D722CA2 /* mod.rs */,
+			);
+			path = network;
 			sourceTree = "<group>";
 		};
 		306ED9C9B07A92B91B086459 /* Frameworks */ = {
@@ -299,6 +694,7 @@
 			isa = PBXGroup;
 			children = (
 				06519C1A5B6EC32ECD3A1E05 /* commands.rs */,
+				13568E57A6A2E111195159B2 /* layout_cache.rs */,
 				205CE721479EF5546D6D75BC /* mod.rs */,
 			);
 			path = translate;
@@ -312,35 +708,13 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		384D982F07B8A2E1C5B1B99E /* refs */ = {
+		38242BDA3DA08DFC201C49C0 /* recommend */ = {
 			isa = PBXGroup;
 			children = (
-				F738F24C73DF2E78A50BC47E /* bbl.rs */,
-				7AC39FE0E5848E7240D7A305 /* bib.rs */,
-				E917CBFF1C37954F1BBC4B55 /* commands.rs */,
-				2179C6198A1366AEEC8B692B /* latex.rs */,
-				928826F4FC371E10BBE4DA0F /* mod.rs */,
-				8356DA0F4B6876ED7A9F51A2 /* online.rs */,
+				1D0D8CAFA83FFCFE9BF212C4 /* commands.rs */,
+				C36F9E7F0DEBFC19AB1DAC7C /* mod.rs */,
 			);
-			path = refs;
-			sourceTree = "<group>";
-		};
-		3BE1A9004D057B8E66B6E38D /* import */ = {
-			isa = PBXGroup;
-			children = (
-				70D8AAF23DD9079DC28D44AE /* assets.rs */,
-				B00090326ACEACD56AC735F1 /* commands.rs */,
-				0391C21BE5E5311412179D78 /* map.rs */,
-				0547969FBC2F4F160F2437EE /* mod.rs */,
-				97AE709A06B0B1EA64F9F3CD /* parse.rs */,
-				CA341351714A65458AF81019 /* skill_import.rs */,
-				1376CFB03B69FC0B47831331 /* zotero_commands.rs */,
-				7BC179B92A43A84D9617F226 /* zotero_db.rs */,
-				04547BF8D592C3727EE38FFA /* zotero_io.rs */,
-				9F37C0C7F5509824504141C8 /* paper_import */,
-				8793979E7A0B8E488FBDFBEF /* pdf_parse */,
-			);
-			path = import;
+			path = recommend;
 			sourceTree = "<group>";
 		};
 		3EE6CFBABCF884212C09F294 /* agentero_iOS */ = {
@@ -352,33 +726,177 @@
 			path = agentero_iOS;
 			sourceTree = "<group>";
 		};
+		3F8EE1869A55279E185A13DF /* telemetry */ = {
+			isa = PBXGroup;
+			children = (
+				B2C36DF69E63C03076E2AB43 /* commands.rs */,
+				E10B741AC2DE170EFC8C5315 /* device.rs */,
+				45197AD660EF8D0E44F71622 /* feedback.rs */,
+				6D190D43B235A9544C88F152 /* mod.rs */,
+			);
+			path = telemetry;
+			sourceTree = "<group>";
+		};
+		402B05089177A69BC0A175E1 /* decision */ = {
+			isa = PBXGroup;
+			children = (
+				3BAAD231EB41D02C96FD05FA /* commands.rs */,
+				C870114B4E15D7273E61F6D8 /* mod.rs */,
+			);
+			path = decision;
+			sourceTree = "<group>";
+		};
+		40AE0DA3C089E90AE223B725 /* layout */ = {
+			isa = PBXGroup;
+			children = (
+				CA73AE00E2AE2A1438DED776 /* mod.rs */,
+				0D2D3453671C64E479FE6381 /* hosted */,
+				DE30B54D005187E891AD9578 /* model_assets */,
+			);
+			path = layout;
+			sourceTree = "<group>";
+		};
 		43070083CED811910BD918ED /* app */ = {
 			isa = PBXGroup;
 			children = (
+				597452A4A4D6E731E7C2F6BE /* account.rs */,
+				B25368F3D32B657D7E350F75 /* bindings_test.rs */,
+				20CBFE832135FFF178B3A8B4 /* command_util.rs */,
+				E23936C39A3D979500EB6C0B /* events_contract.rs */,
 				52ECAA33068C5902650A4BB9 /* handlers.rs */,
 				E2E158C8C6823C05F63A95C6 /* logging.rs */,
 				01A67FA819F0B63A0EF8385C /* menu.rs */,
+				B43EBEA124AA94C79ABA766F /* mobile_capabilities_tests.rs */,
+				35952A8E2A89136F941A24BC /* mobile_connectivity.rs */,
+				0CBB16613D5B930B2A48A059 /* mobile_deep_links.rs */,
+				241B7DC0760C59438701100C /* mobile_documents.rs */,
+				1A56D36261836DF78A24C634 /* mobile_webview.rs */,
 				38ADF1CBAE2C78D68B1ACB23 /* mod.rs */,
+				AE0BEBF54E0BD9936659CE05 /* remote_agent.rs */,
+				0E8EB441D14E72CE5BECA8DD /* finder_service */,
+				4FF625DC317A9D2665E5E48E /* open_request */,
+				202B89B33943EC940AAD4D4D /* remote_agent */,
+				FA67A684267ED06AA381CD11 /* terminal */,
+				00497193F1BD48E03A8E01C2 /* vault_session */,
+				58EC302F29C4A1BE7DD9968F /* window */,
 			);
 			path = app;
 			sourceTree = "<group>";
 		};
-		551012B837A246755A8B9CE2 /* search */ = {
+		4ECAEE0966079F70D5F18304 /* session */ = {
 			isa = PBXGroup;
 			children = (
-				269691DF4D5D2259054FFF13 /* commands.rs */,
-				72FC8C72262F5175ACFB4B42 /* mod.rs */,
+				A13911F9475257D8BDBD6105 /* config.rs */,
+				C4B49B144810C25B89001AC5 /* dsh_history.rs */,
+				F72A1E89CEBE833226371850 /* handlers.rs */,
+				DBACA286A8E4B8C9A30D8DBF /* history.rs */,
+				C197CABEF34330C1015DC9F0 /* mod.rs */,
+				51209C6C02A1F261DBBF41B9 /* pool.rs */,
+				7EFFC3DD0AE705B4E8EF5251 /* run.rs */,
+				027EFFA28A927CB13B8320A1 /* warm.rs */,
 			);
-			path = search;
+			path = session;
 			sourceTree = "<group>";
 		};
-		5F6BDE55F690F547523674A7 /* window */ = {
+		4FF625DC317A9D2665E5E48E /* open_request */ = {
 			isa = PBXGroup;
 			children = (
-				9441A15D5F5262436FF7057F /* commands.rs */,
-				22BD8A7C03E73F2F0CBB9C8C /* mod.rs */,
+				BC82545B394F53EA85E68FC1 /* commands.rs */,
+				0E92C5F41C84C13362F6864D /* mod.rs */,
+			);
+			path = open_request;
+			sourceTree = "<group>";
+		};
+		5181ABE922E14A06AA2EE928 /* mobile_route */ = {
+			isa = PBXGroup;
+			children = (
+				23541F8F2100A4458F778D6E /* commands.rs */,
+				F34C657F870D98A1A5E0E0FA /* mod.rs */,
+				972F9A4B7412068F2BEC55D5 /* tests.rs */,
+			);
+			path = mobile_route;
+			sourceTree = "<group>";
+		};
+		52E058FA8BD831ED867AF770 /* fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				381C1BB2937AE45131FC0FFB /* envelope.json */,
+				A551B64EAACD3C7020D2D676 /* native-typert.json */,
+				68690724B01FBD1919E70F5A /* noise-ik.json */,
+				2E6193FBA6D1351E65645CCF /* relay.json */,
+			);
+			path = fixtures;
+			sourceTree = "<group>";
+		};
+		55D7813249BB2FBA1901F88D /* paper */ = {
+			isa = PBXGroup;
+			children = (
+				7637AE39110B8FA177F177B0 /* mobile.rs */,
+				D71C66E2CFD6F92E6F01111B /* mod.rs */,
+				0C68B691ADE81C07B42095D2 /* analyze */,
+				E72DDBE45BA6EC4D04CA3A80 /* catalog */,
+				703D930C9ECEC2048BCF9A2E /* discovery */,
+				E11D04357C7A54822542DFA3 /* import */,
+				1C0A153E3C9D9BF7A7A85195 /* ingest */,
+				BC4CAD7C1DC78BE0B6D5C509 /* zotero */,
+			);
+			path = paper;
+			sourceTree = "<group>";
+		};
+		55E5F2AB4C62E044C4A2BCA2 /* commands */ = {
+			isa = PBXGroup;
+			children = (
+				19C8DD11BA647FBFC83EA6E1 /* citation.rs */,
+				C12234F1C3315C55158064F9 /* doctor.rs */,
+				1A9D94CD946FFF26CC9012C0 /* interaction.rs */,
+				45042D58CBB40A3344D5928D /* mod.rs */,
+				C4398E297D2DB6A921DA03B7 /* pi.rs */,
+				2F199BD978E69FD39CE7D820 /* registry.rs */,
+				9DC9986C08698408A3B4012E /* remote.rs */,
+				75BAC58C56C8F7E3CBA32E8E /* session.rs */,
+			);
+			path = commands;
+			sourceTree = "<group>";
+		};
+		58EC302F29C4A1BE7DD9968F /* window */ = {
+			isa = PBXGroup;
+			children = (
+				8A86F840E34A0ACCBE8B7872 /* commands.rs */,
+				55B3A067870419AD80E85732 /* mod.rs */,
+				6C1093755AE332F3427D8A50 /* pinch_zoom.rs */,
+				4F8E4FCFAE4EDBBC1969825B /* pinch-zoom.js */,
 			);
 			path = window;
+			sourceTree = "<group>";
+		};
+		5DCE35FCD9ECCFBF6E7F49FE /* integration */ = {
+			isa = PBXGroup;
+			children = (
+				8D0B40A0D1DFF68BB6733945 /* context_mcp.rs */,
+				D24865010B8D4A572F0531FE /* credentials.rs */,
+				4CE4CEB5EF0F025B31CF08A3 /* delegate_mcp.rs */,
+				BEC3D78C7D5C43BE37501612 /* mod.rs */,
+				D44D8403DA9A8AC593D55AFF /* remote_agent_journal_tests.rs */,
+				3C3B58CD0DFE0529A1EF3E9E /* remote_agent_journal.rs */,
+				1BCCB7580B81D65411197389 /* bridge */,
+				04C9C4C848C525C1D9D0F2C1 /* connector */,
+				E6402AE67ED6258D445E9A35 /* dsh_remote */,
+				AD82835D9298F18FCAC34304 /* mcp */,
+				F50E3AD17B905BF423BF37D7 /* plugins */,
+				6AC3F91C8BB35659326AC8E3 /* remote */,
+				761E345ACB200E97FC74A46D /* sync */,
+				E5F66D187FC4DB5A0BCEAE61 /* word */,
+			);
+			path = integration;
+			sourceTree = "<group>";
+		};
+		63C1DEB36390F3138A2C1E4B /* jobs */ = {
+			isa = PBXGroup;
+			children = (
+				FC0298476429CEC8BF912BD5 /* commands.rs */,
+				59714790C24D2A849236FF99 /* mod.rs */,
+			);
+			path = jobs;
 			sourceTree = "<group>";
 		};
 		644835EA97A8954ED639A3EA /* Sources */ = {
@@ -389,104 +907,284 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		65203E33FBF5BD09BBE57C33 /* catalog */ = {
-			isa = PBXGroup;
-			children = (
-				78C503907D0091FF9A7E4890 /* commands.rs */,
-				49FA24ABEC1E70A8F1821C08 /* mod.rs */,
-				4631FCDC2B7FA1B9E9138675 /* papers.rs */,
-				D0C464432807F88694164887 /* schema.rs */,
-			);
-			path = catalog;
-			sourceTree = "<group>";
-		};
 		65BA213E7700B16D0B51AA8F /* vault */ = {
 			isa = PBXGroup;
 			children = (
 				444354B0AACFFD5B45D41AB4 /* commands.rs */,
+				051025665CDC419610010FA7 /* files.rs */,
 				B21074CA8322301D9A16F490 /* mod.rs */,
-				A84D56AAAF718BBC4CA78F2A /* tree.rs */,
+				C25DF2C9A1A40A6DBC74BBB7 /* doctor */,
+				89DB713290DFD67B93B5625F /* rename */,
+				DE407CCBD2B3162F07DF1A82 /* trash */,
+				0721B37E468750978DAE1E31 /* watcher */,
 			);
 			path = vault;
 			sourceTree = "<group>";
 		};
-		683A3FC311A193E6A61AF509 /* fs */ = {
+		6AC3F91C8BB35659326AC8E3 /* remote */ = {
 			isa = PBXGroup;
 			children = (
-				922D5F9C431C41DB7BE8AB68 /* local.rs */,
-				5D53C529E1CA75AA736370D8 /* mod.rs */,
-				0C51A04455EA40A1ED0BDA73 /* path.rs */,
+				9067CD7BF702A1327A88C273 /* agent_exec.rs */,
+				D5CA4B0C1A853B31855FC5D8 /* blob_cache.rs */,
+				A7116630206504038493D2DA /* catalog_mirror.rs */,
+				23A137479BC1B8A6262080E7 /* catalog_snapshot.rs */,
+				014C6BCC7A769CD1D711AE7A /* commands.rs */,
+				91C8AABC5467D9A7F36B2542 /* import_bridge.rs */,
+				7F4D6BBCEFF9D2B1FC0A5F55 /* launch.rs */,
+				C05044EC9D7BCE4539C440B1 /* mod.rs */,
+				73550DB2D43CBCA6433A5A58 /* paper_commit.rs */,
+				7987951ED299EAF6CFD3E466 /* session.rs */,
+				FEFC4801D45A3D816FC4701C /* sftp_fs.rs */,
+				ECF99B923619527999F00CB7 /* ssh_config.rs */,
+				6C159538BB9713104D62A871 /* trash_bridge.rs */,
 			);
-			path = fs;
+			path = remote;
 			sourceTree = "<group>";
 		};
-		7B7FAB452E5C6577F4A57831 /* terminal */ = {
+		703D930C9ECEC2048BCF9A2E /* discovery */ = {
 			isa = PBXGroup;
 			children = (
-				6EEFB1DBE267B0098673CF9D /* commands.rs */,
-				7886599063DB8A4BF36E58AA /* mod.rs */,
+				F33CAD25A43280B078C10D73 /* mod.rs */,
+				B04AA105BC4BFA9267A6070C /* scratch.rs */,
+				AE2862B7DA2F1337F3C7892F /* coolpapers */,
+				DFC1055F0813F3B1AB504294 /* feeds */,
+				72B27E085435E32E5300A13E /* proxy */,
+				F867C1E5C9EF08C6775C2FB7 /* pwc */,
+				38242BDA3DA08DFC201C49C0 /* recommend */,
 			);
-			path = terminal;
+			path = discovery;
 			sourceTree = "<group>";
 		};
-		8793979E7A0B8E488FBDFBEF /* pdf_parse */ = {
+		71352201B44D88AE1F847A05 /* install */ = {
 			isa = PBXGroup;
 			children = (
-				0BA028FF3D101646D4EC562C /* mod.rs */,
+				513E9111E9CB0E33A4116FB6 /* commands.rs */,
+				2117D89D911E893BC9127749 /* download.rs */,
+				D0E8906EC9B94A0C5A4D69A3 /* mod.rs */,
+				05913ABD82D89C6BDBDC5234 /* windows_path.rs */,
 			);
-			path = pdf_parse;
+			path = install;
 			sourceTree = "<group>";
 		};
-		9F37C0C7F5509824504141C8 /* paper_import */ = {
+		713F3E1A9ECE88F1842AF521 /* builtin */ = {
 			isa = PBXGroup;
 			children = (
-				7200A91387D2588884A4E9CB /* mod.rs */,
+				B5D71E86D8A687C59936D58F /* mod.rs */,
 			);
-			path = paper_import;
+			path = builtin;
 			sourceTree = "<group>";
 		};
-		A1ACBBB54A3F6EDB6C59324D /* connector */ = {
+		72B27E085435E32E5300A13E /* proxy */ = {
 			isa = PBXGroup;
 			children = (
-				1B9E840327FC1653A5780A49 /* commands.rs */,
-				AA7E510349C6751267D46E46 /* import.rs */,
-				A3B742E70225AB9AB97EAEEA /* mod.rs */,
-				45A833879DDC814229CD0D1F /* server.rs */,
-				799E8235D760FBA1EFE44CAA /* state.rs */,
-				28C69513E43D0A9C47ED43FE /* targets.rs */,
+				E4A90E1F86C9D0179B34858E /* arxiv.rs */,
+				C0A43395B27BF61782BD0E13 /* huggingface.rs */,
+				90FD6A53C375031D95673432 /* mod.rs */,
+				6EE6ADB262CB876B6ED34005 /* modelscope.rs */,
+				816F50B8920DA1492473BAE6 /* pwc.rs */,
 			);
-			path = connector;
+			path = proxy;
+			sourceTree = "<group>";
+		};
+		743628639D916DA96396A822 /* recognize */ = {
+			isa = PBXGroup;
+			children = (
+				EB25A36AD2B54968BC214CC0 /* apply.rs */,
+				87BDC97F65399A554EB0DA6C /* chain_resolve.rs */,
+				B1F8F3A936AFD632D8450B8E /* mod.rs */,
+			);
+			path = recognize;
+			sourceTree = "<group>";
+		};
+		761E345ACB200E97FC74A46D /* sync */ = {
+			isa = PBXGroup;
+			children = (
+				C2FD74C34B58C0AE96BD1F11 /* commands.rs */,
+				5C2F650CE7A82A78B621B0F9 /* credentials_tests.rs */,
+				31220E37DB55AC1121856B3D /* credentials.rs */,
+				C389258E8B5B91D2880628ED /* mod.rs */,
+				3493CE7E51D34D5A7722FE73 /* scheduler.rs */,
+			);
+			path = sync;
+			sourceTree = "<group>";
+		};
+		794B0D26988CAEB88C6FD29A /* desktop_apps */ = {
+			isa = PBXGroup;
+			children = (
+				5825D90A0A61D6F6349F4969 /* commands.rs */,
+				519C3CD66A8AD1D0B1688944 /* mod.rs */,
+				D373065847CE42E537D89938 /* windows.rs */,
+			);
+			path = desktop_apps;
+			sourceTree = "<group>";
+		};
+		80C48DA23CB199A0FF76AAFD /* export */ = {
+			isa = PBXGroup;
+			children = (
+				496697BCF6BD070F74138ED1 /* commands.rs */,
+				1036A0FBAD0FD2BA50402053 /* mod.rs */,
+			);
+			path = export;
+			sourceTree = "<group>";
+		};
+		89DB713290DFD67B93B5625F /* rename */ = {
+			isa = PBXGroup;
+			children = (
+				CFEAD223C8D8172153CBC6BF /* commands.rs */,
+				A2EDE96E883DD62974EC4179 /* mod.rs */,
+			);
+			path = rename;
+			sourceTree = "<group>";
+		};
+		8E3A6D8C6D09264C470AA057 /* pdf */ = {
+			isa = PBXGroup;
+			children = (
+				E97D08D9571CE6FDD0402544 /* bookmarks.rs */,
+				D0E2FE3905B477ADDCCB4179 /* ink_tests.rs */,
+				5201FCF7BA9948ECEBFB9911 /* ink.rs */,
+				9274CD93CC15CE3A35FB26E8 /* mod.rs */,
+				80C48DA23CB199A0FF76AAFD /* export */,
+			);
+			path = pdf;
+			sourceTree = "<group>";
+		};
+		96F5B183E6ADDE4751518B2F /* body_engines */ = {
+			isa = PBXGroup;
+			children = (
+				6DD5F1FA9091F2F3F8E42B18 /* mineru.rs */,
+				886983254A1899610382FEFD /* mod.rs */,
+				F00D73D13BE9710D4D80F7C1 /* openai_vlm.rs */,
+				5060CF3BAB5708AFC0C0935D /* paddle.rs */,
+			);
+			path = body_engines;
+			sourceTree = "<group>";
+		};
+		97B9FF3BF14201544962C7FD /* acp */ = {
+			isa = PBXGroup;
+			children = (
+				91949C94491CD2E2B3472E5A /* ask_user.rs */,
+				D1D5817A8AB180915DE3ED61 /* client.rs */,
+				8DA1FF49DE30D2E7BCDBAE53 /* grok_models.rs */,
+				8FA90D633A78BE0ADC4A118C /* interaction.rs */,
+				06D86E3BC767C22DF070BE82 /* mod.rs */,
+				7FB4C9CFE98E86161EE5BBD0 /* probe.rs */,
+				D99C3C3233BF0CB413C9A9D4 /* terminal.rs */,
+				05B47E0CEBB3B1DE164E8DAB /* updates.rs */,
+			);
+			path = acp;
+			sourceTree = "<group>";
+		};
+		98AA7E8890C1DDFE7D44A56B /* jev */ = {
+			isa = PBXGroup;
+			children = (
+				93FED9D02B3F5D2826D1E92F /* commands.rs */,
+				55B1C29A3A2F70C5C9055E58 /* mod.rs */,
+				6B4C87696151FF6FD053E85F /* runner.rs */,
+				E82A00BE45076CD5E72A9374 /* service.rs */,
+			);
+			path = jev;
 			sourceTree = "<group>";
 		};
 		A5754A49724EBA47377C8784 /* agent */ = {
 			isa = PBXGroup;
 			children = (
 				93642ADFE41E0D79987E1F93 /* acp_tests.rs */,
-				2390C3B6D7485AB8414FC22B /* acp.rs */,
-				38158A1CD6F56A22EFC30250 /* background_commands.rs */,
-				B022071FD65F7C41F5DD6393 /* background_tasks.rs */,
-				50B0DBFB0A7BE1220EBBB01F /* commands.rs */,
-				EBC5D6B66B4FA88D0B2601B2 /* discover.rs */,
-				1774FBC23874C37BC4A7B68C /* events.rs */,
+				FC94145C6E67B7BCFD4339FD /* citation.rs */,
+				0979F552F39F6E856A5E9744 /* context_turn.rs */,
+				0DD0607AB277346FF6552B6D /* doctor_agents.rs */,
+				AB398ED842D2376E3D354589 /* doctor.rs */,
 				2E14872E39C0706A619B7DCB /* mod.rs */,
 				48011F01AB627447C8EB1B83 /* models.rs */,
-				07B81C16D1DDF590C257EB1C /* permission.rs */,
-				9A5F8C50C3EAE0B339E1DA63 /* prompts.rs */,
-				2F5431BC962662D3C1C8CB2F /* registry.rs */,
-				422655C56CD9D82DE466BB15 /* runtime.rs */,
-				769B67891107FD003FF08D2E /* skills.rs */,
-				4BCFE8F59E7EB37EAFE69776 /* templates.rs */,
+				954FAEAEDCF8D067F200C9AE /* pi_trust.rs */,
+				A16653CE5FC65297E17609CB /* remote_host.rs */,
+				3AD0264350FDAE5B4CB5488B /* service.rs */,
+				97B9FF3BF14201544962C7FD /* acp */,
+				55E5F2AB4C62E044C4A2BCA2 /* commands */,
+				B69A9C808D60D84A3DEA5310 /* delegate */,
+				71352201B44D88AE1F847A05 /* install */,
+				D9ACFAD64E8691383A43399D /* prompt */,
+				EB8A5E827138CE29A2E4EB61 /* registry */,
+				CBC17BA5ECEC59D1E1385740 /* runtime */,
+				4ECAEE0966079F70D5F18304 /* session */,
 			);
 			path = agent;
 			sourceTree = "<group>";
 		};
-		C13330E420C3CB3BCA143D47 /* settings */ = {
+		AD82835D9298F18FCAC34304 /* mcp */ = {
 			isa = PBXGroup;
 			children = (
-				EF7A33ED89608F3EF77A7A10 /* commands.rs */,
-				5B9E05FCB2F64B18A8A8F74A /* mod.rs */,
+				496E963920BF40205F0CF492 /* commands.rs */,
+				8A33EA2E7AE152B2CC16DCCA /* host.rs */,
+				C43C07C491F818CD77EF7833 /* mod.rs */,
+				30849433A46D4AFC5DAB1F88 /* tunnel.rs */,
 			);
-			path = settings;
+			path = mcp;
+			sourceTree = "<group>";
+		};
+		AE2862B7DA2F1337F3C7892F /* coolpapers */ = {
+			isa = PBXGroup;
+			children = (
+				13D1A09F555879F34B1A845E /* commands.rs */,
+				0FD99E45A87CB263AD740686 /* mod.rs */,
+				15DF301F5F3C89C7380E298E /* page.rs */,
+				F6B2927553CA0226151EE05C /* proxy.rs */,
+			);
+			path = coolpapers;
+			sourceTree = "<group>";
+		};
+		B154175056CB860FBC894CC5 /* remote_agent */ = {
+			isa = PBXGroup;
+			children = (
+				0FAFD294C7E6C06D58FF0E0F /* journal.rs */,
+				71542E710495B94643EEFD42 /* mod.rs */,
+				F348C70B28B71A49E2E8B767 /* provider.rs */,
+				332641C90F77A3621F16C114 /* README.md */,
+				96B5FE5037E81969E7202883 /* service.rs */,
+				F68BA78A9F48ECC9A110B81B /* tests.rs */,
+				6C40D8C2803835104BA9142B /* types.rs */,
+			);
+			path = remote_agent;
+			sourceTree = "<group>";
+		};
+		B69A9C808D60D84A3DEA5310 /* delegate */ = {
+			isa = PBXGroup;
+			children = (
+				7BFE3AAC871FB353AEA1A867 /* bridge.rs */,
+				02846FFCD22D461F319C3DAB /* mod.rs */,
+				F3DA4153609164CC4D56B388 /* policy.rs */,
+				3F756C7575C2B9C8B2FDCC69 /* protocol.rs */,
+			);
+			path = delegate;
+			sourceTree = "<group>";
+		};
+		BC4CAD7C1DC78BE0B6D5C509 /* zotero */ = {
+			isa = PBXGroup;
+			children = (
+				0E1BB17641C98328D75F287E /* commands.rs */,
+				3302831E7912A0C5E81E27EC /* db.rs */,
+				C684544A0ECC08DB9EED8C79 /* mod.rs */,
+				CE1FFCF3E04A6631C75E212C /* sync */,
+			);
+			path = zotero;
+			sourceTree = "<group>";
+		};
+		BFC190E941D53CCAF5B79FA3 /* writing */ = {
+			isa = PBXGroup;
+			children = (
+				A46D7C5FE6FF612A9DE718E4 /* cloud.rs */,
+				B757D5A685117090B3580827 /* mod.rs */,
+				875AA447CE3D9BE344018823 /* sync.rs */,
+			);
+			path = writing;
+			sourceTree = "<group>";
+		};
+		C25DF2C9A1A40A6DBC74BBB7 /* doctor */ = {
+			isa = PBXGroup;
+			children = (
+				10DC4BF5CA6B0BB47693AA42 /* commands.rs */,
+				CFA30AB877BA19E3CC711974 /* mod.rs */,
+			);
+			path = doctor;
 			sourceTree = "<group>";
 		};
 		C28957B3FD374B4664088777 /* src */ = {
@@ -497,6 +1195,7 @@
 				43070083CED811910BD918ED /* app */,
 				020519B1C80F785487BA205D /* core */,
 				11AE55904520986220D69CAC /* features */,
+				5DCE35FCD9ECCFBF6E7F49FE /* integration */,
 			);
 			name = src;
 			path = ../../src;
@@ -517,6 +1216,42 @@
 			);
 			sourceTree = "<group>";
 		};
+		CBBCF67D546E9BFA7F116D7F /* web */ = {
+			isa = PBXGroup;
+			children = (
+				387D4607D7DF925CA7DFAE2E /* allowlist.rs */,
+				1CDC1CDAA3BD926B82A949A9 /* commands.rs */,
+				20D188B20EF2B62EA8ADFC90 /* html_preview.rs */,
+				67EA643D4230388790596126 /* mod.rs */,
+				F3E5A3459E922BB5575DC9B1 /* proxy.rs */,
+			);
+			path = web;
+			sourceTree = "<group>";
+		};
+		CBC17BA5ECEC59D1E1385740 /* runtime */ = {
+			isa = PBXGroup;
+			children = (
+				96BFE8B05A10FC71BFDFF0B2 /* control.rs */,
+				C56B99D36E721A3D2812F628 /* events.rs */,
+				4DA4288118027448BFF2F1CC /* gates.rs */,
+				4FABCD015030A9B46080868D /* mod.rs */,
+				A9C28962AC6C147C6A799668 /* stream.rs */,
+			);
+			path = runtime;
+			sourceTree = "<group>";
+		};
+		CE1FFCF3E04A6631C75E212C /* sync */ = {
+			isa = PBXGroup;
+			children = (
+				F6F4DDEE17D7201C96E19CB4 /* commands.rs */,
+				2127F0E53AB9974A1BD7A181 /* link.rs */,
+				04BF473F95C918671EAB35EE /* mod.rs */,
+				C77E8171D4B42148E336C384 /* pull.rs */,
+				E16D65794626DF7F31E3528A /* push.rs */,
+			);
+			path = sync;
+			sourceTree = "<group>";
+		};
 		CE68ED39356CFFBD987EA3C7 /* agentero */ = {
 			isa = PBXGroup;
 			children = (
@@ -526,33 +1261,191 @@
 			path = agentero;
 			sourceTree = "<group>";
 		};
-		E4AD9617AE7BAE8D353EA574 /* trash */ = {
+		D9ACFAD64E8691383A43399D /* prompt */ = {
 			isa = PBXGroup;
 			children = (
-				567D8F8412F6FBD20D3B8BE0 /* commands.rs */,
-				9B715423902F01D12C9C6107 /* mod.rs */,
+				AB2084CDD10553EF02716800 /* envelope.rs */,
+				1603B768B660B440C789B83D /* mod.rs */,
+				3F2EB1F9CECBC0052119C356 /* openui_guidance.generated.txt */,
+				685017D0D33F06D5B3A583AC /* skills.rs */,
+			);
+			path = prompt;
+			sourceTree = "<group>";
+		};
+		DB191D78861B12A6C675BE06 /* rtex */ = {
+			isa = PBXGroup;
+			children = (
+				541C8B02BF6745C8E10D62EF /* mod.rs */,
+			);
+			path = rtex;
+			sourceTree = "<group>";
+		};
+		DCCEE32B8BCBD34B6415E3AB /* mobile_stylus */ = {
+			isa = PBXGroup;
+			children = (
+				577E6CDAF32AA9E7228447A5 /* commands.rs */,
+				B79747F0E8E9E37E1DB921EF /* mod.rs */,
+				E6EB271B4AEF0B27A0FBED00 /* slot.rs */,
+			);
+			path = mobile_stylus;
+			sourceTree = "<group>";
+		};
+		DE30B54D005187E891AD9578 /* model_assets */ = {
+			isa = PBXGroup;
+			children = (
+				900C6C58B47BFB9B8E2D0368 /* commands.rs */,
+				66EF3EB4F5C4593CBC25EF85 /* mod.rs */,
+			);
+			path = model_assets;
+			sourceTree = "<group>";
+		};
+		DE407CCBD2B3162F07DF1A82 /* trash */ = {
+			isa = PBXGroup;
+			children = (
+				CA4556B21ABD4E60FFC41011 /* commands.rs */,
+				6C10A2AE250AAC8428FE2CF7 /* mod.rs */,
+				3B36532D6564B49DED394AB5 /* remote_ops.rs */,
 			);
 			path = trash;
 			sourceTree = "<group>";
 		};
-		EC79DCB2D0540F95AF4B15FC /* wiki */ = {
+		DFC1055F0813F3B1AB504294 /* feeds */ = {
 			isa = PBXGroup;
 			children = (
-				9BAAD754F1CDE6263B7112E5 /* cache.rs */,
-				1D96584FE51452F01D2C41AA /* commands.rs */,
-				89FA7822A2FD316BC448F196 /* embed.rs */,
-				43ABE168D4C35A48F35B9C61 /* extract.rs */,
-				04A68747B124315923A04E6E /* heading_rename.rs */,
-				48A1FC968BE8EC6011F4B487 /* index.rs */,
-				FDB11612B9FB881FD4B0C7C1 /* mod.rs */,
-				9AF41E5811FC99B7A697CDAC /* models.rs */,
-				5714021DBFE0692FBF971D81 /* rename.rs */,
-				ADC3572383F2DB5FC59073C8 /* resolve.rs */,
+				1400ED8A1D881F3EAEED437F /* commands.rs */,
+				55660D4CD62E74E1BC0A07EB /* mod.rs */,
+			);
+			path = feeds;
+			sourceTree = "<group>";
+		};
+		E11D04357C7A54822542DFA3 /* import */ = {
+			isa = PBXGroup;
+			children = (
+				8624480C11344CEB7F3529EC /* commands.rs */,
+				C4A618B48D7AE28BA949996F /* ios_inbox.rs */,
+				DE80A0C5F67C4A7EC83EEDF5 /* job_runners.rs */,
+				A9758E7C127FFFE9D5C53F27 /* mod.rs */,
+				66CC669DCD7C66D10AB9219C /* native_picker.rs */,
+				D31514640AB79EBE8AAE8B71 /* native.rs */,
+				0A4EA9D812FB4DA98679AE43 /* remote_ops.rs */,
+				743628639D916DA96396A822 /* recognize */,
+			);
+			path = import;
+			sourceTree = "<group>";
+		};
+		E5F66D187FC4DB5A0BCEAE61 /* word */ = {
+			isa = PBXGroup;
+			children = (
+				87D6544883BD9CC66CF478F7 /* citation.rs */,
+				89365F48F242E1A51424965A /* driver.rs */,
+				992DD69ECA7791ED8EB4DFED /* mac-word.js */,
+				703CE15AB9B44B135357EED2 /* mod.rs */,
+				805F96F91205211581A7BC22 /* win-word.ps1 */,
+				7688EFB10FF1DBB19875A8FE /* windows.rs */,
+			);
+			path = word;
+			sourceTree = "<group>";
+		};
+		E6402AE67ED6258D445E9A35 /* dsh_remote */ = {
+			isa = PBXGroup;
+			children = (
+				3CB6EA2F416F05C80B8E9AE1 /* api.rs */,
+				188655133841219EF7DFE712 /* crypto.rs */,
+				DB8BB454C74CF905B25E93F9 /* gateway.rs */,
+				56A7F2C92DCEC64816DF6091 /* mod.rs */,
+				CF31D568462AC6B92CA3BA10 /* native_model.rs */,
+				C3569A13AF70BEC2BC787EEA /* native_tests.rs */,
+				0964BD7109FD62BAAC74C834 /* native.rs */,
+				5BE41F5D2D46B69B468770BA /* network_tests.rs */,
+				54B88A4ABF6B31E068ED77E9 /* protocol.rs */,
+				01E74722C24239A9F887DE5E /* provider.rs */,
+				5DD3CC18295FA396E34853BB /* README.md */,
+				C6EC70F0A408D3C53BA84130 /* relay.rs */,
+				614F03DD077079A7D4CC736C /* rpc.rs */,
+				4CEA4894DA60102CD91E0E41 /* tests.rs */,
+				7511C7B3C0587D1AFC25F00C /* THIRD_PARTY_LICENSES.md */,
+				52E058FA8BD831ED867AF770 /* fixtures */,
+			);
+			path = dsh_remote;
+			sourceTree = "<group>";
+		};
+		E72DDBE45BA6EC4D04CA3A80 /* catalog */ = {
+			isa = PBXGroup;
+			children = (
+				AEEF0FB9554A86F147C1E207 /* commands.rs */,
+				27B14532F0AE5B0F4A97BB8A /* mod.rs */,
+				0E05ECECE6D19130A82FE622 /* service.rs */,
+			);
+			path = catalog;
+			sourceTree = "<group>";
+		};
+		E7C346628A80D825781154CB /* wiki */ = {
+			isa = PBXGroup;
+			children = (
+				83D3446B2371D18D8049B2AB /* commands.rs */,
+				4E20F1FC9896C1867DD9CCD1 /* mod.rs */,
 			);
 			path = wiki;
 			sourceTree = "<group>";
 		};
-		"TEMP_9FE9B7DF-2E7B-46BC-9516-55A02A8AA667" /* x86_64 */ = {
+		EB8A5E827138CE29A2E4EB61 /* registry */ = {
+			isa = PBXGroup;
+			children = (
+				B7537A7AF2A108B0F6FD9F58 /* bundled.rs */,
+				F8DCEBAB1B8EC89DBB538EC4 /* discovery.rs */,
+				52300722187F0E0BE1669E2D /* dsh.rs */,
+				CD027740E667919DF6A2DDDF /* lifecycle.rs */,
+				C76ABCF5FD20638FEA881FE4 /* mod.rs */,
+				D6D9C97074FB15DCCDDDE3A3 /* remote.rs */,
+				CCEB61E258DF8DE02E7B7388 /* store.rs */,
+				B67EA29F8C15E0229A7F6F4E /* templates.rs */,
+				795A8BA2381701A3A22E145B /* version_check.rs */,
+			);
+			path = registry;
+			sourceTree = "<group>";
+		};
+		F3CA84CF4577BBFD7B5B8478 /* mobile_background */ = {
+			isa = PBXGroup;
+			children = (
+				0BDD9FC3A900717318E0B534 /* commands.rs */,
+				8B43BED58FDABE35074071D3 /* mod.rs */,
+				49849210822F5A4A6B07B79B /* scene.rs */,
+				ADBE1ACDA7A5712BBA42C8B5 /* service_tests.rs */,
+				BE472577026476F496B1B4EF /* service.rs */,
+			);
+			path = mobile_background;
+			sourceTree = "<group>";
+		};
+		F50E3AD17B905BF423BF37D7 /* plugins */ = {
+			isa = PBXGroup;
+			children = (
+				C609883E62AC47C8FDF0EF1D /* broker.rs */,
+				02B5424171AD1B77DC706E5C /* mod.rs */,
+				352C2063A873DF3CB5DD0E66 /* packages.rs */,
+			);
+			path = plugins;
+			sourceTree = "<group>";
+		};
+		F867C1E5C9EF08C6775C2FB7 /* pwc */ = {
+			isa = PBXGroup;
+			children = (
+				2D12A65C48B97C83AF3A22D3 /* commands.rs */,
+				7BC2A49E4FAAB1224C2DA138 /* mod.rs */,
+			);
+			path = pwc;
+			sourceTree = "<group>";
+		};
+		FA67A684267ED06AA381CD11 /* terminal */ = {
+			isa = PBXGroup;
+			children = (
+				4AE4A6F5F8479B9DC743A43D /* commands.rs */,
+				279A8A87EE6589E691213D16 /* mod.rs */,
+				E499B03A381820FDE4E37EB9 /* presets.rs */,
+			);
+			path = terminal;
+			sourceTree = "<group>";
+		};
+		"TEMP_52C1119A-0D88-4FF7-AA7A-0C1E1F98EC84" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -620,6 +1513,7 @@
 				95258A0459370588A582C332 /* Assets.xcassets in Resources */,
 				30595555E9187C632BA8B49B /* LaunchScreen.storyboard in Resources */,
 				A381A8E4AF35E8D94A28588C /* assets in Resources */,
+				B2D5089AAB886DCC1441AE6C /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -672,7 +1566,6 @@
 				CODE_SIGN_ENTITLEMENTS = agentero_iOS/agentero_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "Agentero App Store";
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -688,10 +1581,10 @@
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.poco-ai.agentero;
 				PRODUCT_NAME = "Agentero";
+				PROVISIONING_PROFILE_SPECIFIER = "Agentero App Store";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "43B86K77UU";
 			};
 			name = release;
 		};
@@ -746,7 +1639,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -787,7 +1680,6 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "43B86K77UU";
 			};
 			name = debug;
 		};
@@ -836,7 +1728,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
