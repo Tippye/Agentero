@@ -1,4 +1,4 @@
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, X } from "lucide-react";
 import {
 	lazy,
 	Suspense,
@@ -76,8 +76,17 @@ export function MobileReaderPage({
 	);
 	const widthClass = suppliedWidth ?? measurement.widthClass;
 	const compare = widthClass !== "narrow" && preset === "compare";
-	const notesVisible = compare || (widthClass === "narrow" && mode === "notes");
-	const pdfVisible = compare || !notesVisible;
+	const [translationPaneOpen, setTranslationPaneOpen] = useState(false);
+	const translationVisible = translationPaneOpen;
+	// Dual-pane translation reuses the reader split: original PDF on the left,
+	// translated companion on the right. Narrow screens show the companion
+	// alone until it is closed, since three panes would be unusable.
+	const notesVisible = translationVisible
+		? false
+		: compare || (widthClass === "narrow" && mode === "notes");
+	const pdfVisible = translationVisible
+		? widthClass !== "narrow"
+		: compare || !notesVisible;
 	const [pdf, setPdf] = useState<{
 		paperId: string;
 		paperPath: string;
@@ -157,7 +166,7 @@ export function MobileReaderPage({
 		>
 			<MobilePaneGroup
 				id="mobile-document"
-				layoutKey={`${widthClass}:${preset}:${mode}`}
+				layoutKey={`${widthClass}:${preset}:${mode}:translation${translationPaneOpen ? 1 : 0}`}
 				panes={[
 					{
 						id: "pdf",
@@ -191,6 +200,7 @@ export function MobileReaderPage({
 										paperAbsPath={paths.paperAbsPath}
 										vaultPath={vaultPath}
 										reserveCommentRail={false}
+										onOpenTranslationPane={() => setTranslationPaneOpen(true)}
 										isActive={active && pdfVisible}
 										initialReadingSnapshot={initialReadingSnapshot}
 										onReadingSnapshotChange={(snapshot, documentId) => {
@@ -226,6 +236,39 @@ export function MobileReaderPage({
 								{t("reader.pdfUnavailable")}
 							</div>
 						),
+					},
+					{
+						id: "translation",
+						visible: translationVisible,
+						weight: 1,
+						separatorLabel: t("workspace.resizeNotes"),
+						content:
+							translationVisible && pdf && paths ? (
+								<div className="relative h-full min-h-0">
+									<MobilePdfViewer
+										source={pdf.source}
+										sourceBytes={pdf.bytes}
+										docId={`${paths.paperAbsPath}::translation`}
+										paperRelPath={paths.paperRelPath}
+										paperAbsPath={paths.paperAbsPath}
+										vaultPath={vaultPath}
+										translationPane
+										translationOnly
+										isActive={active && translationVisible}
+										className="h-full"
+									/>
+									<Button
+										type="button"
+										variant="secondary"
+										size="icon"
+										className="absolute top-2 left-2 z-40 size-11 rounded-full shadow"
+										aria-label={t("reader.closeTranslation")}
+										onClick={() => setTranslationPaneOpen(false)}
+									>
+										<X className="size-5" />
+									</Button>
+								</div>
+							) : null,
 					},
 				]}
 			/>

@@ -149,8 +149,6 @@ export type PdfLayoutTranslate = {
 	layoutTranslatePageCounts: { done: number; total: number } | null;
 	/** Toolbar button: start → stop → retry incomplete / hide or show retained translations. */
 	toggleLayoutTranslate: () => void;
-	/** Force the original page view (used before entering ink mode). */
-	hideLayoutTranslate: () => void;
 	/** Per-page tag: retry incomplete blocks, translate this page, or hide a complete page. */
 	togglePageLayoutTranslate: (pageIndex: number) => void;
 };
@@ -1537,16 +1535,6 @@ export function usePdfLayoutTranslate({
 		cancelWaitingLayout,
 	]);
 
-	const hideLayoutTranslate = useCallback(() => {
-		const pages = new Set(
-			layoutTranslateJobRef.current.items
-				.filter((item) => Boolean(item.translated?.trim()))
-				.map((item) => item.pageIndex),
-		);
-		if (pages.size === 0) return;
-		setHiddenPageIndexes(pages);
-	}, []);
-
 	// Abort bulk translate when switching documents.
 	useEffect(() => {
 		if (!docId) return;
@@ -1985,7 +1973,6 @@ export function usePdfLayoutTranslate({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
-		hideLayoutTranslate,
 		togglePageLayoutTranslate,
 	};
 }

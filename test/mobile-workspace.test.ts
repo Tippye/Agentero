@@ -1134,4 +1134,20 @@ describe("stable tablet workspace DOM", () => {
 		await click("reader.back");
 		expect(container.querySelector("[data-pdf-document]")).toBeNull();
 	});
+
+	it("opens a translated companion beside the editable source PDF", async () => {
+		await resize(1000);
+		await click("Paper first");
+		await ready();
+		const source = state.pdf;
+		expect(source?.translationOnly).not.toBe(true);
+		await act(async () => source?.onOpenTranslationPane?.());
+		await ready();
+		expect(pane("translation")).not.toBeNull();
+		expect(state.pdf?.translationOnly).toBe(true);
+		expect(state.pdf?.translationPane).toBe(true);
+		expect(source?.translationOnly).not.toBe(true);
+		await click("reader.closeTranslation");
+		expect(pane("translation")?.hidden).toBe(true);
+	});
 });

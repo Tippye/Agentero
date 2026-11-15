@@ -563,6 +563,7 @@ function PdfViewerInner({
 	onHighlightsChange,
 	onAsksChange,
 	onVisualTracesChange,
+	onOpenTranslationPane,
 	onOpenTranslationTab,
 }: PdfViewerInnerProps) {
 	const capabilities = pdfViewerCapabilities(runtime);
@@ -1326,7 +1327,6 @@ function PdfViewerInner({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
-		hideLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutCluster({
 		capabilities,
@@ -1357,13 +1357,19 @@ function PdfViewerInner({
 	);
 	const mobileInk =
 		(runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
-	// Mobile keeps the pen available even while translated pages are shown.
-	// Selecting a drawing tool switches back to the original page (see the
-	// effect below) instead of leaving an export-only ink toolbar.
-	const inkEditable = mobileInk && !embeddedTarget && !translationPane;
+	// Overlay translation owns the page surface: annotating it would mix ink
+	// coordinates with translated text, so the original PDF is read-only there.
+	// Dual-pane translation keeps the original PDF editable by opening the
+	// translation in its own pane instead.
 	const visibleReflowDocumentId = layoutTranslateActive
 		? reflowDisplayDocumentId
 		: null;
+	const inkEditable =
+		mobileInk &&
+		!layoutTranslateActive &&
+		!visibleReflowDocumentId &&
+		!embeddedTarget &&
+		!translationPane;
 	const { editor: inkEditor, mode: inkMode } = usePdfInk({
 		vaultPath,
 		paperRelPath,
@@ -1374,13 +1380,6 @@ function PdfViewerInner({
 		onInkDirtyChange,
 		onInkModeChange,
 	});
-	// A pen tool means annotating the source PDF: leave the translated/reflow
-	// view so the ink layer is mounted and coordinates stay on the real page.
-	useEffect(() => {
-		if (!mobileInk || inkMode === "read" || !layoutTranslateActive) return;
-		hideLayoutTranslate();
-	}, [mobileInk, inkMode, layoutTranslateActive, hideLayoutTranslate]);
-
 	const inkPageSize = useCallback(
 		(page: number) =>
 			docCapRef.current?.getDocument(docId)?.pages[page - 1]?.size ?? null,
@@ -1454,10 +1453,13 @@ function PdfViewerInner({
 			!capabilities.latex
 		)
 			return;
-		// Mobile has no desktop translation tab; always use the overlay there even
-		// if the shared preference is still dualPane.
-		if (displayMode !== "dualPane" || capabilities.apiOnly) {
+		if (displayMode !== "dualPane") {
 			toggleLayoutTranslate();
+			return;
+		}
+		// Mobile has no desktop tab strip: the companion opens as a pane.
+		if (capabilities.apiOnly) {
+			onOpenTranslationPane?.();
 			return;
 		}
 		// In dual-pane mode the source pane only opens the right-hand
@@ -1490,6 +1492,7 @@ function PdfViewerInner({
 		displayMode,
 		dualPaneSource,
 		toggleLayoutTranslate,
+		onOpenTranslationPane,
 		onOpenTranslationTab,
 		baseDocId,
 		paperAbsPath,
@@ -2767,7 +2770,11 @@ function PdfViewerInner({
 							? handleAskInkRegion
 							: undefined
 					}
-					onExport={!mobileInk || onInkExport ? handleExportInk : undefined}
+					onExport={
+						inkEditable && (!mobileInk || onInkExport)
+							? handleExportInk
+							: undefined
+					}
 				/>
 			)}
 			{!translationOnly && (!plainViewer || showBottomBar) && (

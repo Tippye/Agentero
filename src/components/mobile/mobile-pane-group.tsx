@@ -41,6 +41,25 @@ export function MobilePaneGroup({
 	);
 	const desiredRef = useRef(desired);
 	desiredRef.current = desired;
+	// Panels that appear later (e.g. the translation companion) start with a
+	// collapsed layout until the group settles; do not persist that transient
+	// collapse as a user-collapsed pane.
+	const visibleIdsRef = useRef<Set<string>>(new Set());
+	const visibleAtRender = visibleIdsRef.current;
+	useEffect(() => {
+		const next = new Set(
+			panes.filter((pane) => pane.visible).map((pane) => pane.id),
+		);
+		const added = [...next].filter((id) => !visibleIdsRef.current.has(id));
+		visibleIdsRef.current = next;
+		if (added.length === 0) return;
+		setCollapsed((previous) => {
+			if (!added.some((id) => previous[id])) return previous;
+			const nextCollapsed = { ...previous };
+			for (const id of added) delete nextCollapsed[id];
+			return nextCollapsed;
+		});
+	}, [panes]);
 	useEffect(() => {
 		group.current?.setLayout(
 			layouts.current.get(layoutKey) ?? desiredRef.current,
@@ -61,7 +80,9 @@ export function MobilePaneGroup({
 		>
 			{panes.map((pane, index) => {
 				const separator = pane.visible && panes[index + 1]?.visible;
-				const hidden = !pane.visible || collapsed[pane.id] === true;
+				const hidden =
+					!pane.visible ||
+					(collapsed[pane.id] === true && visibleAtRender.has(pane.id));
 				return (
 					<Fragment key={pane.id}>
 						<ResizablePanel

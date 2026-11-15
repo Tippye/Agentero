@@ -121,6 +121,8 @@ export type PdfViewerProps = {
 	 * Open a rendered-translation workspace tab split to the right.
 	 * Used when Settings → Translate → dualPaneTranslate is enabled.
 	 */
+	/** Mobile: open the dual-pane translation companion inside the reader. */
+	onOpenTranslationPane?: () => void;
 	onOpenTranslationTab?: (
 		paperTabId: string,
 		paperAbsPath: string | null,
