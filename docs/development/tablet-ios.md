@@ -221,7 +221,27 @@ iOS Core 的既有 Library 数据根与 Tauri appDataDir 不完全相同；原�
 
 共享全量前端 463 文件、3587 项通过、10 项既有跳过；TypeScript、依赖图、scoped BIOME 通过；本轮无 Rust 改动。macOS 移动预览可启动并创建私有库，但桌面控制服务无法激活/捕获窗口，因此不计入滑动、删除确认、设置页或广场 header 的可见视觉验收。当前环境仍缺完整 Xcode/iPhoneOS SDK，未生成 IPA、未验证 iOS 目标或真实设备；TestFlight 自动发布保持冻结。
 
-## 9. 参考
+## 9. 从 android 分支同步共享修复（2026-11-15）
+
+`mobile` 分支停留在 `260d128af`，android 分支在其上继续堆积了共享前端与 Rust 改动。这些提交只存在于 `android` 分支，因此本轮按提交逐个 cherry-pick 到 `ios`（跳过 `feat(android)`/`fix(android)`/`docs(android)` 与 Android 平台文件），保留原提交信息与作者日期：
+
+`75246a9a2`（笔频道解码，iOS 已有更通用的 `native_channel`，冲突取 ours）、`c28d52f03`（笔悬停保护手指手势）、`a0ca4219e`（翻译测试展示 Host 原因）、`29de07690`（移动端永久删除论文）、`981f7a089`（引用、适宽与翻译反馈）、`f59d358f0`（墨迹可用性与长按阈值 1000 ms）、`92f33f756`（双栏翻译）、`5427bf3eb`（笔记长按、图片查看器、设置打磨）、`a0445ee39`（锁定 WebView 缩放与滑动选区）、`8b6625c3c`（阅读手势、预览与翻译外观）、`2c2865f5f`（滚动惯性抖动）、`0c68b4cb6` 与 `0b9c4c3c1`（触摸惯性临时调参）。
+
+同步后 `gen/apple` 用 `tauri ios init` 重新生成，与 `src-tauri/ios-project.yml` 对齐：最低系统 18.2（此前提交的生成产物仍是 15.0）、补上 PDF 文档类型与 `UIFileSharingEnabled`/`LSSupportsOpeningDocumentsInPlace`、版本号从 0.3.2 更新为 0.15.5。`pnpm ios:release:check` 通过。
+
+android 遗留的红测在同一提交里没有更新，本轮一并修正：论文信息把 EasyScholar 密钥移入设置页后，设置页保存后仍显示明文（改为回读 Host 的掩码值，与桌面 GeneralPane 一致）；侧栏新增「阅读手感」「EasyScholar」分区后，侧栏与共享面板测试的期望同步更新。
+
+验证：`pnpm typecheck`、`pnpm deps:check`（1485 模块 / 8183 依赖）、`pnpm vitest run`（3611 项通过、10 项既有跳过）通过。未运行：整仓 `cargo clippy --workspace`（pre-commit 钩子依赖的 host 目标 pdfium 构建脚本在本机网络下无法下载 GitHub release 资产）。
+
+## 10. iPhone Duo 适配
+
+iPhone Duo 在 iOS 27.2 模拟器里表现为两块屏幕：外屏 1398×2034 px（466×678 pt，@3x），应用实际拿到的内容视口只有 **382×644 pt**，右侧 84 pt 留给系统状态簇（时钟/网络）；内屏 2007×2853 px（669×951 pt）。按宽度分档，外屏落窄档、内屏落中档，与既有 `<600 / 600–839 / ≥840` 三档一致。
+
+窄档问题与处理：382 pt 下顶栏原有「菜单 + 标题 + 魔棒/刷新/导入 + 行内搜索」会把标题挤成「论…」并裁掉搜索框。文献库在窄档改为两行——第一行菜单、标题与三个图标，第二行整宽搜索；中档与宽档保持单行。回归用例 `test/mobile-app-local.test.ts`「keeps the library search out of the narrow header」防止搜索再回到窄档顶栏。
+
+未覆盖：模拟器把应用固定在外屏（第一块 `LCD`），内屏 `LCD-1` 始终黑屏；`simctl io screenConfig` 只能开关屏幕电源与改几何，没有折叠/展开姿态切换，因此**内屏 669 pt 中档只按宽度推算，未在 Duo 内屏实机截图验证**（用 iPad mini 744 pt 走同档位可补）。签名按要求留空（`--no-sign`），Keychain、配对与远程登录仍需签名构建验收。
+
+## 11. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - 现有 iOS 发布流程：[../test/ios-testflight.md](../test/ios-testflight.md)
