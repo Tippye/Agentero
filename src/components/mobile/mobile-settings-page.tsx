@@ -103,6 +103,49 @@ export function MobileSettingsPage({
 		() => setEasyScholarKeyDraft(settings.easyScholarKey),
 		[settings.easyScholarKey],
 	);
+	const [inertiaDraft, setInertiaDraft] = useState({
+		windowMs: settings.pdfInertiaVelocityWindowMs,
+		friction: settings.pdfInertiaFriction,
+		minVelocity: settings.pdfInertiaMinVelocity,
+		speedScale: settings.pdfInertiaSpeedScale,
+	});
+	useEffect(() => {
+		setInertiaDraft({
+			windowMs: settings.pdfInertiaVelocityWindowMs,
+			friction: settings.pdfInertiaFriction,
+			minVelocity: settings.pdfInertiaMinVelocity,
+			speedScale: settings.pdfInertiaSpeedScale,
+		});
+	}, [
+		settings.pdfInertiaVelocityWindowMs,
+		settings.pdfInertiaFriction,
+		settings.pdfInertiaMinVelocity,
+		settings.pdfInertiaSpeedScale,
+	]);
+	const saveInertiaAndRestart = useCallback(async () => {
+		const next = {
+			...loadSettings(),
+			pdfInertiaVelocityWindowMs: inertiaDraft.windowMs,
+			pdfInertiaFriction: inertiaDraft.friction,
+			pdfInertiaMinVelocity: inertiaDraft.minVelocity,
+			pdfInertiaSpeedScale: inertiaDraft.speedScale,
+		};
+		setSettings(next);
+		try {
+			await saveSettingsAsync(next);
+		} catch (error) {
+			notifyError(errorMessage(error));
+			return;
+		}
+		try {
+			const { relaunch } = await import("@tauri-apps/plugin-process");
+			await relaunch();
+		} catch (error) {
+			notifyError(t("mobile:readingFeel.restartFailed"), {
+				description: errorMessage(error),
+			});
+		}
+	}, [inertiaDraft, t]);
 	useEffect(() => {
 		if (!open) return;
 		let active = true;
@@ -170,108 +213,89 @@ export function MobileSettingsPage({
 								<p className="text-muted-foreground text-sm">
 									{t("mobile:readingFeel.description")}
 								</p>
-								<label className="block space-y-2">
-									<span className="flex items-center justify-between gap-3 text-sm">
-										<span>{t("mobile:readingFeel.window")}</span>
-										<span className="text-muted-foreground tabular-nums">
-											{settings.pdfInertiaVelocityWindowMs} ms
+								{(
+									[
+										{
+											key: "windowMs",
+											label: t("mobile:readingFeel.window"),
+											min: 20,
+											max: 200,
+											step: 5,
+											format: (value: number) => `${value} ms`,
+										},
+										{
+											key: "friction",
+											label: t("mobile:readingFeel.friction"),
+											min: 0.001,
+											max: 0.02,
+											step: 0.0005,
+											format: (value: number) => value.toFixed(4),
+										},
+										{
+											key: "minVelocity",
+											label: t("mobile:readingFeel.minVelocity"),
+											min: 0.005,
+											max: 0.1,
+											step: 0.001,
+											format: (value: number) => value.toFixed(3),
+										},
+										{
+											key: "speedScale",
+											label: t("mobile:readingFeel.speedScale"),
+											min: 0.3,
+											max: 2.5,
+											step: 0.1,
+											format: (value: number) => `${value.toFixed(1)}×`,
+										},
+									] as const
+								).map((field) => (
+									<label key={field.key} className="block space-y-2">
+										<span className="flex items-center justify-between gap-3 text-sm">
+											<span>{field.label}</span>
+											<span className="text-muted-foreground tabular-nums">
+												{field.format(inertiaDraft[field.key])}
+											</span>
 										</span>
-									</span>
-									<input
-										type="range"
-										min={20}
-										max={200}
-										step={5}
-										value={settings.pdfInertiaVelocityWindowMs}
-										className="w-full accent-primary"
-										onChange={(event) =>
-											patch({
-												pdfInertiaVelocityWindowMs: Number(event.target.value),
+										<input
+											type="range"
+											min={field.min}
+											max={field.max}
+											step={field.step}
+											value={inertiaDraft[field.key]}
+											className="w-full accent-primary"
+											onChange={(event) =>
+												setInertiaDraft((value) => ({
+													...value,
+													[field.key]: Number(event.target.value),
+												}))
+											}
+										/>
+									</label>
+								))}
+								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										className="min-h-11"
+										onClick={() =>
+											setInertiaDraft({
+												windowMs: DEFAULT_SETTINGS.pdfInertiaVelocityWindowMs,
+												friction: DEFAULT_SETTINGS.pdfInertiaFriction,
+												minVelocity: DEFAULT_SETTINGS.pdfInertiaMinVelocity,
+												speedScale: DEFAULT_SETTINGS.pdfInertiaSpeedScale,
 											})
 										}
-									/>
-								</label>
-								<label className="block space-y-2">
-									<span className="flex items-center justify-between gap-3 text-sm">
-										<span>{t("mobile:readingFeel.friction")}</span>
-										<span className="text-muted-foreground tabular-nums">
-											{settings.pdfInertiaFriction.toFixed(4)}
-										</span>
-									</span>
-									<input
-										type="range"
-										min={0.001}
-										max={0.02}
-										step={0.0005}
-										value={settings.pdfInertiaFriction}
-										className="w-full accent-primary"
-										onChange={(event) =>
-											patch({
-												pdfInertiaFriction: Number(event.target.value),
-											})
-										}
-									/>
-								</label>
-								<label className="block space-y-2">
-									<span className="flex items-center justify-between gap-3 text-sm">
-										<span>{t("mobile:readingFeel.minVelocity")}</span>
-										<span className="text-muted-foreground tabular-nums">
-											{settings.pdfInertiaMinVelocity.toFixed(3)}
-										</span>
-									</span>
-									<input
-										type="range"
-										min={0.005}
-										max={0.1}
-										step={0.001}
-										value={settings.pdfInertiaMinVelocity}
-										className="w-full accent-primary"
-										onChange={(event) =>
-											patch({
-												pdfInertiaMinVelocity: Number(event.target.value),
-											})
-										}
-									/>
-								</label>
-								<label className="block space-y-2">
-									<span className="flex items-center justify-between gap-3 text-sm">
-										<span>{t("mobile:readingFeel.speedScale")}</span>
-										<span className="text-muted-foreground tabular-nums">
-											{settings.pdfInertiaSpeedScale.toFixed(1)}×
-										</span>
-									</span>
-									<input
-										type="range"
-										min={0.3}
-										max={2.5}
-										step={0.1}
-										value={settings.pdfInertiaSpeedScale}
-										className="w-full accent-primary"
-										onChange={(event) =>
-											patch({
-												pdfInertiaSpeedScale: Number(event.target.value),
-											})
-										}
-									/>
-								</label>
-								<Button
-									type="button"
-									variant="outline"
-									className="min-h-11"
-									onClick={() =>
-										patch({
-											pdfInertiaVelocityWindowMs:
-												DEFAULT_SETTINGS.pdfInertiaVelocityWindowMs,
-											pdfInertiaFriction: DEFAULT_SETTINGS.pdfInertiaFriction,
-											pdfInertiaMinVelocity:
-												DEFAULT_SETTINGS.pdfInertiaMinVelocity,
-											pdfInertiaSpeedScale:
-												DEFAULT_SETTINGS.pdfInertiaSpeedScale,
-										})
-									}
-								>
-									{t("mobile:readingFeel.reset")}
-								</Button>
+									>
+										{t("mobile:readingFeel.reset")}
+									</Button>
+									<Button
+										type="button"
+										className="min-h-11"
+										onClick={() => void saveInertiaAndRestart()}
+									>
+										{t("mobile:readingFeel.saveAndRestart")}
+									</Button>
+								</div>
 							</div>
 						) : section === "appearance" ? (
 							<AppearancePane

@@ -128,6 +128,18 @@ pub struct AppSettings {
     /// Enable single-key Vim navigation on PDF reading surfaces.
     #[serde(default = "default_true")]
     pub pdf_vim_keys: bool,
+    /// Temporary touch-inertia tuning: velocity sample window in ms.
+    #[serde(default = "default_pdf_inertia_velocity_window_ms")]
+    pub pdf_inertia_velocity_window_ms: u32,
+    /// Temporary touch-inertia tuning: exponential friction coefficient.
+    #[serde(default = "default_pdf_inertia_friction")]
+    pub pdf_inertia_friction: f64,
+    /// Temporary touch-inertia tuning: stop threshold in px/ms.
+    #[serde(default = "default_pdf_inertia_min_velocity")]
+    pub pdf_inertia_min_velocity: f64,
+    /// Temporary touch-inertia tuning: release-velocity multiplier.
+    #[serde(default = "default_pdf_inertia_speed_scale")]
+    pub pdf_inertia_speed_scale: f64,
     /// Master switch for Vim-style single-key navigation (PDF + list surfaces).
     /// Off keeps plain typing and arrow keys only.
     #[serde(default = "default_true")]
@@ -503,6 +515,10 @@ impl Default for AppSettings {
             terminal_app: String::new(),
             pdf_scroll_strategy: default_pdf_scroll_strategy(),
             pdf_vim_keys: true,
+            pdf_inertia_velocity_window_ms: default_pdf_inertia_velocity_window_ms(),
+            pdf_inertia_friction: default_pdf_inertia_friction(),
+            pdf_inertia_min_velocity: default_pdf_inertia_min_velocity(),
+            pdf_inertia_speed_scale: default_pdf_inertia_speed_scale(),
             vim_mode: true,
             hint_mode_enabled: true,
             pdf_spread_mode: default_pdf_spread_mode(),
@@ -575,6 +591,22 @@ fn default_paper_note_mode() -> String {
 fn default_auto_update_internal_links() -> String {
     "ask".into()
 }
+fn default_pdf_inertia_velocity_window_ms() -> u32 {
+    80
+}
+
+fn default_pdf_inertia_friction() -> f64 {
+    0.005
+}
+
+fn default_pdf_inertia_min_velocity() -> f64 {
+    0.015
+}
+
+fn default_pdf_inertia_speed_scale() -> f64 {
+    1.0
+}
+
 fn default_pdf_scroll_strategy() -> String {
     "vertical".into()
 }
@@ -1373,6 +1405,16 @@ fn normalize(s: &mut AppSettings) {
     const PDF_SCROLL_STRATEGIES: &[&str] = &["vertical", "horizontal", "paginated"];
     if !PDF_SCROLL_STRATEGIES.contains(&s.pdf_scroll_strategy.as_str()) {
         s.pdf_scroll_strategy = default_pdf_scroll_strategy();
+    }
+    s.pdf_inertia_velocity_window_ms = s.pdf_inertia_velocity_window_ms.clamp(20, 200);
+    if !(0.001..=0.02).contains(&s.pdf_inertia_friction) {
+        s.pdf_inertia_friction = default_pdf_inertia_friction();
+    }
+    if !(0.005..=0.1).contains(&s.pdf_inertia_min_velocity) {
+        s.pdf_inertia_min_velocity = default_pdf_inertia_min_velocity();
+    }
+    if !(0.3..=2.5).contains(&s.pdf_inertia_speed_scale) {
+        s.pdf_inertia_speed_scale = default_pdf_inertia_speed_scale();
     }
     const PDF_SPREAD_MODES: &[&str] = &["none", "odd", "even"];
     if !PDF_SPREAD_MODES.contains(&s.pdf_spread_mode.as_str()) {
