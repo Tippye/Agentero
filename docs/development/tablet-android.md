@@ -409,26 +409,26 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
 - 真机重点验收：慢速短滑、快速甩动、手指停顿后抬起、连续多次滑动、双指缩放前是否有残留惯性抖动；首尾 overscroll bounce 仍不在本包范围。
 
-## 17. 触摸惯性手感调试配置与打包（2026-11-15）
+## 17. 触摸惯性手感调试、保存并重启与打包（2026-11-15）
 
-本轮改动（commit `0c68b4cb6`）：
+本轮改动（commit `0515aa69b`）：
 
-- 移动设置新增临时 **阅读手感** 分区（`settings:nav.reading`），四项滑杆：
-  - 速度采样窗口：20–200 ms，默认 80；越大越平滑、拖尾越长。
-  - 摩擦系数：0.001–0.02，默认 0.005；越大停得越快。
-  - 停止阈值：0.005–0.1 px/ms，默认 0.015；低于该速度结束滑行。
-  - 释放速度倍率：0.3–2.5×，默认 1；整体放大/缩小甩动距离。
-  - 恢复默认按钮。
-- 配置持久化在 `AppSettings` 四个扁平字段（`pdfInertiaVelocityWindowMs` / `pdfInertiaFriction` / `pdfInertiaMinVelocity` / `pdfInertiaSpeedScale`），经 `InkInputBridge` 注入 `bindInkInput`；输入层对越界值再做 clamp，释放速度上限 8 px/ms，避免异常参数把手感或性能打坏。
-- 默认值与上一版惯性一致；这是**调试期临时配置**，手感和默认参数确定后会移除该设置分区与四个字段。
+- 移动设置 **阅读手感** 四项滑杆只修改本地草稿，拖动时不再逐次写设置，避免拖杆过程中触发退出/崩溃；调整完点 **“保存并重启”**。
+- 保存使用 `saveSettingsAsync` 等待 Host 写盘完成，再调用 Android 原生 `mobile_restart_app`：插件在 UI 线程执行 `activity.recreate()`，WebView 重新加载并从磁盘读取新参数。若原生重启桥不可用，提示“设置已保存，请手动重新打开 Agentero”。
+- 四个参数已写入 Rust `AppSettings` schema（默认值与前端一致，Host 侧再做范围 clamp），因此重启后不再丢失。
+- 参数与范围：
+  - 速度采样窗口 20–200 ms（默认 80）
+  - 摩擦系数 0.001–0.02（默认 0.005，越大停得越快）
+  - 停止阈值 0.005–0.1 px/ms（默认 0.015）
+  - 释放速度倍率 0.3–2.5×（默认 1）
+- 这是调试期临时配置；手感确定后可移除设置分区并写死默认值。
 
 验证与产物：
 
-- TypeScript、Biome 通过；移动设置、手写输入、移动工作区、PDF 能力与后台任务条 5 个文件 49 项相关测试通过。
-- Android ARM64 release 构建成功；v3 签名、ZIP 完整性与 16KB 对齐通过。
-- 新 APK：[Agentero-0.15.5-inertia-tuning-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-tuning-arm64-test.apk)，56,761,105 字节，SHA-256 `bbc0debfed53b329389b297290308b0d9cee3db1d624e597d54b225ead80e716`；包内 library SHA-256 `b02b0dee338cbf8cc104cec8ac1269441f1cdfd6b613fa8d5a2a25ddd77d42c6`。
-- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
-- 真机调参建议：先只调“摩擦系数”，再调“释放速度倍率”；速度窗口过低会敏感抖动，过高会感觉拖。调好后把最终值告诉我，我移除滑杆并把默认值写死。
+- TypeScript、Biome 通过；移动设置/手写/工作区/PDF 能力/后台任务条 5 个文件 49 项测试通过；Android ARM64 release 构建成功。
+- 新 APK：[Agentero-0.15.5-inertia-save-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-save-arm64-test.apk)，56,781,585 字节，SHA-256 `2caab40efd96c4f2168702ca3ac395db97ea46a1c052c5cc530adf4271542854`；包内 library SHA-256 `7bde863220c2870db2e332f1d49d0abaa1ab0e1de4adcef8335e2438ee026cc0`。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；v3 签名与 16KB 对齐通过。
+- 真机重点验收：拖滑杆不再退出；点保存并重启后设置值保留且立即生效；若重启失败能看到“已保存”的提示。
 
 ## 18. 参考
 
