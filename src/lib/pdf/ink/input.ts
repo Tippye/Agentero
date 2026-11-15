@@ -37,13 +37,6 @@ export function bindInkInput(options: {
 	) => void;
 	/** A touch tap that never became a hold/pan; used to clear selection. */
 	onTap?: (page: InkInputPage, point: InkPosition) => void;
-	/** Temporary settings-driven tuning for touch inertia. */
-	inertia?: {
-		velocityWindowMs?: number;
-		friction?: number;
-		minVelocity?: number;
-		speedScale?: number;
-	};
 }) {
 	const { target, editor } = options;
 	let stroke: {
@@ -99,22 +92,11 @@ export function bindInkInput(options: {
 	const originalTouchAction = target.style.touchAction;
 	const editing = () => editor.getState().mode !== "read";
 	const managed = () => options.automaticPen || editing();
-	const inertiaWindowMs = Math.min(
-		200,
-		Math.max(16, options.inertia?.velocityWindowMs ?? 80),
-	);
-	const inertiaFriction = Math.min(
-		0.05,
-		Math.max(0.0005, options.inertia?.friction ?? 0.005),
-	);
-	const inertiaMinVelocity = Math.min(
-		0.2,
-		Math.max(0.001, options.inertia?.minVelocity ?? 0.015),
-	);
-	const inertiaSpeedScale = Math.min(
-		3,
-		Math.max(0.1, options.inertia?.speedScale ?? 1),
-	);
+	// Tuned on-device values; kept as constants now that the temporary sliders
+	// were removed.
+	const inertiaWindowMs = 120;
+	const inertiaFriction = 0.001;
+	const inertiaMinVelocity = 0.005;
 	const capture = (id: number) => {
 		try {
 			target.setPointerCapture(id);
@@ -537,13 +519,13 @@ export function bindInkInput(options: {
 				released?.id === event.pointerId &&
 				released.moved &&
 				Math.abs(event.timeStamp - released.lastTime) < inertiaWindowMs &&
-				(Math.abs(released.vx) * inertiaSpeedScale > inertiaMinVelocity ||
-					Math.abs(released.vy) * inertiaSpeedScale > inertiaMinVelocity)
+				(Math.abs(released.vx) > inertiaMinVelocity ||
+					Math.abs(released.vy) > inertiaMinVelocity)
 			) {
 				const viewport = options.viewport();
 				if (viewport) {
-					let vx = released.vx * inertiaSpeedScale;
-					let vy = released.vy * inertiaSpeedScale;
+					let vx = released.vx;
+					let vy = released.vy;
 					const releaseSpeed = Math.hypot(vx, vy);
 					if (releaseSpeed > 8) {
 						vx = (vx / releaseSpeed) * 8;

@@ -40,15 +40,6 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun restartApp(invoke: Invoke) = onUi(invoke) {
-        // Recreate the activity and WebView so the persisted settings are read
-        // again. This is the predictable "save and restart" path on Android;
-        // killing the process here can leave the launcher task empty.
-        invoke.resolve(JSObject())
-        activity.recreate()
-    }
-
-    @Command
     fun readState(invoke: Invoke) = onUi(invoke) { invoke.resolve(state()) }
 
     @Command

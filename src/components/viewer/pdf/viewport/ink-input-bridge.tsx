@@ -6,9 +6,8 @@ import {
 	useViewportElement,
 } from "@embedpdf/plugin-viewport/react";
 import { useZoomCapability } from "@embedpdf/plugin-zoom/react";
-import { type RefObject, useEffect, useMemo } from "react";
+import { type RefObject, useEffect } from "react";
 import { pdfPageRenderRotation } from "@/components/viewer/pdf/layers/agentero-render-layer";
-import { useSettings } from "@/hooks/use-app-stores";
 import {
 	activateStylusTarget,
 	isStylusTarget,
@@ -47,19 +46,6 @@ export function InkInputBridge({
 	const { provides: zoom } = useZoomCapability();
 	const { provides: selection } = useSelectionCapability();
 	const { provides: interaction } = useInteractionManagerCapability();
-	const inertiaWindow = useSettings((s) => s.pdfInertiaVelocityWindowMs);
-	const inertiaFriction = useSettings((s) => s.pdfInertiaFriction);
-	const inertiaMinVelocity = useSettings((s) => s.pdfInertiaMinVelocity);
-	const inertiaSpeedScale = useSettings((s) => s.pdfInertiaSpeedScale);
-	const inertia = useMemo(
-		() => ({
-			velocityWindowMs: inertiaWindow,
-			friction: inertiaFriction,
-			minVelocity: inertiaMinVelocity,
-			speedScale: inertiaSpeedScale,
-		}),
-		[inertiaWindow, inertiaFriction, inertiaMinVelocity, inertiaSpeedScale],
-	);
 	useEffect(() => {
 		const target = viewportRef?.current;
 		if (!enabled || !editor || !target || !viewport) return;
@@ -96,7 +82,6 @@ export function InkInputBridge({
 				else editor.selectAt(page, point);
 			},
 			onLongPressNote,
-			inertia,
 			onTap: () => {
 				const scope = selection?.forDocument(documentId);
 				if (scope?.getState().selection) scope.clear();
@@ -186,7 +171,6 @@ export function InkInputBridge({
 		docCapRef,
 		selection,
 		interaction,
-		inertia,
 		onLongPressNote,
 	]);
 	return null;

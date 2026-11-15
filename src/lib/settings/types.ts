@@ -190,14 +190,6 @@ export type AppSettings = {
 	pdfScrollStrategy: PdfScrollStrategy;
 	/** Enable Vim-style single-key navigation on the PDF reading surface. */
 	pdfVimKeys: boolean;
-	/** Temporary tuning: touch inertia velocity sample window (ms). */
-	pdfInertiaVelocityWindowMs: number;
-	/** Temporary tuning: exponential friction coefficient (per ms). */
-	pdfInertiaFriction: number;
-	/** Temporary tuning: stop once release speed drops below this px/ms. */
-	pdfInertiaMinVelocity: number;
-	/** Temporary tuning: release-velocity multiplier. */
-	pdfInertiaSpeedScale: number;
 	/**
 	 * Master switch for Vim-style single-key navigation: `j/k/h/l` in the
 	 * file tree, dropdown lists and the PDF reader. Off keeps plain typing.

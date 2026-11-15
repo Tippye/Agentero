@@ -8,7 +8,6 @@ import {
 	LayoutTemplate,
 	LoaderCircle,
 	Paintbrush,
-	SlidersHorizontal,
 	Star,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
@@ -31,7 +30,6 @@ import {
 	saveSettingsAsync,
 	subscribeSettings,
 } from "@/lib/settings";
-import { DEFAULT_SETTINGS } from "@/lib/settings/defaults";
 
 // The sync pane pulls in the full storage configuration surface; load it on
 // demand like the desktop shell so opening settings stays cheap.
@@ -45,7 +43,6 @@ const GITHUB_REPO_URL = "https://github.com/poco-ai/Agentero";
 
 type MobileSettingsLabel =
 	| "settings:nav.appearance"
-	| "settings:nav.reading"
 	| "settings:nav.translate"
 	| "settings:general.easyScholar.section"
 	| "settings:nav.layout"
@@ -59,7 +56,6 @@ const NAV: {
 	label: MobileSettingsLabel;
 }[] = [
 	{ id: "appearance", icon: Paintbrush, label: "settings:nav.appearance" },
-	{ id: "reading", icon: SlidersHorizontal, label: "settings:nav.reading" },
 	{ id: "translate", icon: Languages, label: "settings:nav.translate" },
 	{
 		id: "easyscholar",
@@ -103,49 +99,6 @@ export function MobileSettingsPage({
 		() => setEasyScholarKeyDraft(settings.easyScholarKey),
 		[settings.easyScholarKey],
 	);
-	const [inertiaDraft, setInertiaDraft] = useState({
-		windowMs: settings.pdfInertiaVelocityWindowMs,
-		friction: settings.pdfInertiaFriction,
-		minVelocity: settings.pdfInertiaMinVelocity,
-		speedScale: settings.pdfInertiaSpeedScale,
-	});
-	useEffect(() => {
-		setInertiaDraft({
-			windowMs: settings.pdfInertiaVelocityWindowMs,
-			friction: settings.pdfInertiaFriction,
-			minVelocity: settings.pdfInertiaMinVelocity,
-			speedScale: settings.pdfInertiaSpeedScale,
-		});
-	}, [
-		settings.pdfInertiaVelocityWindowMs,
-		settings.pdfInertiaFriction,
-		settings.pdfInertiaMinVelocity,
-		settings.pdfInertiaSpeedScale,
-	]);
-	const saveInertiaAndRestart = useCallback(async () => {
-		const next = {
-			...loadSettings(),
-			pdfInertiaVelocityWindowMs: inertiaDraft.windowMs,
-			pdfInertiaFriction: inertiaDraft.friction,
-			pdfInertiaMinVelocity: inertiaDraft.minVelocity,
-			pdfInertiaSpeedScale: inertiaDraft.speedScale,
-		};
-		setSettings(next);
-		try {
-			await saveSettingsAsync(next);
-		} catch (error) {
-			notifyError(errorMessage(error));
-			return;
-		}
-		try {
-			const { invoke } = await import("@tauri-apps/api/core");
-			await invoke("mobile_restart_app");
-		} catch (error) {
-			notifyError(t("mobile:readingFeel.restartFailed"), {
-				description: errorMessage(error),
-			});
-		}
-	}, [inertiaDraft, t]);
 	useEffect(() => {
 		if (!open) return;
 		let active = true;
@@ -207,97 +160,7 @@ export function MobileSettingsPage({
 				</nav>
 				<div className="agentero-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [&_[data-slot=select-trigger]]:max-w-[45vw] [&_[data-slot=select-trigger]]:min-h-11 [&_[data-slot=select-trigger]]:min-w-0 [&_[data-slot=select-trigger]]:w-40 [&_button]:touch-manipulation [&_input]:min-h-11">
 					<div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6">
-						{section === "reading" ? (
-							<div className="space-y-6">
-								<PageTitle title={t("mobile:readingFeel.title")} />
-								<p className="text-muted-foreground text-sm">
-									{t("mobile:readingFeel.description")}
-								</p>
-								{(
-									[
-										{
-											key: "windowMs",
-											label: t("mobile:readingFeel.window"),
-											min: 20,
-											max: 200,
-											step: 5,
-											format: (value: number) => `${value} ms`,
-										},
-										{
-											key: "friction",
-											label: t("mobile:readingFeel.friction"),
-											min: 0.001,
-											max: 0.02,
-											step: 0.0005,
-											format: (value: number) => value.toFixed(4),
-										},
-										{
-											key: "minVelocity",
-											label: t("mobile:readingFeel.minVelocity"),
-											min: 0.005,
-											max: 0.1,
-											step: 0.001,
-											format: (value: number) => value.toFixed(3),
-										},
-										{
-											key: "speedScale",
-											label: t("mobile:readingFeel.speedScale"),
-											min: 0.3,
-											max: 2.5,
-											step: 0.1,
-											format: (value: number) => `${value.toFixed(1)}×`,
-										},
-									] as const
-								).map((field) => (
-									<label key={field.key} className="block space-y-2">
-										<span className="flex items-center justify-between gap-3 text-sm">
-											<span>{field.label}</span>
-											<span className="text-muted-foreground tabular-nums">
-												{field.format(inertiaDraft[field.key])}
-											</span>
-										</span>
-										<input
-											type="range"
-											min={field.min}
-											max={field.max}
-											step={field.step}
-											value={inertiaDraft[field.key]}
-											className="w-full accent-primary"
-											onChange={(event) =>
-												setInertiaDraft((value) => ({
-													...value,
-													[field.key]: Number(event.target.value),
-												}))
-											}
-										/>
-									</label>
-								))}
-								<div className="flex flex-wrap gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										className="min-h-11"
-										onClick={() =>
-											setInertiaDraft({
-												windowMs: DEFAULT_SETTINGS.pdfInertiaVelocityWindowMs,
-												friction: DEFAULT_SETTINGS.pdfInertiaFriction,
-												minVelocity: DEFAULT_SETTINGS.pdfInertiaMinVelocity,
-												speedScale: DEFAULT_SETTINGS.pdfInertiaSpeedScale,
-											})
-										}
-									>
-										{t("mobile:readingFeel.reset")}
-									</Button>
-									<Button
-										type="button"
-										className="min-h-11"
-										onClick={() => void saveInertiaAndRestart()}
-									>
-										{t("mobile:readingFeel.saveAndRestart")}
-									</Button>
-								</div>
-							</div>
-						) : section === "appearance" ? (
+						{section === "appearance" ? (
 							<AppearancePane
 								theme={settings.theme}
 								uiTheme={settings.uiTheme}

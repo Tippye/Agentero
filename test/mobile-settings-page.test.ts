@@ -92,7 +92,6 @@ import { DEFAULT_SETTINGS } from "@/lib/settings/defaults";
 
 const NAV_LABELS: [string, MobileSettingsSection][] = [
 	["settings:nav.appearance", "appearance"],
-	["settings:nav.reading", "reading"],
 	["settings:nav.translate", "translate"],
 	["settings:general.easyScholar.section", "easyscholar"],
 	["settings:nav.layout", "layout"],
@@ -222,7 +221,6 @@ describe("mobile settings page", () => {
 
 	it("switches panes through onSectionChange and forwards mobile-only props", async () => {
 		await renderPage();
-		await navigate("settings:nav.reading", "reading");
 		await navigate("settings:nav.translate", "translate");
 		expect(io.translate?.apiOnly).toBe(true);
 		expect(io.translate?.settings).toBe(io.snapshot);

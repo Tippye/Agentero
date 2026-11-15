@@ -1,15 +1,4 @@
 {
-	"readingFeel": {
-		"title": "阅读手感（临时）",
-		"description": "调试触摸滚动惯性用，手感确定后这些配置会移除。",
-		"window": "速度采样窗口",
-		"friction": "摩擦系数（越大停得越快）",
-		"minVelocity": "停止阈值",
-		"speedScale": "释放速度倍率",
-		"reset": "恢复默认",
-		"saveAndRestart": "保存并重启",
-		"restartFailed": "设置已保存，但应用未能自动重启，请手动重新打开 Agentero。"
-	},
 	"bridge": {
 		"hostFallback": "Agentero 桥接"
 	},
