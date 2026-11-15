@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.view.KeyEvent
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.PermissionState
@@ -31,6 +32,14 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     override fun load(webView: WebView) {
         activity.runOnUiThread {
             controller.attach(activity, events); stylus.attach(webView)
+            // Android 14+ turns barrel-button presses into KeyEvents and sends
+            // them to the app first. Intercept only the stylus/vendor keycodes
+            // we map; every other key falls through to the WebView unchanged.
+            webView.setOnKeyListener { _, keyCode, event ->
+                event.action == KeyEvent.ACTION_DOWN &&
+                    event.repeatCount == 0 &&
+                    stylus.handleKey(keyCode)
+            }
             externalPdfs.initial(activity.intent)
         }
     }

@@ -5,6 +5,7 @@ import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.Looper
 import android.view.InputDevice
+import android.view.KeyEvent
 import android.webkit.WebView
 import app.tauri.annotation.InvokeArg
 import app.tauri.plugin.JSObject
@@ -56,6 +57,21 @@ internal class GenericInputDeviceStylusAdapter(activity: Activity) : StylusAdapt
 
 internal class StylusAdapterRegistry(activity: Activity, plugin: Plugin) {
     private val owner = WeakReference(activity)
+    /**
+     * Public Android 14+ barrel keycodes plus the keycodes emitted by Lenovo
+     * Pen firmware and older Wacom-style pens. Mapping is only active while an
+     * admitted PDF target is focused, so unknown keyboard keys are unaffected.
+     */
+    private val keyShortcuts = mapOf(
+        KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY to PencilShortcut.ToggleEraser,
+        KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY to PencilShortcut.PreviousTool,
+        KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY to PencilShortcut.ShowColorPalette,
+        289 to PencilShortcut.ToggleEraser, // pre-Android-14 barrel primary
+        290 to PencilShortcut.PreviousTool, // pre-Android-14 barrel secondary
+        602 to PencilShortcut.ToggleEraser, // Lenovo framework PEN_PRESS_CLICK
+        603 to PencilShortcut.PreviousTool,
+        604 to PencilShortcut.ShowColorPalette,
+    )
     private val plugin = WeakReference(plugin)
     private val adapters: List<StylusAdapter> = listOf(
         GenericInputDeviceStylusAdapter(activity),
@@ -102,20 +118,28 @@ internal class StylusAdapterRegistry(activity: Activity, plugin: Plugin) {
      * OEM body shortcuts carry no pen coordinates, so they may only change the
      * active tool. Rust re-checks the window and token before the WebView sees it.
      */
-    private fun emitShortcut(shortcut: PencilShortcut) {
-        val token = targetToken ?: return
-        val label = windowLabel ?: return
-        val activity = owner.get() ?: return
-        if (activity.isDestroyed || activity.isFinishing || !focused()) return
-        plugin.get()?.trigger("stylus-event", JSObject().apply {
+    private fun emitShortcut(shortcut: PencilShortcut, adapterId: String = OplusPencilShortcutAdapter.ID): Boolean {
+        val token = targetToken ?: return false
+        val label = windowLabel ?: return false
+        val activity = owner.get() ?: return false
+        if (activity.isDestroyed || activity.isFinishing || !focused()) return false
+        val plugin = plugin.get() ?: return false
+        plugin.trigger("stylus-event", JSObject().apply {
             put("kind", "action"); put("windowLabel", label)
             put("event", JSObject().apply {
                 put("action", shortcut.wire)
                 put("source", "nativeInputDevice")
-                put("adapterId", OplusPencilShortcutAdapter.ID)
+                put("adapterId", adapterId)
                 put("targetToken", token)
             })
         })
+        return true
+    }
+
+    /** Returns true only when a focused PDF target consumed the key. */
+    fun handleKey(keyCode: Int): Boolean {
+        val shortcut = keyShortcuts[keyCode] ?: return false
+        return emitShortcut(shortcut, "android-stylus-key")
     }
 
     private fun emitPresence() {
