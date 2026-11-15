@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
 	mounts: 0,
 	remoteMounts: 0,
 	dirty: null as ((dirty: boolean) => void) | null,
+	sideControls: null as "left" | "right" | null,
 	error: vi.fn(),
 	refresh: vi.fn(async (_rescan?: boolean) => {}),
 	deleted: vi.fn(async () => ({
@@ -38,6 +39,9 @@ const state = vi.hoisted(() => ({
 vi.mock("react-i18next", async (importOriginal) => ({
 	...(await importOriginal<typeof import("react-i18next")>()),
 	useTranslation: () => ({ t: state.t }),
+}));
+vi.mock("@/components/mobile/hooks/use-side-controls", () => ({
+	useSideControls: () => state.sideControls,
 }));
 vi.mock("@/components/mobile/mobile-paper-import", () => ({
 	MobilePaperImport: () => null,
@@ -319,6 +323,7 @@ beforeEach(async () => {
 	state.mounts = 0;
 	state.remoteMounts = 0;
 	state.dirty = null;
+	state.sideControls = null;
 	state.settings = null;
 	state.error.mockClear();
 	state.refresh.mockClear();
@@ -374,6 +379,37 @@ describe("mobile local-first shell", () => {
 		expect(host.textContent).toContain("Offline paper");
 	});
 
+	it("moves the rail, its actions and the search toggle to the side strip", async () => {
+		state.sideControls = "right";
+		await act(async () => {
+			root.render(createElement(MobileApp));
+		});
+		const aside = host.querySelector("aside");
+		expect(aside).toBeTruthy();
+		expect(aside?.hidden).toBe(false);
+		expect(aside?.className).toContain("order-last");
+		const importInRail = aside?.querySelector(
+			'button[aria-label="library.importPdf"]',
+		);
+		expect(importInRail).toBeTruthy();
+		expect(
+			host.querySelector('header button[aria-label="library.importPdf"]'),
+		).toBeNull();
+		expect(host.querySelector("[data-library-search-row]")).toBeNull();
+		await act(() =>
+			aside
+				?.querySelector<HTMLButtonElement>(
+					'button[aria-label="library.search"]',
+				)
+				?.click(),
+		);
+		expect(
+			host.querySelector(
+				'[data-library-search-row] input[aria-label="library.search"]',
+			),
+		).toBeTruthy();
+	});
+
 	it("keeps the library search out of the narrow header", () => {
 		const header = host.querySelector("header");
 		expect(header).toBeTruthy();
@@ -381,7 +417,9 @@ describe("mobile local-first shell", () => {
 			header?.querySelectorAll('input[aria-label="library.search"]'),
 		).toHaveLength(0);
 		expect(
-			host.querySelector('[data-library-search-row] input[aria-label="library.search"]'),
+			host.querySelector(
+				'[data-library-search-row] input[aria-label="library.search"]',
+			),
 		).toBeTruthy();
 	});
 

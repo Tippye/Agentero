@@ -32,6 +32,7 @@ import { useMobileSystemBack } from "@/components/mobile/hooks/use-mobile-system
 import { useMobileVault } from "@/components/mobile/hooks/use-mobile-vault";
 import { useMobileWorkspaceWidth } from "@/components/mobile/hooks/use-mobile-workspace-width";
 import { usePairOfferLinks } from "@/components/mobile/hooks/use-pair-offer-links";
+import { useSideControls } from "@/components/mobile/hooks/use-side-controls";
 import { MobileAgentPage } from "@/components/mobile/mobile-agent-page";
 import { MobileBridgeReset } from "@/components/mobile/mobile-bridge-reset";
 import {
@@ -648,6 +649,89 @@ export default function MobileApp() {
 	);
 
 	const inReader = tab === "library" && selectedPaper !== null;
+	const sideControlsSide = useSideControls();
+	const sideControls = sideControlsSide !== null;
+	const [searchExpanded, setSearchExpanded] = useState(false);
+
+	const headerActions = inReader ? (
+		<div className="flex min-w-0 items-center gap-1">
+			<MobileReaderModeToggle
+				mode={readerMode}
+				onChange={selectReaderMode}
+				preset={workspacePreset}
+				widthClass={widthClass}
+				onPresetChange={selectPreset}
+			/>
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				className="size-11"
+				aria-label={t("sidebar:paperInfo.info")}
+				onClick={() => showPaperInfo(selectedPaper)}
+			>
+				<Info className="size-4" />
+			</Button>
+		</div>
+	) : tab === "plaza" ? (
+		<MobilePlazaControls
+			path={plazaPath}
+			onPathChange={setPlazaPath}
+			onReload={() => setPlazaReloadKey((key) => key + 1)}
+			onOpenUrl={openPlazaUrl}
+		/>
+	) : tab === "library" ? (
+		<div className="flex shrink-0 items-center gap-1">
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon"
+				className="size-12"
+				disabled={!vaultPath}
+				aria-label={t("shortcuts:labels.magicWand")}
+				onClick={() => showImport()}
+			>
+				<WandSparkles className="size-4" />
+			</Button>
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon"
+				className="size-12"
+				disabled={!vaultPath || papersLoading}
+				aria-label={t("library.refresh")}
+				onClick={() => void refresh(true)}
+			>
+				<RefreshCw className={cn("size-4", papersLoading && "animate-spin")} />
+			</Button>
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon"
+				className="size-12"
+				disabled={!vaultPath || importing}
+				aria-label={t("library.importPdf")}
+				onClick={() => {
+					if (isTauri()) void importFiles();
+					else fileInput.current?.click();
+				}}
+			>
+				{importing ? (
+					<LoaderCircle className="size-4 animate-spin" />
+				) : (
+					<Plus className="size-5" />
+				)}
+			</Button>
+			{widthClass === "narrow" ? null : (
+				<MobileLibrarySearch
+					value={libraryQuery}
+					onChange={setLibraryQuery}
+					label={t("library.search")}
+					className="w-40"
+				/>
+			)}
+		</div>
+	) : undefined;
 
 	return (
 		<div
@@ -670,23 +754,83 @@ export default function MobileApp() {
 				}}
 			/>
 			<aside
-				hidden={widthClass !== "wide"}
-				style={{ display: widthClass === "wide" ? undefined : "none" }}
-				className="flex w-20 shrink-0 flex-col items-center border-r bg-muted/25 py-6"
+				hidden={!sideControls && widthClass !== "wide"}
+				style={{
+					display: sideControls || widthClass === "wide" ? undefined : "none",
+				}}
+				className={cn(
+					"flex shrink-0 flex-col items-center bg-muted/25 py-6",
+					sideControls
+						? cn(
+								"w-16 gap-2",
+								sideControlsSide === "right"
+									? "order-last border-l"
+									: "border-r",
+							)
+						: "w-20 border-r",
+				)}
 			>
-				<button
-					type="button"
-					className="grid size-12 place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
-					aria-label={t("settings.menu")}
-					onClick={() => setSidebarOpen(true)}
+				{sideControls ? (
+					<div className="flex flex-col items-center gap-2 [&>div]:flex-col [&>div]:gap-2">
+						{inReader ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								className="size-11"
+								aria-label={t("reader.back")}
+								onClick={closeReader}
+							>
+								<ArrowLeft className="size-4" />
+							</Button>
+						) : null}
+						{tab === "library" || inReader ? headerActions : null}
+						{tab === "library" && !inReader ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="size-11"
+								aria-label={t("library.search")}
+								aria-expanded={searchExpanded}
+								onClick={() => setSearchExpanded((open) => !open)}
+							>
+								<Search className="size-4" />
+							</Button>
+						) : null}
+					</div>
+				) : (
+					<button
+						type="button"
+						className="grid size-12 place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
+						aria-label={t("settings.menu")}
+						onClick={() => setSidebarOpen(true)}
+					>
+						<MobileBrand />
+					</button>
+				)}
+				<div
+					className={cn(
+						"flex flex-col items-center",
+						sideControls && "mt-auto gap-3",
+					)}
 				>
-					<MobileBrand />
-				</button>
-				<MobileNav
-					tab={tab}
-					onTab={selectTab}
-					agentTemplate={selectedAgent?.template}
-				/>
+					{sideControls ? (
+						<button
+							type="button"
+							className="grid size-12 place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
+							aria-label={t("settings.menu")}
+							onClick={() => setSidebarOpen(true)}
+						>
+							<MobileBrand />
+						</button>
+					) : null}
+					<MobileNav
+						tab={tab}
+						onTab={selectTab}
+						agentTemplate={selectedAgent?.template}
+					/>
+				</div>
 			</aside>
 			<main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
 				<MobileHeader
@@ -702,7 +846,7 @@ export default function MobileApp() {
 					brand={<MobileBrand />}
 					brandButtonLabel={t("settings.menu")}
 					onBrandClick={() => setSidebarOpen(true)}
-					showBrand={!inReader}
+					showBrand={!inReader && !sideControls}
 					wide={widthClass === "wide"}
 					showStatus={layout.agent && agentProvider === "agentero-bridge"}
 					leading={
@@ -766,91 +910,19 @@ export default function MobileApp() {
 							</div>
 						) : undefined
 					}
-					trailing={
-						inReader ? (
-							<div className="flex min-w-0 items-center gap-1">
-								<MobileReaderModeToggle
-									mode={readerMode}
-									onChange={selectReaderMode}
-									preset={workspacePreset}
-									widthClass={widthClass}
-									onPresetChange={selectPreset}
-								/>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									className="size-11"
-									aria-label={t("sidebar:paperInfo.info")}
-									onClick={() => showPaperInfo(selectedPaper)}
-								>
-									<Info className="size-4" />
-								</Button>
-							</div>
-						) : tab === "plaza" ? (
-							<MobilePlazaControls
-								path={plazaPath}
-								onPathChange={setPlazaPath}
-								onReload={() => setPlazaReloadKey((key) => key + 1)}
-								onOpenUrl={openPlazaUrl}
-							/>
-						) : tab === "library" ? (
-							<div className="flex shrink-0 items-center gap-1">
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="size-12"
-									disabled={!vaultPath}
-									aria-label={t("shortcuts:labels.magicWand")}
-									onClick={() => showImport()}
-								>
-									<WandSparkles className="size-4" />
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="size-12"
-									disabled={!vaultPath || papersLoading}
-									aria-label={t("library.refresh")}
-									onClick={() => void refresh(true)}
-								>
-									<RefreshCw
-										className={cn("size-4", papersLoading && "animate-spin")}
-									/>
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="size-12"
-									disabled={!vaultPath || importing}
-									aria-label={t("library.importPdf")}
-									onClick={() => {
-										if (isTauri()) void importFiles();
-										else fileInput.current?.click();
-									}}
-								>
-									{importing ? (
-										<LoaderCircle className="size-4 animate-spin" />
-									) : (
-										<Plus className="size-5" />
-									)}
-								</Button>
-								{widthClass === "narrow" ? null : (
-									<MobileLibrarySearch
-										value={libraryQuery}
-										onChange={setLibraryQuery}
-										label={t("library.search")}
-										className="w-40"
-									/>
-								)}
-							</div>
-						) : undefined
-					}
+					trailing={sideControls ? undefined : headerActions}
 				/>
-				{tab === "library" && !inReader && widthClass === "narrow" ? (
+				{sideControls &&
+				headerActions &&
+				(tab === "plaza" || tab === "agent") ? (
+					<div className="flex shrink-0 items-center gap-2 border-b bg-background px-3 py-1.5">
+						{headerActions}
+					</div>
+				) : null}
+				{tab === "library" &&
+				!inReader &&
+				widthClass === "narrow" &&
+				(!sideControls || searchExpanded) ? (
 					<div
 						data-library-search-row=""
 						className="shrink-0 border-b bg-background px-3 py-1.5"
