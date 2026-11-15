@@ -1793,6 +1793,14 @@ export type AppSettings_Deserialize = {
 	pdfScrollStrategy?: string,
 	/**  Enable single-key Vim navigation on PDF reading surfaces. */
 	pdfVimKeys?: boolean,
+	/**  Temporary touch-inertia tuning: velocity sample window in ms. */
+	pdfInertiaVelocityWindowMs?: number,
+	/**  Temporary touch-inertia tuning: exponential friction coefficient. */
+	pdfInertiaFriction?: number | null,
+	/**  Temporary touch-inertia tuning: stop threshold in px/ms. */
+	pdfInertiaMinVelocity?: number | null,
+	/**  Temporary touch-inertia tuning: release-velocity multiplier. */
+	pdfInertiaSpeedScale?: number | null,
 	/**
 	 *  Master switch for Vim-style single-key navigation (PDF + list surfaces).
 	 *  Off keeps plain typing and arrow keys only.
@@ -1943,6 +1951,14 @@ export type AppSettings_Serialize = {
 	pdfScrollStrategy: string,
 	/**  Enable single-key Vim navigation on PDF reading surfaces. */
 	pdfVimKeys: boolean,
+	/**  Temporary touch-inertia tuning: velocity sample window in ms. */
+	pdfInertiaVelocityWindowMs: number,
+	/**  Temporary touch-inertia tuning: exponential friction coefficient. */
+	pdfInertiaFriction: number | null,
+	/**  Temporary touch-inertia tuning: stop threshold in px/ms. */
+	pdfInertiaMinVelocity: number | null,
+	/**  Temporary touch-inertia tuning: release-velocity multiplier. */
+	pdfInertiaSpeedScale: number | null,
 	/**
 	 *  Master switch for Vim-style single-key navigation (PDF + list surfaces).
 	 *  Off keeps plain typing and arrow keys only.
