@@ -445,7 +445,15 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；v3 签名与 16KB 对齐通过。
 - 真机重点验收：在原文画一笔，译文立即出现；在译文画一笔/擦除/撤销，原文立即变化且重启后保留；原文新建/改色/删除高亮，译文同步出现/变色/消失；译文 reflow 页的 ink 位置是否与原文页面尺寸一致。
 
-## 19. 参考
+## 19. 译文视图黑屏修复（2026-11-15）
+
+- 原因：译文 pane 复用手写输入桥时，`InkInputBridge` 无条件调用 `useSelectionCapability()`；轻量译文运行时没有 selection 插件，打开翻译即抛错，页面黑屏。
+- 修复：`InkInputBridge` 改为接收 owner viewer 传入的可选 `selection` capability，不再自行调用该 hook；原文 pane 传入自己的 selection，译文 pane 不传。手写输入/平移仍可用，译文没有选区清空/长按选词能力。
+- 验证：手写输入 18 项、移动工作区 17 项测试通过；Android ARM64 构建成功。
+- 新 APK：[Agentero-0.15.5-translation-blackfix-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-translation-blackfix-arm64-test.apk)，56,761,105 字节，SHA-256 `91f7c4fd30f52cb847963e710efe92b7bcbe61ab5e5f167299459792dfdd89a7`；包内 library SHA-256 `83285298244b01d39f51a2a28cec5cffe44f2ca4216909649236e81287f2a49d`。
+- 真机验收：点击翻译应正常显示译文页，不再黑屏；译文内可手写并与原文同步。
+
+## 20. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
