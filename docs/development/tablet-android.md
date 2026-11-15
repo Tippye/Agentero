@@ -409,26 +409,25 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
 - 真机重点验收：慢速短滑、快速甩动、手指停顿后抬起、连续多次滑动、双指缩放前是否有残留惯性抖动；首尾 overscroll bounce 仍不在本包范围。
 
-## 17. 触摸惯性手感调试、保存并重启与打包（2026-11-15）
+## 17. 最终触摸惯性参数与移除调参入口（2026-11-15）
 
-本轮改动（commit `0515aa69b`）：
+本轮改动（commit `b1044a118`）：
 
-- 移动设置 **阅读手感** 四项滑杆只修改本地草稿，拖动时不再逐次写设置，避免拖杆过程中触发退出/崩溃；调整完点 **“保存并重启”**。
-- 保存使用 `saveSettingsAsync` 等待 Host 写盘完成，再调用 Android 原生 `mobile_restart_app`：插件在 UI 线程执行 `activity.recreate()`，WebView 重新加载并从磁盘读取新参数。若原生重启桥不可用，提示“设置已保存，请手动重新打开 Agentero”。
-- 四个参数已写入 Rust `AppSettings` schema（默认值与前端一致，Host 侧再做范围 clamp），因此重启后不再丢失。
-- 参数与范围：
-  - 速度采样窗口 20–200 ms（默认 80）
-  - 摩擦系数 0.001–0.02（默认 0.005，越大停得越快）
-  - 停止阈值 0.005–0.1 px/ms（默认 0.015）
-  - 释放速度倍率 0.3–2.5×（默认 1）
-- 这是调试期临时配置；手感确定后可移除设置分区并写死默认值。
+- 采用实机调参结果，把惯性参数硬编码到 `bindInkInput`：
+  - 速度采样窗口 **120 ms**
+  - 摩擦系数 **0.001**
+  - 停止阈值 **0.005 px/ms**
+  - 释放速度倍率 **1.0×**
+- 移除临时“阅读手感”设置分区、四个 `pdfInertia*` 设置字段（前端 + Rust schema）、保存并重启按钮以及仅供调参的 Android restart 桥；设置页恢复原导航。旧 settings.json 中残留的四个字段在下次保存时被忽略/丢弃，不影响其他设置。
+- 惯性实现保持位置累加 + 120 ms 速度窗口 + 时间指数摩擦，无调参入口。
+- 上一轮的 1 秒选词、点击清选、图片预览/全屏、翻译预设同步等保持。
 
 验证与产物：
 
 - TypeScript、Biome 通过；移动设置/手写/工作区/PDF 能力/后台任务条 5 个文件 49 项测试通过；Android ARM64 release 构建成功。
-- 新 APK：[Agentero-0.15.5-inertia-save-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-save-arm64-test.apk)，56,781,585 字节，SHA-256 `2caab40efd96c4f2168702ca3ac395db97ea46a1c052c5cc530adf4271542854`；包内 library SHA-256 `7bde863220c2870db2e332f1d49d0abaa1ab0e1de4adcef8335e2438ee026cc0`。
+- 新 APK：[Agentero-0.15.5-inertia-final-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-final-arm64-test.apk)，56,757,009 字节，SHA-256 `b4331e2fddc4ec45493e01a63f8feaa50dd4e0a4b1e0c73848406c11761567e5`；包内 library SHA-256 `f9b36b5dfa8469b40eeed3e75b1b6c42a04a00f7c57c4ca5929542817aeb4d26`。
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；v3 签名与 16KB 对齐通过。
-- 真机重点验收：拖滑杆不再退出；点保存并重启后设置值保留且立即生效；若重启失败能看到“已保存”的提示。
+- 真机重点验收：慢速短滑、快速甩动、停顿后抬起、连续滑动是否与调参时一致；设置页已无“阅读手感”入口；旧设置不再弹出/丢失其他配置。
 
 ## 18. 参考
 
