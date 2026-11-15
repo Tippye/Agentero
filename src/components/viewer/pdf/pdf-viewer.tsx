@@ -1406,6 +1406,8 @@ function PdfViewerInner({
 			!plainViewer && !isRemotePaper && !translationOnly && !translationPane,
 		editable: inkEditable,
 		isActive,
+		sharedEditor: inkEditable,
+		controlsMode: !inkEditable,
 		onInkDirtyChange,
 		onInkModeChange,
 	});

@@ -24,7 +24,6 @@ import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfCitationPreview } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
-import { PdfInkToolbar } from "@/components/viewer/pdf/chrome/pdf-ink-toolbar";
 import { PdfTranslateProgressChip } from "@/components/viewer/pdf/chrome/pdf-translate-progress";
 import { EMPTY_LAYOUT_REGIONS_BY_PAGE } from "@/components/viewer/pdf/constants";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
@@ -152,8 +151,6 @@ export function PdfTranslationViewerInner({
 	importIdentifier,
 	isActive = true,
 	onHandle,
-	onInkDirtyChange,
-	onInkModeChange,
 }: PdfViewerInnerProps) {
 	const capabilities = pdfViewerCapabilities(runtime);
 	usePdfScrollSync(docId);
@@ -165,20 +162,17 @@ export function PdfTranslationViewerInner({
 	const docCapRef = useRef(docCap);
 	docCapRef.current = docCap;
 	const inkEditable = Boolean(paperRelPath && vaultPath && !isRemotePaper);
+	// The original pane's toolbar is the only toolbar. Reuse its editor so
+	// the pen/highlighter mode applies to both documents.
 	const { editor: inkEditor } = usePdfInk({
 		vaultPath,
 		paperRelPath,
 		enabled: inkEditable,
 		editable: inkEditable,
 		isActive,
-		onInkDirtyChange,
-		onInkModeChange,
+		sharedEditor: inkEditable,
+		controlsMode: false,
 	});
-	const inkPageSize = useCallback(
-		(page: number) =>
-			docCapRef.current?.getDocument(docId)?.pages[page - 1]?.size ?? null,
-		[docId],
-	);
 	// Interaction manager is registered; keep the capability subscribed so
 	// GlobalPointerProvider / pan-zoom gestures stay wired.
 	useInteractionManagerCapability();
@@ -608,13 +602,6 @@ export function PdfTranslationViewerInner({
 					</GlobalPointerProvider>
 				</ZoomGestureWrapper>
 			</DockviewViewport>
-			{inkEditor && inkEditable && (
-				<PdfInkToolbar
-					editor={inkEditor}
-					editable={inkEditable}
-					pageSize={inkPageSize}
-				/>
-			)}
 			<PdfTranslateProgressChip
 				layoutTranslateRunning={layoutTranslateRunning}
 				layoutTranslatePreparing={layoutTranslatePreparing}
