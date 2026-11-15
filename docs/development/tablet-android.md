@@ -463,7 +463,15 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 新 APK：[Agentero-0.15.5-single-toolbar-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-single-toolbar-arm64-test.apk)，56,761,105 字节，SHA-256 `f6564ee1f4ea66ff0a1087bef41c9b6c42cc840f221e537d6f760caabfd8618a`；包内 library SHA-256 `b3898aa8fc8afdc0512daa27b43e98812c2e8d0fadf922967884f65334ebffe6`。
 - 真机验收：译文页无手写工具栏；原文工具栏切到手写/荧光笔/橡皮后，两侧笔型一致；双栏交替书写不再出现工具切换错乱。
 
-## 21. 参考
+## 21. 小米/三星/华为/联想通用笔身按键适配（2026-11-15）
+
+- 在没有厂商企业 SDK 的前提下，新增公开 Android `KeyEvent` 路径：WebView `OnKeyListener` 捕获 Android 14+ 标准 `KEYCODE_STYLUS_BUTTON_PRIMARY/SECONDARY/TERTIARY`，以及 Lenovo/旧 Wacom 常见兼容键码 289/290、600–604，映射为橡皮/上一工具/调色盘。
+- 仅当已激活、聚焦且获 Rust token 校验的 PDF 目标存在时消费按键；其他按键返回 `false`，WebView、系统截图和键盘行为不变。没有品牌字符串判断、反射或私有 SDK。
+- 已知边界：Lenovo 的 `lenovo.intent.action.INPUT_DEVICE_CLICK_STATE_CHANGED` 是 protected broadcast，第三方无法接收；Samsung Air Actions 需要 S Pen Remote SDK 和 enable key；Huawei/Xiaomi 多数笔身手势不在公开广播/KeyEvent 通道；这些品牌的标准手写、压感、倾斜、接触时侧键仍通过通用 pen 输入工作。
+- 新 APK：[Agentero-0.15.5-vendor-stylus-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-vendor-stylus-arm64-test.apk)，56,761,105 字节，SHA-256 `678cdfcc0adf477bc2256dcbaf84dc234a108175fa07e7f0882abdcd5769a305`；包内 library SHA-256 `b3898aa8fc8afdc0512daa27b43e98812c2e8d0fadf922967884f65334ebffe6`。
+- 真机验收：在上述品牌设备上打开 PDF 并进入手写模式，按笔身主键应切橡皮、次键切上一工具/调色盘（具体取决于固件投递的键码）；无反应时记录 `adb logcat` 中 KeyEvent 的 keyCode 再补映射。
+
+## 22. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>

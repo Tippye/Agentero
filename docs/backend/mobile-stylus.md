@@ -8,6 +8,9 @@ PDF 笔迹持久化继续使用共享的 page-space ink 数据；本模块只提
 |---|---|---|
 | Web PointerEvent | 实际 pen 接触观察；标准按钮、反转笔尖、压力等由 PDF 输入层处理 | 不列出系统已连接的笔，不根据品牌猜测功能 |
 | Android `InputManager` / `InputDevice` | 泛用适配器注册设备变化监听，以公开 `SOURCE_STYLUS` 查询输入源；标准侧键与反转笔尖仍由 Web 输入处理，避免重复切换 | 注册输入源可能是内置数字化器，并不证明某支实体笔连接；无标准笔身双击能力，无反射或未公开 OEM 接口 |
+| Android 14+ 标准笔身按键 | WebView `OnKeyListener` 接收公开的 `KEYCODE_STYLUS_BUTTON_PRIMARY/SECONDARY/TERTIARY`，映射橡皮 / 上一工具 / 调色盘；仅在已授权 PDF 目标聚焦时消费，其余按键原样下传 | 只覆盖会向应用投递 KeyEvent 的机型；BLE 私有手势、无 KeyEvent 的厂商笔不保证 |
+| Lenovo / 旧 Wacom 键码 | 兼容公开资料中 Lenovo Pen 固件与旧笔常见的 289/290、600–604 键码；仅当作笔身按键动作，不依赖 Lenovo 受保护广播 | Lenovo `INPUT_DEVICE_CLICK_STATE_CHANGED` 是 protected broadcast，第三方无法接收；键码随固件变化，需真机日志确认 |
+| Xiaomi / Huawei / Samsung 私有笔身手势 | 没有接入：未发现可随应用发布的公开广播接口；Samsung Air Actions 需 S Pen Remote SDK 与厂商 enable key | 不以品牌字符串或反射私有 SDK 猜测能力；这些品牌的标准笔输入与 Android 14 KeyEvent 路径仍可用 |
 | Android OPPO / OnePlus 笔身快捷动作 | 只接收厂商公开文档的 `com.oplus.ipemanager.action.PENCIL_DOUBLE_CLICK` 广播，按 `Settings.Global[ipe_pencil_double_click]` 映射橡皮、上一个工具、调色盘；收到真实事件后才报告观察可用 | 不引用 OPPO 手写笔服务 SDK 的任何类；笔端书写震动、四种材质触感与单次功能震动**未实现**，需要企业授权码后另行接入 |
 | iPad `UIPencilInteraction` | 当前可见 WKWebView 上接收双击及 Pencil Pro 挤压，分别遵循 `preferredTapAction` / `preferredSqueezeAction`，映射橡皮、上一个工具、调色板；实际收到交互后才报告观察可用 | 不枚举 Pencil 硬件连接；不假定所有 Pencil 支持双击或挤压；不输出悬停位置；完整 UIKit SDK 编译和 Pencil Pro 真机仍未验收 |
 | 桌面 / 共享分支原生 stub | 返回空适配器与空原生观察，Web 输入可独立工作 | 不伪造 Android/iOS 原生能力 |
@@ -23,6 +26,14 @@ PDF 笔迹持久化继续使用共享的 page-space ink 数据；本模块只提
 - 适配器注册为 `RECEIVER_EXPORTED`：发送方是厂商系统服务。清单声明了发送方权限，但注册时不把它当作 `broadcastPermission`，因为各 ROM 对“发送方持权限”还是“接收方持权限”的实现不一致；漏掉一侧会让功能静默失效。伪造广播最多只能切一次工具，且要求当前有已激活且聚焦的 PDF 目标，影响有界。
 - 注册失败（ROM 无该权限或改变保护级别）时 `doubleTap` 与动作列表为空、`available` 为 `false`，不影响标准笔输入。首次真正收到事件后才上报 `available:true`，避免把“注册成功”当成“设备支持”。
 - 未做：笔端持续书写震动、四种材质触感、单次功能震动，以及 Pencil 3 Pro 的轻捏。公开接口需要 OPPO 开放平台企业申请、包名与签名证书 SHA1、授权码鉴权与 `ipe_sdk`；没有授权码时不接 SDK，也不用系统 `Vibrator` / `performHapticFeedback` / `navigator.vibrate()` 冒充。
+
+## 通用 Android 笔身按键适配（2026-11-15）
+
+- 目标是在没有 OPPO 企业 SDK 的前提下，让小米、三星、华为、联想等能通过公开 Android 接口暴露的笔身按键驱动橡皮/上一工具/调色盘。
+- `AgenteroMobilePlugin.load(webView)` 安装 `OnKeyListener`；`StylusAdapterRegistry.handleKey` 只在已激活且聚焦的 PDF 目标存在时消费映射键，否则返回 `false`，不影响 WebView 默认键盘/系统截图行为。
+- 映射：Android 14 `KEYCODE_STYLUS_BUTTON_PRIMARY/SECONDARY/TERTIARY`（308/309/310）→ 橡皮/上一工具/调色盘；289/290 与 Lenovo 600–604（602 起）作为兼容键码。没有使用反射、品牌判断或未公开接口。
+- 限制：这几家仍有大量笔型只走 BLE/厂商服务，或把按键在 framework 层吃掉而不投递给应用；Lenovo 的点击广播是 protected broadcast，无法直接接收。真机若按键无反应，需要 `logcat` 确认是否产生 KeyEvent，再按公开键码补充映射。
+- 这不是四家完整 SDK 适配：Samsung S Pen Remote、Huawei/Xiaomi 私有手势、OPPO 笔端震动仍分别需要厂商 SDK/授权。
 
 ## 笔悬停与掌触保护
 
