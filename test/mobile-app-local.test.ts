@@ -374,6 +374,17 @@ describe("mobile local-first shell", () => {
 		expect(host.textContent).toContain("Offline paper");
 	});
 
+	it("keeps the library search out of the narrow header", () => {
+		const header = host.querySelector("header");
+		expect(header).toBeTruthy();
+		expect(
+			header?.querySelectorAll('input[aria-label="library.search"]'),
+		).toHaveLength(0);
+		expect(
+			host.querySelector('[data-library-search-row] input[aria-label="library.search"]'),
+		).toBeTruthy();
+	});
+
 	it("opens settings for the local Vault and rescans completed sync without losing the mounted reader", async () => {
 		await click("open-local-paper");
 		await act(() => state.dirty?.(true));

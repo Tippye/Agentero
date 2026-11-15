@@ -102,6 +102,38 @@ import {
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 import { PLAZA_SOURCES } from "@/lib/plaza/sources";
 
+/** Library search field; rendered inline in the header on wide/medium and as
+ * its own row under the header on narrow screens. */
+function MobileLibrarySearch({
+	value,
+	onChange,
+	label,
+	className,
+	variant = "header",
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	label: string;
+	className?: string;
+	variant?: "header" | "row";
+}) {
+	return (
+		<div className={cn("relative min-w-0", className)}>
+			<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+			<Input
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={label}
+				aria-label={label}
+				className={cn(
+					"w-full pl-8",
+					variant === "row" ? "h-11 text-base" : "h-12 text-sm",
+				)}
+			/>
+		</div>
+	);
+}
+
 export default function MobileApp() {
 	useMobilePdfProcessingRuntime();
 	const { t } = useTranslation(["mobile", "sidebar", "shortcuts"]);
@@ -806,28 +838,31 @@ export default function MobileApp() {
 										<Plus className="size-5" />
 									)}
 								</Button>
-								<div
-									className={cn(
-										"relative min-w-0",
-										widthClass === "narrow" ? "w-24" : "w-40",
-									)}
-								>
-									<Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-									<Input
+								{widthClass === "narrow" ? null : (
+									<MobileLibrarySearch
 										value={libraryQuery}
-										onChange={(event) => setLibraryQuery(event.target.value)}
-										placeholder={t("library.search")}
-										aria-label={t("library.search")}
-										className={cn(
-											"h-12 w-full pl-8",
-											widthClass === "narrow" ? "text-base" : "text-sm",
-										)}
+										onChange={setLibraryQuery}
+										label={t("library.search")}
+										className="w-40"
 									/>
-								</div>
+								)}
 							</div>
 						) : undefined
 					}
 				/>
+				{tab === "library" && !inReader && widthClass === "narrow" ? (
+					<div
+						data-library-search-row=""
+						className="shrink-0 border-b bg-background px-3 py-1.5"
+					>
+						<MobileLibrarySearch
+							value={libraryQuery}
+							onChange={setLibraryQuery}
+							label={t("library.search")}
+							variant="row"
+						/>
+					</div>
+				) : null}
 				<div className="min-h-0 flex-1 overflow-hidden">
 					<MobilePaneGroup
 						id="mobile-workspace"
