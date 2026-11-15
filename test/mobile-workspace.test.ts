@@ -581,6 +581,14 @@ describe("stable tablet workspace DOM", () => {
 		await resize(1000);
 		await click("Paper first");
 		await ready();
+		// Opening a paper starts in the read preset: no blank compare pane and
+		// the compare toggle is not claimed.
+		expect(
+			container
+				.querySelector('[aria-label="workspace.compare"]')
+				?.getAttribute("aria-pressed"),
+		).toBe("false");
+		expect(pane("notes")?.hidden).toBe(true);
 		// Fit-width must use the whole tablet pane: mobile has no comment rail.
 		expect(state.pdf?.reserveCommentRail).toBe(false);
 		const pdf = container.querySelector("[data-pdf-document]");

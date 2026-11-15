@@ -454,8 +454,11 @@ export type PdfPageHandlers = {
 		clientPoint?: ScreenPoint | null,
 	) => void;
 	onRegionSelect: (page: number, region: PdfAskNormalizedRect) => void;
-	/** Click a figure / table / algorithm / formula hit target → crop + draft card. */
+	/** Click a figure hit target → open the full-screen crop. */
 	onLayoutRegionClick: (region: PdfLayoutRegion) => void;
+	/** Pointer hover preview of the exact crop (and its screen box). */
+	onLayoutRegionHover?: (region: PdfLayoutRegion, rect: DOMRect) => void;
+	onLayoutRegionLeave?: () => void;
 	onTogglePageLayoutTranslate?: (pageIndex: number) => void;
 	/** Delete a highlight annotation directly from its on-page selection menu. */
 	onDeleteHighlightAnnotation: (pageIndex: number, id: string) => void;
@@ -1513,14 +1516,19 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 									key={`layout-hit-${region.id}`}
 									type="button"
 									data-layout-hit={region.id}
-									aria-label={t("figures.clickAnnotateAria", {
+									aria-label={t("figures.viewImageAria", {
 										kind: t(layoutKindI18nKey(region.kind)),
 									})}
-									// Click crops in place; pointer cursor is reserved for
-									// navigation (citation links).
 									className={cn(
-										"group absolute z-[2] cursor-crosshair rounded-none border-0 bg-transparent p-0 transition-colors hover:bg-default-primary/5",
+										"group absolute z-[2] cursor-zoom-in rounded-none border-0 bg-transparent p-0",
 									)}
+									onPointerEnter={(event) =>
+										handlers.onLayoutRegionHover?.(
+											region,
+											event.currentTarget.getBoundingClientRect(),
+										)
+									}
+									onPointerLeave={() => handlers.onLayoutRegionLeave?.()}
 									style={{
 										left: `${region.bbox.x * 100}%`,
 										top: `${region.bbox.y * 100}%`,
@@ -1568,7 +1576,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 											className="pointer-events-none absolute top-1 right-1 max-w-[calc(100%-0.5rem)] truncate rounded border border-border/60 bg-background/90 px-1.5 py-0.5 font-medium text-caption text-foreground/90 opacity-0 shadow-raised backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
 											aria-hidden="true"
 										>
-											{t("figures.clickAnnotateHint")}
+											{t("figures.viewImageHint")}
 										</span>
 									) : null}
 								</button>

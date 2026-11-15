@@ -15,7 +15,8 @@ import {
 	subscribeStylusActions,
 	subscribeStylusPresence,
 } from "@/lib/mobile/stylus";
-import type { InkEditor } from "@/lib/pdf/ink/editor";
+import type { InkEditor, InkInputPage } from "@/lib/pdf/ink/editor";
+import type { InkPosition } from "@/lib/pdf/ink/geometry";
 import { bindInkInput } from "@/lib/pdf/ink/input";
 import { createInkLongPressSelection } from "@/lib/pdf/ink/selection";
 
@@ -25,6 +26,7 @@ export function InkInputBridge({
 	documentId,
 	enabled,
 	docCapRef,
+	onLongPressNote,
 }: {
 	editor: InkEditor | null;
 	documentId: string;
@@ -32,6 +34,12 @@ export function InkInputBridge({
 	docCapRef: RefObject<
 		ReturnType<typeof useDocumentManagerCapability>["provides"]
 	>;
+	onLongPressNote?: (
+		page: InkInputPage,
+		point: InkPosition,
+		event: PointerEvent,
+		current: () => boolean,
+	) => void;
 }) {
 	const viewportRef = useViewportElement();
 	const { provides: viewport } = useViewportCapability();
@@ -73,6 +81,7 @@ export function InkInputBridge({
 				if (selector) selector.select(page, point, event, current);
 				else editor.selectAt(page, point);
 			},
+			onLongPressNote,
 			viewport: () => viewport.forDocument(documentId),
 			pageAt: (eventTarget) => {
 				const element =
@@ -158,6 +167,7 @@ export function InkInputBridge({
 		docCapRef,
 		selection,
 		interaction,
+		onLongPressNote,
 	]);
 	return null;
 }

@@ -10,6 +10,8 @@ export type InkViewport = {
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
 export const INK_LONG_PRESS_MS = 1000;
+/** Hold this long anywhere on a page to create a note. */
+export const INK_NOTE_LONG_PRESS_MS = 3000;
 /** A pen in range keeps new finger gestures out of an active writing session. */
 export const INK_PEN_HOVER_GUARD_MS = 1500;
 const HOLD_SLOP_PX = 8;
@@ -22,6 +24,12 @@ export function bindInkInput(options: {
 	automaticPen?: boolean;
 	onPenDetected?: () => void;
 	onLongPress?: (
+		page: InkInputPage,
+		point: InkPosition,
+		event: PointerEvent,
+		current: () => boolean,
+	) => void;
+	onLongPressNote?: (
 		page: InkInputPage,
 		point: InkPosition,
 		event: PointerEvent,
@@ -45,6 +53,14 @@ export function bindInkInput(options: {
 		moved: boolean;
 	} | null = null;
 	let hold: {
+		id: number;
+		page: InkInputPage;
+		x: number;
+		y: number;
+		event: PointerEvent;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
+	let noteHold: {
 		id: number;
 		page: InkInputPage;
 		x: number;
@@ -94,6 +110,10 @@ export function bindInkInput(options: {
 		if (hold) clearTimeout(hold.timer);
 		hold = null;
 	};
+	const clearNoteHold = () => {
+		if (noteHold) clearTimeout(noteHold.timer);
+		noteHold = null;
+	};
 	const flush = () => {
 		if (frame) cancelAnimationFrame(frame);
 		frame = 0;
@@ -125,6 +145,7 @@ export function bindInkInput(options: {
 	const cancel = () => {
 		epoch++;
 		clearHold();
+		clearNoteHold();
 		held = null;
 		const active = stroke;
 		stroke = null;
@@ -201,6 +222,43 @@ export function bindInkInput(options: {
 				}
 			}, INK_LONG_PRESS_MS),
 		};
+		// A longer hold turns into a note. It stays armed after the 1 s text
+		// selection so the user can keep holding instead of hunting the menu.
+		clearNoteHold();
+		if (
+			options.onLongPressNote &&
+			(event.pointerType === "touch" ||
+				(event.pointerType === "pen" && !editing()))
+		) {
+			noteHold = {
+				id: event.pointerId,
+				page,
+				x: event.clientX,
+				y: event.clientY,
+				event,
+				timer: setTimeout(() => {
+					const pending = noteHold;
+					if (
+						!pending ||
+						disposed ||
+						generation !== epoch ||
+						palm ||
+						touches.size > 1 ||
+						!target.contains(page.element)
+					)
+						return;
+					noteHold = null;
+					const point = inkPointFromClient(
+						{ x: pending.x, y: pending.y },
+						page.element.getBoundingClientRect(),
+						page,
+					);
+					const current = () =>
+						!disposed && generation === epoch && target.contains(page.element);
+					options.onLongPressNote?.(page, point, event, current);
+				}, INK_NOTE_LONG_PRESS_MS),
+			};
+		}
 	};
 	const moveHold = (event: PointerEvent) => {
 		if (
@@ -208,6 +266,12 @@ export function bindInkInput(options: {
 			Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > HOLD_SLOP_PX
 		)
 			clearHold();
+		if (
+			noteHold?.id === event.pointerId &&
+			Math.hypot(event.clientX - noteHold.x, event.clientY - noteHold.y) >
+				HOLD_SLOP_PX
+		)
+			clearNoteHold();
 	};
 	const down = (event: PointerEvent) => {
 		if (excluded(event)) return;
@@ -221,6 +285,7 @@ export function bindInkInput(options: {
 		if (!page) return;
 		epoch++;
 		clearHold();
+		clearNoteHold();
 		held = null;
 		if (event.pointerType === "touch") {
 			// A resting hand must not pan, select, or start a stroke while a pen
@@ -237,12 +302,14 @@ export function bindInkInput(options: {
 			touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
 			if (stroke || palm) {
 				clearHold();
+				clearNoteHold();
 				palm = true;
 				consume(event);
 				return;
 			}
 			if (touches.size > 1) {
 				clearHold();
+				clearNoteHold();
 				epoch++;
 				pan = null;
 				held = null;
@@ -315,6 +382,12 @@ export function bindInkInput(options: {
 		}
 		moveHold(event);
 		if (held === event.pointerId) {
+			if (
+				noteHold?.id === event.pointerId &&
+				Math.hypot(event.clientX - noteHold.x, event.clientY - noteHold.y) >
+					HOLD_SLOP_PX
+			)
+				clearNoteHold();
 			consume(event);
 			return;
 		}
@@ -353,6 +426,7 @@ export function bindInkInput(options: {
 	};
 	const end = (event: PointerEvent) => {
 		if (hold?.id === event.pointerId) clearHold();
+		if (noteHold?.id === event.pointerId) clearNoteHold();
 		if (suppressed.delete(event.pointerId)) {
 			release(event.pointerId);
 			if (managed()) consume(event);
@@ -417,6 +491,7 @@ export function bindInkInput(options: {
 	};
 	const blur = () => {
 		cancel();
+		clearNoteHold();
 		touches.clear();
 		suppressed.clear();
 		hoverGuardUntil = 0;
