@@ -23,6 +23,8 @@
 		"unsaved": "请完成保存或丢弃待保存的笔迹后再离开。"
 	},
 	"pdf": {
+		"close": "关闭",
+		"noteNeedsSelection": "在文字或图表上长按 3 秒可添加备注。",
 		"apiOnly": {
 			"layoutProviderRequired": "请先配置远程版面解析 API 服务。",
 			"translateProviderRequired": "请先选择 API 翻译服务。"
@@ -253,6 +255,10 @@
 		"progressPct": "{{pct}}%",
 		"clickAnnotateAria": "批注此{{kind}}",
 		"clickAnnotateHint": "单击进行批注",
+		"viewImageAria": "全屏查看此{{kind}}",
+		"viewImageHint": "单击查看大图",
+		"lightboxTitle": "{{kind}} · 第 {{page}} 页",
+		"imageUnavailable": "无法渲染图片预览。",
 		"sectionFigures": "插图",
 		"sectionTables": "表格",
 		"sectionAlgorithms": "算法",

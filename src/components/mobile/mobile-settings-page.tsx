@@ -16,6 +16,7 @@ import agenteroAppIcon from "@/assets/agentero-app-icon.svg";
 import { MobileBackgroundSettingsPanel } from "@/components/mobile/mobile-background-settings";
 import { MobileDownloadSettings } from "@/components/mobile/mobile-download-settings";
 import { AppearancePane } from "@/components/settings/panes/appearance-pane";
+import { EasyScholarSettingsBlock } from "@/components/settings/panes/general/easy-scholar-settings-block";
 import { LayoutPane } from "@/components/settings/panes/layout-pane";
 import { TranslatePane } from "@/components/settings/panes/translate-pane";
 import { PageTitle } from "@/components/settings/settings-layout";
@@ -43,6 +44,7 @@ const GITHUB_REPO_URL = "https://github.com/poco-ai/Agentero";
 type MobileSettingsLabel =
 	| "settings:nav.appearance"
 	| "settings:nav.translate"
+	| "settings:general.easyScholar.section"
 	| "settings:nav.layout"
 	| "settings:nav.sync"
 	| "mobile:background.title"
@@ -55,6 +57,11 @@ const NAV: {
 }[] = [
 	{ id: "appearance", icon: Paintbrush, label: "settings:nav.appearance" },
 	{ id: "translate", icon: Languages, label: "settings:nav.translate" },
+	{
+		id: "easyscholar",
+		icon: Star,
+		label: "settings:general.easyScholar.section",
+	},
 	{ id: "layout", icon: LayoutTemplate, label: "settings:nav.layout" },
 	{ id: "sync", icon: CloudUpload, label: "settings:nav.sync" },
 	{ id: "background", icon: BatteryCharging, label: "mobile:background.title" },
@@ -83,8 +90,15 @@ export function MobileSettingsPage({
 }: MobileSettingsPageProps) {
 	const { t } = useTranslation(["settings", "mobile", "common"]);
 	const [settings, setSettings] = useState(loadSettings);
+	const [easyScholarKeyDraft, setEasyScholarKeyDraft] = useState(
+		settings.easyScholarKey,
+	);
 	const [version, setVersion] = useState<string | null>(null);
 	useEffect(() => subscribeSettings(setSettings), []);
+	useEffect(
+		() => setEasyScholarKeyDraft(settings.easyScholarKey),
+		[settings.easyScholarKey],
+	);
 	useEffect(() => {
 		if (!open) return;
 		let active = true;
@@ -164,6 +178,23 @@ export function MobileSettingsPage({
 							/>
 						) : section === "translate" ? (
 							<TranslatePane settings={settings} patch={patch} apiOnly />
+						) : section === "easyscholar" ? (
+							<div className="space-y-4">
+								<PageTitle title={t("settings:general.easyScholar.section")} />
+								<EasyScholarSettingsBlock
+									savedKey={settings.easyScholarKey}
+									keyDraft={easyScholarKeyDraft}
+									onKeyDraftChange={setEasyScholarKeyDraft}
+									onCommitKey={async (value) => {
+										patch({ easyScholarKey: value.trim() });
+									}}
+									onOpenKeyPage={() =>
+										openExternalUrl(
+											"https://www.easyscholar.cc/console/user/open",
+										)
+									}
+								/>
+							</div>
 						) : section === "layout" ? (
 							<LayoutPane
 								settings={settings}

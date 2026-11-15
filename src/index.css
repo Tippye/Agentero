@@ -1412,3 +1412,16 @@ html[data-offscreen-md-blocks] [data-slate-editor][data-selection-chat-origin="m
 	grid-column: 3;
 	grid-row: 2;
 }
+
+/*
+ * Global hover affordance. Explicit variant hover classes always win
+ * (`.hover:*:hover` is more specific than this :where() rule); plain buttons
+ * and variants without their own hover state get the subtle neutral wash.
+ * `:where()` keeps specificity at 0,1,0 so primary/destructive hovers are not
+ * recolored.
+ */
+@media (hover: hover) {
+	:where(button:not(:disabled):not([data-variant="link"])):hover {
+		background-color: color-mix(in oklab, var(--muted) 55%, transparent);
+	}
+}

@@ -23,6 +23,7 @@ import { InkEditor } from "@/lib/pdf/ink/editor";
 import {
 	bindInkInput,
 	INK_LONG_PRESS_MS,
+	INK_NOTE_LONG_PRESS_MS,
 	INK_PEN_HOVER_GUARD_MS,
 } from "@/lib/pdf/ink/input";
 import { createInkLongPressSelection } from "@/lib/pdf/ink/selection";
@@ -89,6 +90,7 @@ afterEach(() => {
 });
 async function reader(
 	onLongPress?: Parameters<typeof bindInkInput>[0]["onLongPress"],
+	onLongPressNote?: Parameters<typeof bindInkInput>[0]["onLongPressNote"],
 ) {
 	const target = document.createElement("div"),
 		page = document.createElement("div");
@@ -132,6 +134,7 @@ async function reader(
 		}),
 		viewport: () => viewport,
 		onLongPress,
+		onLongPressNote,
 	});
 	dispose = binding.dispose;
 	return { target, page, editor, controller, apply, viewport, binding };
@@ -176,6 +179,7 @@ function hover(page: HTMLElement, x = 50, y = 60) {
 }
 it("keeps touch selection deliberate and the pen hover guard long", () => {
 	expect(INK_LONG_PRESS_MS).toBe(1000);
+	expect(INK_NOTE_LONG_PRESS_MS).toBe(3000);
 	expect(INK_PEN_HOVER_GUARD_MS).toBe(1500);
 });
 
@@ -218,6 +222,32 @@ describe("automatic stylus and long-press arbitration", () => {
 		r.page.dispatchEvent(context);
 		expect(context.defaultPrevented).toBe(true);
 	});
+	it("creates a note after a three-second touch hold, after selection", async () => {
+		const note = vi.fn();
+		const r = await reader(undefined, note);
+		pointer(r.page, "pointerdown", "touch");
+		vi.advanceTimersByTime(INK_LONG_PRESS_MS);
+		expect(r.editor.getState().selection?.bounds).not.toBeNull();
+		expect(note).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(INK_NOTE_LONG_PRESS_MS - INK_LONG_PRESS_MS - 1);
+		expect(note).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(note).toHaveBeenCalledOnce();
+		expect(note.mock.calls[0][0].page).toBe(1);
+		pointer(r.page, "pointerup", "touch");
+	});
+
+	it("cancels a pending note when the finger moves after the first selection", async () => {
+		const note = vi.fn();
+		const r = await reader(undefined, note);
+		pointer(r.page, "pointerdown", "touch");
+		vi.advanceTimersByTime(INK_LONG_PRESS_MS);
+		pointer(r.page, "pointermove", "touch", 1, 90, 60);
+		vi.advanceTimersByTime(INK_NOTE_LONG_PRESS_MS);
+		expect(note).not.toHaveBeenCalled();
+		pointer(r.page, "pointerup", "touch");
+	});
+
 	it("finger movement pans in read/pen mode and cancels the hold; two fingers hand touch events to pinch", async () => {
 		const r = await reader();
 		pointer(r.page, "pointerdown", "touch");

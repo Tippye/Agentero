@@ -23,6 +23,8 @@
 		"unsaved": "Finish saving or discard the pending handwriting before leaving."
 	},
 	"pdf": {
+		"close": "Close",
+		"noteNeedsSelection": "Hold for 3 seconds on text or a figure to add a note.",
 		"apiOnly": {
 			"layoutProviderRequired": "Configure a remote layout API provider before analyzing this paper.",
 			"translateProviderRequired": "Choose an API translation provider before translating on this device."
@@ -253,6 +255,10 @@
 		"progressPct": "{{pct}}%",
 		"clickAnnotateAria": "Annotate this {{kind}}",
 		"clickAnnotateHint": "Click to annotate",
+		"viewImageAria": "View this {{kind}} full screen",
+		"viewImageHint": "Click to view",
+		"lightboxTitle": "{{kind}} · Page {{page}}",
+		"imageUnavailable": "The image preview could not be rendered.",
 		"sectionFigures": "Figures",
 		"sectionTables": "Tables",
 		"sectionAlgorithms": "Algorithms",

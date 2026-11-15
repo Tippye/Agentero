@@ -1,7 +1,6 @@
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { EasyScholarSettingsBlock } from "@/components/settings/panes/general/easy-scholar-settings-block";
 import { PaperInfoPanel } from "@/components/sidebar/paper-info-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,11 +22,6 @@ import {
 import { setPaperTags, syncPublication } from "@/lib/paper/api";
 import type { PaperTag } from "@/lib/paper/tags";
 import type { PaperMetadata } from "@/lib/paper/types";
-import {
-	loadSettings,
-	saveSettingsAsync,
-	subscribeSettings,
-} from "@/lib/settings";
 
 export type MobilePaperInfoProps = {
 	open: boolean;
@@ -85,8 +79,6 @@ function PaperInfoBody({
 }) {
 	const { t } = useTranslation(["sidebar", "settings", "mobile"]);
 	const [meta, setMeta] = useState(paper);
-	const [settings, setSettings] = useState(loadSettings);
-	const [keyDraft, setKeyDraft] = useState(settings.easyScholarKey);
 	const [busy, setBusy] = useState(false);
 	const active = useRef(false);
 	const busyRef = useRef(false);
@@ -99,11 +91,6 @@ function PaperInfoBody({
 		};
 	}, []);
 	useEffect(() => setMeta(paper), [paper]);
-	useEffect(() => subscribeSettings(setSettings), []);
-	useEffect(
-		() => setKeyDraft(settings.easyScholarKey),
-		[settings.easyScholarKey],
-	);
 
 	const publish = async (next: PaperMetadata) => {
 		if (!active.current || next.path !== paper.path) return;
@@ -138,17 +125,6 @@ function PaperInfoBody({
 						failed: report.metricsFailed,
 					}),
 				);
-		});
-	const commitKey = (value: string) =>
-		mutate(async () => {
-			const saved = await saveSettingsAsync({
-				...loadSettings(),
-				easyScholarKey: value.trim(),
-			});
-			if (active.current) {
-				setSettings(saved);
-				setKeyDraft(saved.easyScholarKey);
-			}
 		});
 	const jump = (url: string) => {
 		void openMobilePaperLink(url).catch((error) => {
@@ -248,20 +224,6 @@ function PaperInfoBody({
 						)}
 						{t("papersLibrary.syncPublication")}
 					</Button>
-					<fieldset disabled={busy} className="min-w-0">
-						<legend className="sr-only">
-							{t("settings:general.easyScholar.section")}
-						</legend>
-						<EasyScholarSettingsBlock
-							savedKey={settings.easyScholarKey}
-							keyDraft={keyDraft}
-							onKeyDraftChange={setKeyDraft}
-							onCommitKey={commitKey}
-							onOpenKeyPage={() =>
-								jump("https://www.easyscholar.cc/console/user/open")
-							}
-						/>
-					</fieldset>
 				</section>
 			</div>
 		</TooltipProvider>

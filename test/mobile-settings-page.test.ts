@@ -19,6 +19,7 @@ const io = vi.hoisted(() => ({
 	sync: null as Captured | null,
 	download: null as Captured | null,
 	background: null as Captured | null,
+	easyScholar: null as Captured | null,
 	t: (key: string) => key,
 }));
 
@@ -36,6 +37,15 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: io.version }));
 vi.mock("@/lib/core/open-external", () => ({
 	openExternalUrl: io.openExternal,
 }));
+vi.mock(
+	"@/components/settings/panes/general/easy-scholar-settings-block",
+	() => ({
+		EasyScholarSettingsBlock: (props: Captured) => {
+			io.easyScholar = props;
+			return null;
+		},
+	}),
+);
 vi.mock("@/components/settings/panes/appearance-pane", () => ({
 	AppearancePane: (props: Captured) => {
 		io.appearance = props;
@@ -83,6 +93,7 @@ import { DEFAULT_SETTINGS } from "@/lib/settings/defaults";
 const NAV_LABELS: [string, MobileSettingsSection][] = [
 	["settings:nav.appearance", "appearance"],
 	["settings:nav.translate", "translate"],
+	["settings:general.easyScholar.section", "easyscholar"],
 	["settings:nav.layout", "layout"],
 	["settings:nav.sync", "sync"],
 	["mobile:background.title", "background"],
@@ -213,6 +224,8 @@ describe("mobile settings page", () => {
 		await navigate("settings:nav.translate", "translate");
 		expect(io.translate?.apiOnly).toBe(true);
 		expect(io.translate?.settings).toBe(io.snapshot);
+		await navigate("settings:general.easyScholar.section", "easyscholar");
+		expect(io.easyScholar?.savedKey).toBe(io.snapshot?.easyScholarKey);
 		await navigate("settings:nav.layout", "layout");
 		expect(io.layout?.apiOnly).toBe(true);
 		expect(io.layout?.hostContext).toEqual({ kind: "local" });

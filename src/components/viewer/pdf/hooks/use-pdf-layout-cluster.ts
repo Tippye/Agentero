@@ -82,6 +82,7 @@ export type PdfLayoutCluster = Omit<PdfLayoutRegions, "layoutDocRegions"> &
 		/** Figures panel thumbnails: render a region crop (null on any miss). */
 		handleRenderLayoutThumb: (
 			region: PdfLayoutRegion,
+			maxEdgePx?: number,
 		) => Promise<PromptImage | null>;
 	};
 
@@ -164,7 +165,7 @@ export function usePdfLayoutCluster({
 	);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: engineRef/docCapRef are injected stable refs (fresh EmbedPDF scope objects per render, never deps).
 	const handleRenderLayoutThumb = useCallback(
-		async (region: PdfLayoutRegion) => {
+		async (region: PdfLayoutRegion, maxEdgePx = 360) => {
 			const eng = engineRef.current;
 			const docs = docCapRef.current;
 			if (!eng || !docs) return null;
@@ -177,7 +178,7 @@ export function usePdfLayoutCluster({
 					document,
 					pageIndex: region.pageIndex,
 					region: region.bbox,
-					maxEdgePx: 360,
+					maxEdgePx,
 				});
 				if (!docs.isDocumentOpen(docId)) return null;
 				return image;

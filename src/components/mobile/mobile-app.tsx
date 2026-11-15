@@ -237,9 +237,11 @@ export default function MobileApp() {
 		(route: MobileWindowRoute) => {
 			const paper = papers.find((paper) => paper.id === route.paperId) ?? null;
 			setSelectedPaper(paper);
-			setReaderMode(route.readerMode);
-			// Restoring a document never opens auxiliary panes without a new user action.
+			// Restoring a document never opens auxiliary panes without a new user
+			// action; a stale notes mode used to leave an empty right pane while the
+			// preset toggle still showed Read.
 			setWorkspacePreset("read");
+			setReaderMode("pdf");
 			setTab(paper ? "library" : route.tab);
 			setReadingSnapshot(
 				paper && route.pdf && typeof route.pdf.zoom === "number"
