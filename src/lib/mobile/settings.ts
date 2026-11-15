@@ -1,5 +1,6 @@
 export type MobileSettingsSection =
 	| "appearance"
+	| "reading"
 	| "translate"
 	| "easyscholar"
 	| "layout"
@@ -11,6 +12,7 @@ const OPEN_EVENT = "agentero:mobile-settings";
 
 const SECTIONS: readonly MobileSettingsSection[] = [
 	"appearance",
+	"reading",
 	"translate",
 	"easyscholar",
 	"layout",

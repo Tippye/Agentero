@@ -8,6 +8,7 @@ import {
 	LayoutTemplate,
 	LoaderCircle,
 	Paintbrush,
+	SlidersHorizontal,
 	Star,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
@@ -30,6 +31,7 @@ import {
 	saveSettingsAsync,
 	subscribeSettings,
 } from "@/lib/settings";
+import { DEFAULT_SETTINGS } from "@/lib/settings/defaults";
 
 // The sync pane pulls in the full storage configuration surface; load it on
 // demand like the desktop shell so opening settings stays cheap.
@@ -43,6 +45,7 @@ const GITHUB_REPO_URL = "https://github.com/poco-ai/Agentero";
 
 type MobileSettingsLabel =
 	| "settings:nav.appearance"
+	| "settings:nav.reading"
 	| "settings:nav.translate"
 	| "settings:general.easyScholar.section"
 	| "settings:nav.layout"
@@ -56,6 +59,7 @@ const NAV: {
 	label: MobileSettingsLabel;
 }[] = [
 	{ id: "appearance", icon: Paintbrush, label: "settings:nav.appearance" },
+	{ id: "reading", icon: SlidersHorizontal, label: "settings:nav.reading" },
 	{ id: "translate", icon: Languages, label: "settings:nav.translate" },
 	{
 		id: "easyscholar",
@@ -160,7 +164,116 @@ export function MobileSettingsPage({
 				</nav>
 				<div className="agentero-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [&_[data-slot=select-trigger]]:max-w-[45vw] [&_[data-slot=select-trigger]]:min-h-11 [&_[data-slot=select-trigger]]:min-w-0 [&_[data-slot=select-trigger]]:w-40 [&_button]:touch-manipulation [&_input]:min-h-11">
 					<div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6">
-						{section === "appearance" ? (
+						{section === "reading" ? (
+							<div className="space-y-6">
+								<PageTitle title={t("mobile:readingFeel.title")} />
+								<p className="text-muted-foreground text-sm">
+									{t("mobile:readingFeel.description")}
+								</p>
+								<label className="block space-y-2">
+									<span className="flex items-center justify-between gap-3 text-sm">
+										<span>{t("mobile:readingFeel.window")}</span>
+										<span className="text-muted-foreground tabular-nums">
+											{settings.pdfInertiaVelocityWindowMs} ms
+										</span>
+									</span>
+									<input
+										type="range"
+										min={20}
+										max={200}
+										step={5}
+										value={settings.pdfInertiaVelocityWindowMs}
+										className="w-full accent-primary"
+										onChange={(event) =>
+											patch({
+												pdfInertiaVelocityWindowMs: Number(event.target.value),
+											})
+										}
+									/>
+								</label>
+								<label className="block space-y-2">
+									<span className="flex items-center justify-between gap-3 text-sm">
+										<span>{t("mobile:readingFeel.friction")}</span>
+										<span className="text-muted-foreground tabular-nums">
+											{settings.pdfInertiaFriction.toFixed(4)}
+										</span>
+									</span>
+									<input
+										type="range"
+										min={0.001}
+										max={0.02}
+										step={0.0005}
+										value={settings.pdfInertiaFriction}
+										className="w-full accent-primary"
+										onChange={(event) =>
+											patch({
+												pdfInertiaFriction: Number(event.target.value),
+											})
+										}
+									/>
+								</label>
+								<label className="block space-y-2">
+									<span className="flex items-center justify-between gap-3 text-sm">
+										<span>{t("mobile:readingFeel.minVelocity")}</span>
+										<span className="text-muted-foreground tabular-nums">
+											{settings.pdfInertiaMinVelocity.toFixed(3)}
+										</span>
+									</span>
+									<input
+										type="range"
+										min={0.005}
+										max={0.1}
+										step={0.001}
+										value={settings.pdfInertiaMinVelocity}
+										className="w-full accent-primary"
+										onChange={(event) =>
+											patch({
+												pdfInertiaMinVelocity: Number(event.target.value),
+											})
+										}
+									/>
+								</label>
+								<label className="block space-y-2">
+									<span className="flex items-center justify-between gap-3 text-sm">
+										<span>{t("mobile:readingFeel.speedScale")}</span>
+										<span className="text-muted-foreground tabular-nums">
+											{settings.pdfInertiaSpeedScale.toFixed(1)}×
+										</span>
+									</span>
+									<input
+										type="range"
+										min={0.3}
+										max={2.5}
+										step={0.1}
+										value={settings.pdfInertiaSpeedScale}
+										className="w-full accent-primary"
+										onChange={(event) =>
+											patch({
+												pdfInertiaSpeedScale: Number(event.target.value),
+											})
+										}
+									/>
+								</label>
+								<Button
+									type="button"
+									variant="outline"
+									className="min-h-11"
+									onClick={() =>
+										patch({
+											pdfInertiaVelocityWindowMs:
+												DEFAULT_SETTINGS.pdfInertiaVelocityWindowMs,
+											pdfInertiaFriction: DEFAULT_SETTINGS.pdfInertiaFriction,
+											pdfInertiaMinVelocity:
+												DEFAULT_SETTINGS.pdfInertiaMinVelocity,
+											pdfInertiaSpeedScale:
+												DEFAULT_SETTINGS.pdfInertiaSpeedScale,
+										})
+									}
+								>
+									{t("mobile:readingFeel.reset")}
+								</Button>
+							</div>
+						) : section === "appearance" ? (
 							<AppearancePane
 								theme={settings.theme}
 								uiTheme={settings.uiTheme}
