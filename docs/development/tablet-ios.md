@@ -237,7 +237,15 @@ android 遗留的红测在同一提交里没有更新，本轮一并修正：论
 
 iPhone Duo 在 iOS 27.2 模拟器里表现为两块屏幕：外屏 1398×2034 px（466×678 pt，@3x），应用实际拿到的内容视口只有 **382×644 pt**，右侧 84 pt 留给系统状态簇（时钟/网络）；内屏 2007×2853 px（669×951 pt）。按宽度分档，外屏落窄档、内屏落中档，与既有 `<600 / 600–839 / ≥840` 三档一致。
 
-窄档问题与处理：382 pt 下顶栏原有「菜单 + 标题 + 魔棒/刷新/导入 + 行内搜索」会把标题挤成「论…」并裁掉搜索框。文献库在窄档改为两行——第一行菜单、标题与三个图标，第二行整宽搜索；中档与宽档保持单行。回归用例 `test/mobile-app-local.test.ts`「keeps the library search out of the narrow header」防止搜索再回到窄档顶栏。
+窄档问题与处理（第一版）：382 pt 下顶栏「菜单 + 标题 + 魔棒/刷新/导入 + 行内搜索」会把标题挤成「论…」并把搜索框裁到屏幕外（XCUITest 帧：标题 `w=27`、搜索框右边缘越界）。文献库在窄档把搜索移到顶栏下方独立一行。
+
+按 HIG 的垂直控件改版：Apple《Designing for iPhone Duo》要求外屏与横置内屏把工具栏、标签栏和导航控件放到一条边上（外屏 466×678 pt 时应用视口 382×644，右侧 84 pt 是系统保留区）。实现上不写死机型，而是检测左右安全区不对称（`env(safe-area-inset-right) - env(safe-area-inset-left) ≥ 60`，见 `use-side-controls.ts`）：
+
+- 侧栏（宽 64 pt）移到内容右侧：上方是动作组（阅读器：返回、阅读/对照/研讨、信息；文献库：魔棒、刷新、导入、搜索开关），下方是导航组（菜单、论文库/广场/Agent），两组之间自动留白，符合「主导航在竖轴顶部、频繁动作优先、分组不手写间距」。
+- 顶栏只留标题与状态点，不再放动作；搜索在侧栏用图标开关，展开时仍是顶栏下方整宽一行。广场来源与 Agent 后端是内容相关控件，留在内容上方，不搬进侧栏。
+- 折叠/展开只改变可用宽度，控件相对位置不变；iPad 与普通 iPhone 左右安全区对称，行为不变（iPad 宽档仍是左侧导轨）。
+
+实测（XCUITest 帧）：Duo 外屏 `aside` 带 `order-last`、宽 64，导入按钮在侧栏内且不在 `header` 内；点侧栏搜索按钮后出现 `data-library-search-row`。回归用例 `test/mobile-app-local.test.ts`「moves the rail, its actions and the search toggle to the side strip」（mock `useSideControls`）。
 
 未覆盖：模拟器把应用固定在外屏（第一块 `LCD`），内屏 `LCD-1` 始终黑屏；`simctl io screenConfig` 只能开关屏幕电源与改几何，没有折叠/展开姿态切换，因此**内屏 669 pt 中档只按宽度推算，未在 Duo 内屏实机截图验证**（用 iPad mini 744 pt 走同档位可补）。签名按要求留空（`--no-sign`），Keychain、配对与远程登录仍需签名构建验收。
 
