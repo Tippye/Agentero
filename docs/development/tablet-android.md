@@ -391,7 +391,25 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；FileProvider 与 PDF 分享边界未变。
 - **仍待下一轮**：长按后拖动扩展选区与两端摇杆、滑动首尾 bounce、原文/译文批注与手写双向实时同步。当前版本长按只选一个词，备注/翻译走选区工具栏；滚动只有惯性没有回弹。真机还需验收全屏图片双指缩放与系统返回、翻译预设同步、图标化顶部栏与 hover 预览。
 
-## 16. 参考
+## 16. 滚动惯性抖动修复重新打包验证（2026-11-15）
+
+本轮修复（commit `2c2865f5f`）：
+
+- **速度采样**：单指 pan 释放时不再用最后一个 pointermove 的 1 ms 瞬时速度（高 DPI/合并事件下会放大噪声、方向抖动），改为最近 80 ms 触摸样本的平均速度；手指停下超过 80 ms 再抬起不启动惯性。
+- **位置来源**：惯性帧不再每帧读取 `scrollLeft/scrollTop`（异步提交可能导致读回旧值、来回抖），而是维护本地 scroll 累加器并直接写绝对位置。
+- **摩擦模型**：按真实时间做指数衰减（约 600 ms 尾巴），不按帧乘固定系数，刷新率或掉帧时速度一致；速度低于阈值立即停止。
+- 新手指导入时取消上一段惯性，双指缩放/长按仍优先。
+- 参考常见移动滚动实现（UIScrollView / Android OverScroller 类）：速度追踪窗口 + 位置累加 + 时间指数摩擦。
+
+验证与产物：
+
+- TypeScript、Biome 通过；手写输入 18 项、移动工作区 17 项相关测试通过。
+- Android ARM64 release 构建成功；v3 签名、ZIP 完整性与 ZIP/native 16KB 对齐通过。
+- 新 APK：[Agentero-0.15.5-inertia-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-arm64-test.apk)，56,761,105 字节，SHA-256 `321abd26ba4875fc23831301994b62b35d14dc6ce72063dcac12df1b5fe1a3b1`；包内 library SHA-256 `f03217c38d024878d803fa355e2f31398433c4e69f314f48250a5dadb63d601a`。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
+- 真机重点验收：慢速短滑、快速甩动、手指停顿后抬起、连续多次滑动、双指缩放前是否有残留惯性抖动；首尾 overscroll bounce 仍不在本包范围。
+
+## 17. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
