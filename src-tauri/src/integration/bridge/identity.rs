@@ -20,6 +20,10 @@ const CLIENT_PROFILE_FILE: &str = "client-profile.json";
 const IOS_KEYCHAIN_SERVICE: &str = "com.poco-ai.agentero.bridge";
 #[cfg(target_os = "ios")]
 const IOS_KEYCHAIN_ACCOUNT: &str = "client-identity-v2";
+// `security-framework-sys` does not export this status; the Security framework
+// value is stable (`errSecInteractionNotAllowed` in Security/SecBase.h).
+#[cfg(target_os = "ios")]
+const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
 
 /// Long-lived desktop identity. The secret key stays in the local config dir
 /// and is never added to a QR offer or sent to the Relay.
@@ -495,11 +499,13 @@ impl LegacyIdentityStorage for LegacyFiles {
 #[cfg(target_os = "ios")]
 fn legacy_keychain_read() -> Result<Option<Vec<u8>>, IdentityFailure> {
     use security_framework::passwords::get_generic_password;
-    use security_framework_sys::base::{errSecInteractionNotAllowed, errSecItemNotFound};
+    use security_framework_sys::base::errSecItemNotFound;
     match get_generic_password(IOS_KEYCHAIN_SERVICE, IOS_KEYCHAIN_ACCOUNT) {
         Ok(raw) => Ok(Some(raw)),
         Err(error) if error.code() == errSecItemNotFound => Ok(None),
-        Err(error) if error.code() == errSecInteractionNotAllowed => Err(IdentityFailure::Locked),
+        Err(error) if error.code() == ERR_SEC_INTERACTION_NOT_ALLOWED => {
+            Err(IdentityFailure::Locked)
+        }
         Err(_) => Err(IdentityFailure::Unavailable),
     }
 }
