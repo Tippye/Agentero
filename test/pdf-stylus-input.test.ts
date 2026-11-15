@@ -174,6 +174,11 @@ function hover(page: HTMLElement, x = 50, y = 60) {
 		}),
 	);
 }
+it("keeps touch selection deliberate and the pen hover guard long", () => {
+	expect(INK_LONG_PRESS_MS).toBe(1000);
+	expect(INK_PEN_HOVER_GUARD_MS).toBe(1500);
+});
+
 describe("automatic stylus and long-press arbitration", () => {
 	it("draws with the first pen event from read mode and keeps zero pressure and one native commit", async () => {
 		const r = await reader();

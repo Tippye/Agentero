@@ -9,7 +9,7 @@ import {
 	ScanSearch,
 	Square,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,91 +101,6 @@ export const PdfToolbar = memo(function PdfToolbar({
 	const { t } = useTranslation("viewer");
 	const visualShortcut = useShortcutLabel("visualAnnotation");
 	const translateShortcut = useShortcutLabel("layoutTranslate");
-
-	const LONG_PRESS_MS = 300;
-	const longPressTimerRef = useRef<number | null>(null);
-	const longPressTriggeredRef = useRef(false);
-	const suppressNextClickRef = useRef(false);
-	const [longPressing, setLongPressing] = useState(false);
-
-	const clearLongPressTimer = useCallback(() => {
-		if (longPressTimerRef.current != null) {
-			clearTimeout(longPressTimerRef.current);
-			longPressTimerRef.current = null;
-		}
-	}, []);
-
-	useEffect(() => clearLongPressTimer, [clearLongPressTimer]);
-
-	const handleTranslatePointerDown = useCallback(
-		(event: React.PointerEvent<HTMLButtonElement>) => {
-			if (event.button !== 0) return;
-			if (layoutTranslateActive || layoutTranslateRunning) return;
-			if (layoutTranslateWaiting) return;
-			setLongPressing(true);
-			longPressTriggeredRef.current = false;
-			suppressNextClickRef.current = false;
-			longPressTimerRef.current = window.setTimeout(() => {
-				longPressTriggeredRef.current = true;
-				suppressNextClickRef.current = true;
-				setLongPressing(true);
-				onToggleLayoutTranslate?.();
-			}, LONG_PRESS_MS);
-		},
-		[
-			layoutTranslateActive,
-			layoutTranslateRunning,
-			layoutTranslateWaiting,
-			onToggleLayoutTranslate,
-		],
-	);
-
-	const handleTranslatePointerUp = useCallback(
-		(event: React.PointerEvent<HTMLButtonElement>) => {
-			clearLongPressTimer();
-			setLongPressing(false);
-			if (event.button !== 0) return;
-			if (!longPressTriggeredRef.current) return;
-			longPressTriggeredRef.current = false;
-			if (layoutTranslateActive || layoutTranslateRunning) {
-				onToggleLayoutTranslate?.();
-			}
-		},
-		[
-			clearLongPressTimer,
-			layoutTranslateActive,
-			layoutTranslateRunning,
-			onToggleLayoutTranslate,
-		],
-	);
-
-	const handleTranslatePointerLeave = useCallback(() => {
-		clearLongPressTimer();
-		setLongPressing(false);
-		if (!longPressTriggeredRef.current) return;
-		longPressTriggeredRef.current = false;
-		suppressNextClickRef.current = true;
-		if (layoutTranslateActive || layoutTranslateRunning) {
-			onToggleLayoutTranslate?.();
-		}
-	}, [
-		clearLongPressTimer,
-		layoutTranslateActive,
-		layoutTranslateRunning,
-		onToggleLayoutTranslate,
-	]);
-
-	const handleTranslateClick = useCallback(
-		(event: React.MouseEvent<HTMLButtonElement>) => {
-			if (suppressNextClickRef.current) {
-				event.preventDefault();
-				suppressNextClickRef.current = false;
-				return;
-			}
-			onToggleLayoutTranslate?.();
-		},
-		[onToggleLayoutTranslate],
-	);
 
 	const translateMeter = useTranslateMeter({
 		layoutTranslateRunning,
@@ -429,22 +344,14 @@ export const PdfToolbar = memo(function PdfToolbar({
 										<Button
 											type="button"
 											size="icon-xs"
-											variant={
-												layoutTranslateActive || longPressing
-													? "secondary"
-													: "ghost"
-											}
+											variant={layoutTranslateActive ? "secondary" : "ghost"}
 											className={mobile ? "size-11" : "size-6"}
 											aria-label={translateAriaLabel}
 											aria-pressed={
 												layoutTranslateActive || layoutTranslateWaiting
 											}
 											disabled={!engine}
-											onPointerDown={handleTranslatePointerDown}
-											onPointerUp={handleTranslatePointerUp}
-											onPointerLeave={handleTranslatePointerLeave}
-											onPointerCancel={handleTranslatePointerLeave}
-											onClick={handleTranslateClick}
+											onClick={() => onToggleLayoutTranslate?.()}
 										>
 											<Languages
 												className={mobile ? "size-5" : "size-3.5"}

@@ -1326,6 +1326,7 @@ function PdfViewerInner({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
+		hideLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutCluster({
 		capabilities,
@@ -1356,12 +1357,13 @@ function PdfViewerInner({
 	);
 	const mobileInk =
 		(runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
-	const inkEditable =
-		mobileInk &&
-		!layoutTranslateActive &&
-		!reflowDisplayDocumentId &&
-		!embeddedTarget &&
-		!translationPane;
+	// Mobile keeps the pen available even while translated pages are shown.
+	// Selecting a drawing tool switches back to the original page (see the
+	// effect below) instead of leaving an export-only ink toolbar.
+	const inkEditable = mobileInk && !embeddedTarget && !translationPane;
+	const visibleReflowDocumentId = layoutTranslateActive
+		? reflowDisplayDocumentId
+		: null;
 	const { editor: inkEditor, mode: inkMode } = usePdfInk({
 		vaultPath,
 		paperRelPath,
@@ -1372,6 +1374,13 @@ function PdfViewerInner({
 		onInkDirtyChange,
 		onInkModeChange,
 	});
+	// A pen tool means annotating the source PDF: leave the translated/reflow
+	// view so the ink layer is mounted and coordinates stay on the real page.
+	useEffect(() => {
+		if (!mobileInk || inkMode === "read" || !layoutTranslateActive) return;
+		hideLayoutTranslate();
+	}, [mobileInk, inkMode, layoutTranslateActive, hideLayoutTranslate]);
+
 	const inkPageSize = useCallback(
 		(page: number) =>
 			docCapRef.current?.getDocument(docId)?.pages[page - 1]?.size ?? null,
@@ -2270,16 +2279,14 @@ function PdfViewerInner({
 	const renderPage = useCallback(
 		({ pageIndex, width, height, rotatedWidth, rotatedHeight }: PageLayout) => (
 			<PdfPageLayers
-				inkEditor={
-					!layoutTranslateActive && !reflowDisplayDocumentId ? inkEditor : null
-				}
+				inkEditor={visibleReflowDocumentId ? null : inkEditor}
 				bookmarkSaving={Boolean(bookmarkEditor.draft?.saving)}
 				onBookmarkPage={bookmarkEditor.canEdit ? handleBookmarkPage : undefined}
 				pageBookmarked={bookmarkedPages.has(pageIndex)}
 				annotationSource={paperRelPath ?? paperAbsPath ?? undefined}
 				docId={docId}
 				pageIndex={pageIndex}
-				reflowDocumentId={reflowDisplayDocumentId}
+				reflowDocumentId={visibleReflowDocumentId}
 				width={rotatedWidth || width}
 				height={rotatedHeight || height}
 				tone={pdfTone}
@@ -2298,7 +2305,7 @@ function PdfViewerInner({
 		),
 		[
 			inkEditor,
-			layoutTranslateActive,
+			visibleReflowDocumentId,
 			docId,
 			paperRelPath,
 			paperAbsPath,
@@ -2315,7 +2322,6 @@ function PdfViewerInner({
 			bookmarkEditor.draft?.saving,
 			handleBookmarkPage,
 			bookmarkedPages,
-			reflowDisplayDocumentId,
 		],
 	);
 
