@@ -412,6 +412,7 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::features::mobile_background::commands::mobile_background_open_settings,
             crate::features::mobile_route::commands::mobile_route_read,
             crate::features::mobile_route::commands::mobile_route_save,
+            crate::features::mobile_app::commands::mobile_restart_app,
             crate::features::mobile_stylus::commands::mobile_stylus_get_state,
             crate::features::mobile_stylus::commands::mobile_stylus_set_target,
             crate::features::system::settings::commands::settings_get,

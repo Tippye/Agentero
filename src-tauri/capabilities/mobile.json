@@ -33,7 +33,6 @@
 			]
 		},
 		"dialog:default",
-		"process:allow-restart",
 		"log:default"
 	]
 }

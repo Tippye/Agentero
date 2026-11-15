@@ -39,6 +39,17 @@ pub struct NativeImportFile {
     pub display_name: Option<String>,
 }
 impl<R: Runtime> MobileBackground<R> {
+    /// Restart the Android activity in a fresh process after the Web layer
+    /// persisted its settings. The native command kills this process after
+    /// queuing the launch intent, so the new activity boots from disk.
+    #[cfg(target_os = "android")]
+    pub fn restart_app(&self) -> Result<(), String> {
+        self.handle
+            .run_mobile_plugin::<serde_json::Value>("restartApp", serde_json::json!({}))
+            .map(|_| ())
+            .map_err(|_| "Native restart is unavailable".to_string())
+    }
+
     /// Open a picker-authorized whole content document on a blocking worker.
     #[cfg(target_os = "android")]
     pub fn open_import_file(&self, uri: String) -> Result<NativeImportFile, String> {

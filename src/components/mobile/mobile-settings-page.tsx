@@ -138,8 +138,8 @@ export function MobileSettingsPage({
 			return;
 		}
 		try {
-			const { relaunch } = await import("@tauri-apps/plugin-process");
-			await relaunch();
+			const { invoke } = await import("@tauri-apps/api/core");
+			await invoke("mobile_restart_app");
 		} catch (error) {
 			notifyError(t("mobile:readingFeel.restartFailed"), {
 				description: errorMessage(error),
