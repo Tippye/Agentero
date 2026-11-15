@@ -297,7 +297,24 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；FileProvider 仍只开放相机 Pictures 与导出 cache，PDF VIEW/SEND MIME-only 且无 SEND_MULTIPLE。
 - 保留此前手写笔、移动 UI、API reader 与 native Inbox 安装包。真机左滑删除、确认框、删除后列表刷新与文件消失仍待用户设备验收；删除不可恢复，操作前需确认。
 
-## 11. 参考
+## 11. 阅读器与翻译修复重新打包验证（2026-11-15）
+
+本轮修复（commit `981f7a089`）：
+
+- **参考文献解析**：移动端命令白名单补入 `paper_refs_parse`（`paper_refs_list` 原已注册）。左侧参考文献面板点击“解析参考文献”不再报 `Command paper_refs_parse not found`；解析在 Host 侧完成本地 `.bib`/`.bbl` 解析与在线结构化引用查询，不使用本地 PDF 引擎。
+- **适配屏幕宽度**：移动阅读器向 `PdfViewer` 传 `reserveCommentRail={false}`。移动端没有桌面批注卡片侧栏，Fit width 不再预留 `COMMENT_RAIL_WIDTH_PX`，页面铺满实际阅读区域，旋转/分屏后也按整个 pane 计算。
+- **翻译反馈与后台运行**：移动端即使共享设置仍为双栏模式，也强制在当前 PDF 上以叠加层运行全文翻译，不再尝试打开桌面翻译标签页；工具栏翻译按钮在平板上放大到 44px 触控目标。新增应用级后台任务浮条：显示翻译/排版/导入任务的标题、阶段、百分比与取消按钮，失败保留具体原因；任务由 TaskRuntime/JobCenter 执行，离开阅读页或切回文献库后继续，浮条仍在。
+- **API 测试失败原因**：保留 `a0ca4219e` 的 Host 原因 toast，API 已可访问时不影响正常请求。
+
+验证与产物：
+
+- TypeScript 通过，依赖图 1483 模块 / 8169 条边无违规；移动壳、PDF 翻译生命周期、能力门、后台任务浮条与 API 提示共 8 个文件 121 项通过。
+- Android ARM64 release 构建成功；包内 Rust library 含 `paper_refs_parse`、`paper_refs_list`、`path_delete` 注册字符串；FileProvider 仍只开放相机 Pictures 与导出 cache。
+- 新 APK：[Agentero-0.15.5-reader-fixes-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-reader-fixes-arm64-test.apk)，56,757,009 字节，SHA-256 `5a3c99c40de20700cb3d4ccb92b967aab1be5a763ce1760e6dfc5bde191c3fec`；包内 library SHA-256 `190b1e11efcca4df86f7596fcf5d4727bc7a690f691661d3a035aac3636c7018` 与 release 输出一致。
+- v3 测试签名、ZIP 完整性、ZIP/native 16KB 对齐通过；包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
+- 保留此前永久删除、手写笔、移动 UI 与 API reader 包。真机需继续验收：参考文献解析在线查询、翻译点击后的浮条进度/取消、离开阅读页后任务继续、适配宽度与旋转/分屏、错误 toast 文案。
+
+## 12. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
