@@ -409,7 +409,28 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
 - 真机重点验收：慢速短滑、快速甩动、手指停顿后抬起、连续多次滑动、双指缩放前是否有残留惯性抖动；首尾 overscroll bounce 仍不在本包范围。
 
-## 17. 参考
+## 17. 触摸惯性手感调试配置与打包（2026-11-15）
+
+本轮改动（commit `0c68b4cb6`）：
+
+- 移动设置新增临时 **阅读手感** 分区（`settings:nav.reading`），四项滑杆：
+  - 速度采样窗口：20–200 ms，默认 80；越大越平滑、拖尾越长。
+  - 摩擦系数：0.001–0.02，默认 0.005；越大停得越快。
+  - 停止阈值：0.005–0.1 px/ms，默认 0.015；低于该速度结束滑行。
+  - 释放速度倍率：0.3–2.5×，默认 1；整体放大/缩小甩动距离。
+  - 恢复默认按钮。
+- 配置持久化在 `AppSettings` 四个扁平字段（`pdfInertiaVelocityWindowMs` / `pdfInertiaFriction` / `pdfInertiaMinVelocity` / `pdfInertiaSpeedScale`），经 `InkInputBridge` 注入 `bindInkInput`；输入层对越界值再做 clamp，释放速度上限 8 px/ms，避免异常参数把手感或性能打坏。
+- 默认值与上一版惯性一致；这是**调试期临时配置**，手感和默认参数确定后会移除该设置分区与四个字段。
+
+验证与产物：
+
+- TypeScript、Biome 通过；移动设置、手写输入、移动工作区、PDF 能力与后台任务条 5 个文件 49 项相关测试通过。
+- Android ARM64 release 构建成功；v3 签名、ZIP 完整性与 16KB 对齐通过。
+- 新 APK：[Agentero-0.15.5-inertia-tuning-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-inertia-tuning-arm64-test.apk)，56,761,105 字节，SHA-256 `bbc0debfed53b329389b297290308b0d9cee3db1d624e597d54b225ead80e716`；包内 library SHA-256 `b02b0dee338cbf8cc104cec8ac1269441f1cdfd6b613fa8d5a2a25ddd77d42c6`。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64。
+- 真机调参建议：先只调“摩擦系数”，再调“释放速度倍率”；速度窗口过低会敏感抖动，过高会感觉拖。调好后把最终值告诉我，我移除滑杆并把默认值写死。
+
+## 18. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
