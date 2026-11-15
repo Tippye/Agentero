@@ -1,4 +1,13 @@
 {
+	"readingFeel": {
+		"title": "Reading feel (temporary)",
+		"description": "Tune touch-scroll inertia while testing. These controls will be removed once the default feel is settled.",
+		"window": "Velocity sample window",
+		"friction": "Friction (higher stops sooner)",
+		"minVelocity": "Stop threshold",
+		"speedScale": "Release speed multiplier",
+		"reset": "Reset to defaults"
+	},
 	"bridge": {
 		"hostFallback": "Agentero Bridge"
 	},

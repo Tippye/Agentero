@@ -37,6 +37,13 @@ export function bindInkInput(options: {
 	) => void;
 	/** A touch tap that never became a hold/pan; used to clear selection. */
 	onTap?: (page: InkInputPage, point: InkPosition) => void;
+	/** Temporary settings-driven tuning for touch inertia. */
+	inertia?: {
+		velocityWindowMs?: number;
+		friction?: number;
+		minVelocity?: number;
+		speedScale?: number;
+	};
 }) {
 	const { target, editor } = options;
 	let stroke: {
@@ -92,6 +99,22 @@ export function bindInkInput(options: {
 	const originalTouchAction = target.style.touchAction;
 	const editing = () => editor.getState().mode !== "read";
 	const managed = () => options.automaticPen || editing();
+	const inertiaWindowMs = Math.min(
+		200,
+		Math.max(16, options.inertia?.velocityWindowMs ?? 80),
+	);
+	const inertiaFriction = Math.min(
+		0.05,
+		Math.max(0.0005, options.inertia?.friction ?? 0.005),
+	);
+	const inertiaMinVelocity = Math.min(
+		0.2,
+		Math.max(0.001, options.inertia?.minVelocity ?? 0.015),
+	);
+	const inertiaSpeedScale = Math.min(
+		3,
+		Math.max(0.1, options.inertia?.speedScale ?? 1),
+	);
 	const capture = (id: number) => {
 		try {
 			target.setPointerCapture(id);
@@ -430,7 +453,10 @@ export function bindInkInput(options: {
 				// a single noisy sample was the source of direction jitter at release.
 				const now = event.timeStamp;
 				pan.samples.push({ x: event.clientX, y: event.clientY, t: now });
-				while (pan.samples.length > 1 && now - pan.samples[0].t > 80)
+				while (
+					pan.samples.length > 1 &&
+					now - pan.samples[0].t > inertiaWindowMs
+				)
 					pan.samples.shift();
 				const first = pan.samples[0];
 				const span = now - first.t;
@@ -510,12 +536,19 @@ export function bindInkInput(options: {
 			if (
 				released?.id === event.pointerId &&
 				released.moved &&
-				Math.abs(event.timeStamp - released.lastTime) < 80 &&
-				(Math.abs(released.vx) > 0.02 || Math.abs(released.vy) > 0.02)
+				Math.abs(event.timeStamp - released.lastTime) < inertiaWindowMs &&
+				(Math.abs(released.vx) * inertiaSpeedScale > inertiaMinVelocity ||
+					Math.abs(released.vy) * inertiaSpeedScale > inertiaMinVelocity)
 			) {
 				const viewport = options.viewport();
 				if (viewport) {
-					let { vx, vy } = released;
+					let vx = released.vx * inertiaSpeedScale;
+					let vy = released.vy * inertiaSpeedScale;
+					const releaseSpeed = Math.hypot(vx, vy);
+					if (releaseSpeed > 8) {
+						vx = (vx / releaseSpeed) * 8;
+						vy = (vy / releaseSpeed) * 8;
+					}
 					// Keep an accumulator instead of reading scrollLeft every frame:
 					// async scroll commits made the read-back position oscillate.
 					const metrics = viewport.getMetrics();
@@ -527,14 +560,15 @@ export function bindInkInput(options: {
 						last = now;
 						// Time-based exponential friction (~600 ms tail), independent of
 						// refresh rate.
-						const friction = Math.exp(-0.005 * dt);
+						const friction = Math.exp(-inertiaFriction * dt);
 						x -= vx * dt;
 						y -= vy * dt;
 						viewport.scrollTo({ x, y, behavior: "instant" });
 						vx *= friction;
 						vy *= friction;
 						glideFrame =
-							Math.abs(vx) > 0.015 || Math.abs(vy) > 0.015
+							Math.abs(vx) > inertiaMinVelocity ||
+							Math.abs(vy) > inertiaMinVelocity
 								? requestAnimationFrame(tick)
 								: 0;
 					};
