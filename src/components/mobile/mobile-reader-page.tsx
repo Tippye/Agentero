@@ -52,6 +52,8 @@ export type MobileReaderPageProps = {
 	onInkExport?: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
 	onRegionPrompt?: (context: MobilePaperRegionContext) => void;
 	fetchMissing?: (paper: PaperMetadata) => Promise<boolean>;
+	/** Keep the shell preset in sync while the translation companion is open. */
+	onTranslationPaneChange?: (open: boolean) => void;
 };
 
 export function MobileReaderPage({
@@ -69,6 +71,7 @@ export function MobileReaderPage({
 	onInkExport,
 	onRegionPrompt,
 	fetchMissing,
+	onTranslationPaneChange,
 }: MobileReaderPageProps) {
 	const { t } = useTranslation("mobile");
 	const measurement = useMobileWorkspaceWidth<HTMLElement>(
@@ -77,7 +80,15 @@ export function MobileReaderPage({
 	const widthClass = suppliedWidth ?? measurement.widthClass;
 	const compare = widthClass !== "narrow" && preset === "compare";
 	const [translationPaneOpen, setTranslationPaneOpen] = useState(false);
-	const translationVisible = translationPaneOpen;
+	// The companion belongs to the Compare preset. Switching back to Read (or
+	// an overlay-mode translation) hides it immediately.
+	const translationVisible = translationPaneOpen && preset === "compare";
+	useEffect(() => {
+		if (preset !== "compare" && translationPaneOpen) {
+			setTranslationPaneOpen(false);
+			onTranslationPaneChange?.(false);
+		}
+	}, [preset, translationPaneOpen, onTranslationPaneChange]);
 	// Dual-pane translation reuses the reader split: original PDF on the left,
 	// translated companion on the right. Narrow screens show the companion
 	// alone until it is closed, since three panes would be unusable.
@@ -203,7 +214,10 @@ export function MobileReaderPage({
 										paperAbsPath={paths.paperAbsPath}
 										vaultPath={vaultPath}
 										reserveCommentRail={false}
-										onOpenTranslationPane={() => setTranslationPaneOpen(true)}
+										onOpenTranslationPane={() => {
+											setTranslationPaneOpen(true);
+											onTranslationPaneChange?.(true);
+										}}
 										isActive={active && pdfVisible}
 										initialReadingSnapshot={initialReadingSnapshot}
 										onReadingSnapshotChange={(snapshot, documentId) => {
@@ -266,7 +280,10 @@ export function MobileReaderPage({
 										size="icon"
 										className="absolute top-2 left-2 z-40 size-11 rounded-full shadow"
 										aria-label={t("reader.closeTranslation")}
-										onClick={() => setTranslationPaneOpen(false)}
+										onClick={() => {
+											setTranslationPaneOpen(false);
+											onTranslationPaneChange?.(false);
+										}}
 									>
 										<X className="size-5" />
 									</Button>

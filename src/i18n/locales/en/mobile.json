@@ -1,4 +1,7 @@
 {
+	"bridge": {
+		"hostFallback": "Agentero Bridge"
+	},
 	"navigation": {
 		"import": "Import papers",
 		"tags": "Tags",

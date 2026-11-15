@@ -229,7 +229,10 @@ export const PdfToolbar = memo(function PdfToolbar({
 											type="button"
 											size="icon-xs"
 											variant={regionSelecting ? "secondary" : "ghost"}
-											className="shrink-0 self-center"
+											className={cn(
+												"shrink-0 self-center",
+												mobile && "size-11",
+											)}
 											aria-label={t("pdfExplain.selectRegion")}
 											aria-pressed={regionSelecting}
 											disabled={visualCropPending || !engine}

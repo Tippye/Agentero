@@ -1,4 +1,7 @@
 {
+	"bridge": {
+		"hostFallback": "Agentero 桥接"
+	},
 	"navigation": {
 		"import": "导入论文",
 		"tags": "标签",

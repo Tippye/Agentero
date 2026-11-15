@@ -82,6 +82,10 @@ export function InkInputBridge({
 				else editor.selectAt(page, point);
 			},
 			onLongPressNote,
+			onTap: () => {
+				const scope = selection?.forDocument(documentId);
+				if (scope?.getState().selection) scope.clear();
+			},
 			viewport: () => viewport.forDocument(documentId),
 			pageAt: (eventTarget) => {
 				const element =
