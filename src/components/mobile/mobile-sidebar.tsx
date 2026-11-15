@@ -25,6 +25,17 @@ import { errorText } from "@/lib/core/error";
 import { notifyError } from "@/lib/core/notify";
 import { cn } from "@/lib/core/utils";
 
+/** Bridge hostnames are data, but a loopback label is noise in the shell. */
+function isLoopbackHost(value: string): boolean {
+	const host = value.trim().toLowerCase();
+	return (
+		host === "localhost" ||
+		host === "127.0.0.1" ||
+		host === "::1" ||
+		host === "[::1]"
+	);
+}
+
 export function MobileSidebar({
 	open,
 	status,
@@ -45,6 +56,10 @@ export function MobileSidebar({
 	navigation?: ReactNode;
 }) {
 	const { t } = useTranslation(["mobile", "settings"]);
+	const hostLabel =
+		status.hostName && !isLoopbackHost(status.hostName)
+			? status.hostName
+			: t("bridge.hostFallback");
 	const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 	const [expandedDevice, setExpandedDevice] = useState(true);
 
@@ -167,7 +182,7 @@ export function MobileSidebar({
 								</div>
 								<div className="min-w-0 flex-1">
 									<p className="truncate font-semibold text-base">
-										{status.hostName ?? "-"}
+										{hostLabel}
 									</p>
 									<span
 										className={cn(

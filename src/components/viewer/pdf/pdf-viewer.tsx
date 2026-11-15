@@ -45,12 +45,10 @@ import {
 	ZoomMode,
 	ZoomPluginPackage,
 } from "@embedpdf/plugin-zoom/react";
-import { X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
-import { Button } from "@/components/ui/button";
 import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfBottomBar } from "@/components/viewer/pdf/chrome/pdf-bottom-bar";
 import { PdfCardStack } from "@/components/viewer/pdf/chrome/pdf-card-stack";
@@ -63,6 +61,7 @@ import { PdfOutlinePanel } from "@/components/viewer/pdf/chrome/pdf-outline-pane
 import { PdfReferencesPanel } from "@/components/viewer/pdf/chrome/pdf-references-panel";
 import { PdfToolbar } from "@/components/viewer/pdf/chrome/pdf-toolbar";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
+import { PdfFigureLightbox } from "@/components/viewer/pdf/figure-lightbox";
 import { usePdfActiveAnchors } from "@/components/viewer/pdf/hooks/use-pdf-active-anchors";
 import { usePdfAskThreads } from "@/components/viewer/pdf/hooks/use-pdf-ask-threads";
 import { usePdfBookmarkEditor } from "@/components/viewer/pdf/hooks/use-pdf-bookmark-editor";
@@ -163,6 +162,11 @@ import {
 	removePageBookmark,
 } from "@/lib/pdf/bookmark-edit";
 import { embedPdfDocumentId } from "@/lib/pdf/document-id";
+import {
+	closeFigureLightbox,
+	figureLightboxStore,
+	openFigureLightbox,
+} from "@/lib/pdf/figure-lightbox-store";
 import { HIGHLIGHT_HEX_LIST } from "@/lib/pdf/highlight/palette";
 import { partitionHighlightPaint } from "@/lib/pdf/highlight/translated-geometry";
 import {
@@ -533,14 +537,6 @@ function pdfSelectionMenuContext(input: {
 const regionImageSrc = (image: { data: string; mimeType: string }) =>
 	`data:${image.mimeType};base64,${image.data}`;
 
-const VISUAL_NOTE_KINDS: ReadonlySet<string> = new Set([
-	"image",
-	"chart",
-	"table",
-	"algorithm",
-	"formula",
-]);
-
 function PdfViewerInner({
 	runtime,
 	onInkDirtyChange,
@@ -588,10 +584,10 @@ function PdfViewerInner({
 			? 0
 			: COMMENT_RAIL_WIDTH_PX;
 	const [importBusy, setImportBusy] = useState(false);
-	const [figureLightbox, setFigureLightbox] = useState<{
-		src: string;
-		title: string;
-	} | null>(null);
+	const figureLightbox = useStore(
+		figureLightboxStore,
+		(state) => state.request,
+	);
 	const [figureHover, setFigureHover] = useState<{
 		src: string;
 		left: number;
@@ -1778,7 +1774,6 @@ function PdfViewerInner({
 		visualCropPending,
 		visualCropRegion,
 		toggleRegionSelect,
-		beginVisualAnnotation,
 		beginRegionPrompt,
 		handleVisualRegionSelect,
 	} = usePdfRegionFraming({
@@ -1872,6 +1867,7 @@ function PdfViewerInner({
 			!selectionMenu ||
 			plainViewer ||
 			!canTranslateSelection ||
+			capabilities.apiOnly ||
 			!autoTranslateSelection ||
 			!anchorKey
 		) {
@@ -1884,6 +1880,7 @@ function PdfViewerInner({
 	}, [
 		canTranslateSelection,
 		autoTranslateSelection,
+		capabilities.apiOnly,
 		isActive,
 		plainViewer,
 		selectionMenu,
@@ -1926,52 +1923,6 @@ function PdfViewerInner({
 		});
 		closeSelectionMenu();
 	}, [isRemotePaper, plainViewer, regionSelecting, closeSelectionMenu]);
-
-	// Global 3 s hold: text selection turns into a note, a figure/table region
-	// becomes a visual note. This replaces the old click-to-annotate hit area.
-	const handleLongPressNote = useCallback(
-		(
-			page: { page: number; width: number; height: number },
-			point: { x: number; y: number },
-		) => {
-			if (plainViewer || isRemotePaper) return;
-			const pageIndex = page.page - 1;
-			const nx = page.width > 0 ? point.x / page.width : 0;
-			const ny = page.height > 0 ? point.y / page.height : 0;
-			const regions = hoverableRegionsByPage.get(pageIndex) ?? [];
-			const hits = regions
-				.filter(
-					(region) =>
-						nx >= region.bbox.x &&
-						nx <= region.bbox.x + region.bbox.w &&
-						ny >= region.bbox.y &&
-						ny <= region.bbox.y + region.bbox.h,
-				)
-				.sort((a, b) => a.bbox.w * a.bbox.h - b.bbox.w * b.bbox.h);
-			const hit = hits[0];
-			if (hit && VISUAL_NOTE_KINDS.has(hit.kind)) {
-				void beginVisualAnnotation(hit.pageIndex + 1, hit.bbox);
-				return;
-			}
-			if (selectionMenuRef.current) {
-				handleMenuNote();
-				return;
-			}
-			if (hit) {
-				void beginVisualAnnotation(hit.pageIndex + 1, hit.bbox);
-				return;
-			}
-			notifyError(t("pdf.noteNeedsSelection"));
-		},
-		[
-			beginVisualAnnotation,
-			handleMenuNote,
-			hoverableRegionsByPage,
-			isRemotePaper,
-			plainViewer,
-			t,
-		],
-	);
 
 	const handleSelectionCommentActiveChange = useCallback((active: boolean) => {
 		selectionCommentEngagedRef.current = active;
@@ -2226,7 +2177,7 @@ function PdfViewerInner({
 				page: region.pageIndex + 1,
 			});
 			void handleRenderLayoutThumb(region, 2400).then((image) => {
-				if (image) setFigureLightbox({ src: regionImageSrc(image), title });
+				if (image) openFigureLightbox({ src: regionImageSrc(image), title });
 				else notifyError(t("figures.imageUnavailable"));
 			});
 		},
@@ -2796,6 +2747,16 @@ function PdfViewerInner({
 				className="agentero-scroll-both min-h-0 min-w-0 flex-1"
 				onClickCapture={(event) => {
 					const target = event.target;
+					// A plain tap on the page clears the current text selection. Portaled
+					// menus, citations and chrome keep their own interaction.
+					if (
+						target instanceof Element &&
+						target.closest("[data-annotation-page]") &&
+						!target.closest("[data-pdf-chrome]")
+					) {
+						const scope = selectionCap?.forDocument(docId);
+						if (scope?.getState().selection) scope.clear();
+					}
 					// Observe the reading surface without swallowing its click. Portaled
 					// menus and page controls keep their own interaction unchanged.
 					if (
@@ -2814,7 +2775,6 @@ function PdfViewerInner({
 						inkEditable && isActive && !visualCropPending && !regionSelecting
 					}
 					docCapRef={docCapRef}
-					onLongPressNote={handleLongPressNote}
 				/>
 				<WheelZoomHandler docId={docId} />
 				<KeyboardScrollHandler
@@ -2918,42 +2878,13 @@ function PdfViewerInner({
 						document.body,
 					)
 				: null}
-			{figureLightbox
-				? createPortal(
-						<div
-							role="dialog"
-							aria-modal="true"
-							aria-label={figureLightbox.title}
-							className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-						>
-							<button
-								type="button"
-								aria-label={t("pdf.close")}
-								className="absolute inset-0 cursor-zoom-out bg-black/85"
-								onClick={() => setFigureLightbox(null)}
-							/>
-							<img
-								src={figureLightbox.src}
-								alt={figureLightbox.title}
-								className="pointer-events-none relative max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-							/>
-							<div className="pointer-events-none absolute top-[calc(env(safe-area-inset-top,0px)+0.75rem)] left-1/2 max-w-[calc(100vw-8rem)] -translate-x-1/2 truncate rounded-md bg-black/55 px-3 py-1 text-white text-sm">
-								{figureLightbox.title}
-							</div>
-							<Button
-								type="button"
-								variant="secondary"
-								size="icon"
-								className="absolute top-[calc(env(safe-area-inset-top,0px)+0.75rem)] right-3 size-11 rounded-full"
-								aria-label={t("pdf.close")}
-								onClick={() => setFigureLightbox(null)}
-							>
-								<X className="size-5" />
-							</Button>
-						</div>,
-						document.body,
-					)
-				: null}
+			{figureLightbox ? (
+				<PdfFigureLightbox
+					src={figureLightbox.src}
+					title={figureLightbox.title}
+					onClose={closeFigureLightbox}
+				/>
+			) : null}
 		</div>
 	);
 }

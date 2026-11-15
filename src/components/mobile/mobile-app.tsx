@@ -19,6 +19,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import agenteroLogo from "@/assets/agentero-logo.svg";
 import { useBridgeStatus } from "@/components/mobile/hooks/use-bridge-status";
 import { useMobileAgents } from "@/components/mobile/hooks/use-mobile-agents";
@@ -94,6 +95,10 @@ import {
 } from "@/lib/mobile/workspace";
 import { deletePaths } from "@/lib/paper/api";
 import type { PaperMetadata } from "@/lib/paper/types";
+import {
+	closeFigureLightbox,
+	figureLightboxStore,
+} from "@/lib/pdf/figure-lightbox-store";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
 import { PLAZA_SOURCES } from "@/lib/plaza/sources";
 
@@ -126,6 +131,9 @@ export default function MobileApp() {
 	} | null>(null);
 	const [workspacePreset, setWorkspacePreset] =
 		useState<MobileWorkspacePreset>("read");
+	const figureLightboxOpen = useStore(figureLightboxStore, (state) =>
+		Boolean(state.request),
+	);
 	const [inkDirty, setInkDirty] = useState(false);
 	const [inkMode, setInkMode] = useState(false);
 	const { ref: workspaceRef, widthClass } =
@@ -412,6 +420,10 @@ export default function MobileApp() {
 	);
 
 	const onSystemBack = useCallback(() => {
+		if (figureLightboxOpen) {
+			closeFigureLightbox();
+			return;
+		}
 		markInteraction();
 		if (dismissMobileBackLayer()) return;
 		if (paperInfoOpen) {
@@ -453,6 +465,7 @@ export default function MobileApp() {
 		}
 		if (notesDirty || inkDirty) canLeaveReader();
 	}, [
+		figureLightboxOpen,
 		markInteraction,
 		paperInfoOpen,
 		paperImportOpen,
@@ -951,6 +964,10 @@ export default function MobileApp() {
 														? acceptRegionPrompt
 														: undefined
 												}
+												onTranslationPaneChange={(open) => {
+													setWorkspacePreset(open ? "compare" : "read");
+													setReaderMode(open ? "notes" : "pdf");
+												}}
 											/>
 										) : null}
 									</EdgeSwipeBack>

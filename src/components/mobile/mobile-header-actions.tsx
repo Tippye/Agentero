@@ -80,14 +80,12 @@ export function MobileReaderModeToggle({
 						aria-pressed={preset === id}
 						onClick={() => onPresetChange(id)}
 						className={cn(
-							"flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-2",
+							"flex size-11 items-center justify-center rounded-md",
 							preset === id && "bg-background shadow-raised",
 						)}
+						title={label}
 					>
 						<Icon className="size-4" />
-						{widthClass !== "narrow" ? (
-							<span className="text-sm">{label}</span>
-						) : null}
 					</button>
 				))}
 			</div>

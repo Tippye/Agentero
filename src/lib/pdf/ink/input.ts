@@ -35,6 +35,8 @@ export function bindInkInput(options: {
 		event: PointerEvent,
 		current: () => boolean,
 	) => void;
+	/** A touch tap that never became a hold/pan; used to clear selection. */
+	onTap?: (page: InkInputPage, point: InkPosition) => void;
 }) {
 	const { target, editor } = options;
 	let stroke: {
@@ -51,7 +53,13 @@ export function bindInkInput(options: {
 		left: number;
 		top: number;
 		moved: boolean;
+		lastX: number;
+		lastY: number;
+		lastTime: number;
+		vx: number;
+		vy: number;
 	} | null = null;
+	let glideFrame = 0;
 	let hold: {
 		id: number;
 		page: InkInputPage;
@@ -142,10 +150,15 @@ export function bindInkInput(options: {
 		queued = [];
 		editor.append(samples);
 	};
+	const cancelGlide = () => {
+		if (glideFrame) cancelAnimationFrame(glideFrame);
+		glideFrame = 0;
+	};
 	const cancel = () => {
 		epoch++;
 		clearHold();
 		clearNoteHold();
+		cancelGlide();
 		held = null;
 		const active = stroke;
 		stroke = null;
@@ -286,6 +299,7 @@ export function bindInkInput(options: {
 		epoch++;
 		clearHold();
 		clearNoteHold();
+		cancelGlide();
 		held = null;
 		if (event.pointerType === "touch") {
 			// A resting hand must not pan, select, or start a stroke while a pen
@@ -326,6 +340,11 @@ export function bindInkInput(options: {
 					left: metrics.scrollLeft,
 					top: metrics.scrollTop,
 					moved: false,
+					lastX: event.clientX,
+					lastY: event.clientY,
+					lastTime: event.timeStamp,
+					vx: 0,
+					vy: 0,
 				};
 				capture(event.pointerId);
 			}
@@ -404,12 +423,20 @@ export function bindInkInput(options: {
 					HOLD_SLOP_PX
 				)
 					pan.moved = true;
-				if (pan.moved)
+				const dt = Math.max(1, event.timeStamp - pan.lastTime);
+				pan.vx = (event.clientX - pan.lastX) / dt;
+				pan.vy = (event.clientY - pan.lastY) / dt;
+				pan.lastX = event.clientX;
+				pan.lastY = event.clientY;
+				pan.lastTime = event.timeStamp;
+				if (pan.moved) {
+					cancelGlide();
 					options.viewport()?.scrollTo({
 						x: pan.left - (event.clientX - pan.x),
 						y: pan.top - (event.clientY - pan.y),
 						behavior: "instant",
 					});
+				}
 			}
 			consume(event);
 			return;
@@ -425,6 +452,7 @@ export function bindInkInput(options: {
 		consume(event);
 	};
 	const end = (event: PointerEvent) => {
+		const tapped = hold?.id === event.pointerId ? { ...hold } : null;
 		if (hold?.id === event.pointerId) clearHold();
 		if (noteHold?.id === event.pointerId) clearNoteHold();
 		if (suppressed.delete(event.pointerId)) {
@@ -452,9 +480,50 @@ export function bindInkInput(options: {
 			return;
 		}
 		if (touches.delete(event.pointerId)) {
+			if (tapped && !pan?.moved && event.type !== "pointercancel") {
+				options.onTap?.(
+					tapped.page,
+					inkPointFromClient(
+						{ x: event.clientX, y: event.clientY },
+						tapped.page.element.getBoundingClientRect(),
+						tapped.page,
+					),
+				);
+			}
+			const released = pan;
 			pan = null;
 			release(event.pointerId);
 			if (!touches.size && !stroke) palm = false;
+			// A short release glide keeps a flick feeling like native scrolling.
+			if (
+				released?.id === event.pointerId &&
+				released.moved &&
+				(Math.abs(released.vx) > 0.02 || Math.abs(released.vy) > 0.02)
+			) {
+				const viewport = options.viewport();
+				if (viewport) {
+					let { vx, vy } = released;
+					let last = performance.now();
+					const tick = (now: number) => {
+						const dt = Math.min(32, Math.max(1, now - last));
+						last = now;
+						const metrics = viewport.getMetrics();
+						viewport.scrollTo({
+							x: metrics.scrollLeft - vx * dt,
+							y: metrics.scrollTop - vy * dt,
+							behavior: "instant",
+						});
+						vx *= 0.93;
+						vy *= 0.93;
+						glideFrame =
+							Math.abs(vx) > 0.02 || Math.abs(vy) > 0.02
+								? requestAnimationFrame(tick)
+								: 0;
+					};
+					cancelGlide();
+					glideFrame = requestAnimationFrame(tick);
+				}
+			}
 			if (managed()) consume(event);
 			return;
 		}
