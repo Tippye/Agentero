@@ -19,7 +19,6 @@ const io = vi.hoisted(() => ({
 	sync: null as Captured | null,
 	download: null as Captured | null,
 	background: null as Captured | null,
-	easyScholar: null as Captured | null,
 	t: (key: string) => key,
 }));
 
@@ -37,15 +36,6 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: io.version }));
 vi.mock("@/lib/core/open-external", () => ({
 	openExternalUrl: io.openExternal,
 }));
-vi.mock(
-	"@/components/settings/panes/general/easy-scholar-settings-block",
-	() => ({
-		EasyScholarSettingsBlock: (props: Captured) => {
-			io.easyScholar = props;
-			return null;
-		},
-	}),
-);
 vi.mock("@/components/settings/panes/appearance-pane", () => ({
 	AppearancePane: (props: Captured) => {
 		io.appearance = props;
@@ -84,6 +74,8 @@ vi.mock("@/components/mobile/mobile-background-settings", () => ({
 }));
 
 import { MobileSettingsPage } from "@/components/mobile/mobile-settings-page";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { maskSecret } from "@/lib/core/secret-mask";
 import {
 	listenMobileSettings,
 	openMobileSettings,
@@ -123,14 +115,20 @@ function button(label: string): HTMLButtonElement {
 async function renderPage(open = true) {
 	await act(async () => {
 		root.render(
-			createElement(MobileSettingsPage, {
-				open,
-				section,
-				onSectionChange,
-				onClose,
-				vaultPath: "/vault",
-				onSynced,
-			}),
+			// The app root supplies the provider (main.tsx); the page itself
+			// renders tooltip-bearing settings blocks inside it.
+			createElement(
+				TooltipProvider,
+				null,
+				createElement(MobileSettingsPage, {
+					open,
+					section,
+					onSectionChange,
+					onClose,
+					vaultPath: "/vault",
+					onSynced,
+				}),
+			),
 		);
 	});
 	await act(async () => {});
@@ -139,6 +137,16 @@ async function renderPage(open = true) {
 async function click(label: string) {
 	await act(async () => button(label).click());
 	await act(async () => {});
+}
+
+async function edit(element: HTMLInputElement, value: string) {
+	await act(async () => {
+		Object.getOwnPropertyDescriptor(
+			HTMLInputElement.prototype,
+			"value",
+		)?.set?.call(element, value);
+		element.dispatchEvent(new Event("input", { bubbles: true }));
+	});
 }
 
 async function navigate(label: string, next: MobileSettingsSection) {
@@ -152,9 +160,10 @@ beforeEach(() => {
 	Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 	vi.clearAllMocks();
 	io.snapshot = structuredClone(DEFAULT_SETTINGS);
+	// The Host stores the plaintext secret but answers with its redaction.
 	io.save.mockImplementation(async (next: AppSettings) => {
-		io.snapshot = next;
-		return next;
+		io.snapshot = { ...next, easyScholarKey: maskSecret(next.easyScholarKey) };
+		return io.snapshot;
 	});
 	io.version.mockResolvedValue("9.9.9");
 	section = "appearance";
@@ -227,7 +236,10 @@ describe("mobile settings page", () => {
 		expect(io.translate?.apiOnly).toBe(true);
 		expect(io.translate?.settings).toBe(io.snapshot);
 		await navigate("settings:general.easyScholar.section", "easyscholar");
-		expect(io.easyScholar?.savedKey).toBe(io.snapshot?.easyScholarKey);
+		expect(container.textContent).toContain("general.easyScholar.section");
+		expect(
+			container.querySelector<HTMLInputElement>("#easy-scholar-key")?.value,
+		).toBe(io.snapshot?.easyScholarKey);
 		await navigate("settings:nav.layout", "layout");
 		expect(io.layout?.apiOnly).toBe(true);
 		expect(io.layout?.hostContext).toEqual({ kind: "local" });
@@ -238,6 +250,40 @@ describe("mobile settings page", () => {
 		await navigate("mobile:background.title", "background");
 		expect(io.background?.active).toBe(true);
 		expect(io.background?.onStateChange).toBeUndefined();
+	});
+
+	it("keeps the saved EasyScholar secret masked and preserves unrelated settings", async () => {
+		io.snapshot = {
+			...structuredClone(DEFAULT_SETTINGS),
+			easyScholarKey: "******",
+			locale: "en",
+			batchImportConcurrency: 2,
+		};
+		const before = structuredClone(io.snapshot);
+		section = "easyscholar";
+		await renderPage();
+		const input = container.querySelector("#easy-scholar-key");
+		if (!(input instanceof HTMLInputElement))
+			throw new Error("Missing EasyScholar key input");
+		expect(input.type).toBe("password");
+		expect(input.value).toBe("******");
+		await edit(input, "user-supplied-key");
+		await click("general.easyScholar.confirm");
+		expect(io.save).toHaveBeenCalledExactlyOnceWith({
+			...before,
+			easyScholarKey: "user-supplied-key",
+		});
+		// The committed key comes back redacted from the Host, never as plaintext.
+		expect(input.value).toBe(maskSecret("user-supplied-key"));
+	});
+
+	it("opens the EasyScholar console through the guarded opener", async () => {
+		section = "easyscholar";
+		await renderPage();
+		await click("general.easyScholar.openKeyPage");
+		expect(io.openExternal).toHaveBeenCalledExactlyOnceWith(
+			"https://www.easyscholar.cc/console/user/open",
+		);
 	});
 
 	it("shows a compact about page with the app version and GitHub link", async () => {

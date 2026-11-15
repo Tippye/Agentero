@@ -323,7 +323,18 @@ export function MobileSettingsPage({
 									keyDraft={easyScholarKeyDraft}
 									onKeyDraftChange={setEasyScholarKeyDraft}
 									onCommitKey={async (value) => {
-										patch({ easyScholarKey: value.trim() });
+										// The Host answers with its redacted secret: render that
+										// mask, never keep the plaintext draft on screen.
+										try {
+											setSettings(
+												await saveSettingsAsync({
+													...loadSettings(),
+													easyScholarKey: value.trim(),
+												}),
+											);
+										} catch (error) {
+											notifyError(errorMessage(error));
+										}
 									}}
 									onOpenKeyPage={() =>
 										openExternalUrl(
