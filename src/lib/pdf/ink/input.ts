@@ -9,9 +9,9 @@ export type InkViewport = {
 	getMetrics(): { scrollLeft: number; scrollTop: number };
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
-export const INK_LONG_PRESS_MS = 500;
+export const INK_LONG_PRESS_MS = 1000;
 /** A pen in range keeps new finger gestures out of an active writing session. */
-export const INK_PEN_HOVER_GUARD_MS = 1000;
+export const INK_PEN_HOVER_GUARD_MS = 1500;
 const HOLD_SLOP_PX = 8;
 /** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {

@@ -17,6 +17,7 @@ Settings → **翻译**：
   - 随后做一次连通性 probe。卡片不承担「设为默认」选择。probe 失败时弹窗显示 Host 返回的真实原因（超时、DNS、TLS、鉴权、缺 key 等），不再只显示「不可用」，便于区分网络问题与配置问题；错误文本不含明文密钥。
   - OpenAI 兼容翻译要求服务支持 **Chat Completions** 格式：`POST {baseUrl}/chat/completions`，返回 `choices[0].message.content`。设置里填写 Base URL（例如 `https://api.openai.com/v1` 或服务商自己的 `/v1` 根地址），不要填写 Responses / Completions 端点；应用会自动追加 `/chat/completions`。
     用户配置说明见 [配置 OpenAI 兼容翻译](../usage/translate-openai-compatible.md)。
+- 工具栏翻译按钮只响应短按，不再识别长按（长按与点击原本调用同一开关，容易重复启动/停止）。
 - 移动端全文翻译同样通过共享 JobCenter 任务执行：点击工具栏翻译按钮后，即使离开阅读页，任务仍在应用级运行时继续；底部后台任务条显示阶段、百分比与取消入口，失败会保留原因。移动端不打开桌面双栏翻译标签，统一在当前 PDF 上叠加显示。
 - 默认服务为 Agent 时展示 Agent / 模型座。
 - **导入后自动翻译**：开启后导入的论文在版面解析完成后后台翻译全文；并发数控制同时翻译的论文数。只有导入 / 下载链路触发，打开论文补解析和手动重新解析不触发。实现见下文「导入后自动翻译」。
