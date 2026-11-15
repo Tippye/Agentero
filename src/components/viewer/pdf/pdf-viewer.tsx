@@ -167,6 +167,7 @@ import {
 	figureLightboxStore,
 	openFigureLightbox,
 } from "@/lib/pdf/figure-lightbox-store";
+import { publishHighlightMirror } from "@/lib/pdf/highlight/mirror-store";
 import { HIGHLIGHT_HEX_LIST } from "@/lib/pdf/highlight/palette";
 import { partitionHighlightPaint } from "@/lib/pdf/highlight/translated-geometry";
 import {
@@ -800,6 +801,11 @@ function PdfViewerInner({
 		onHighlightsChangeRef,
 		onReloadAnnotations,
 	});
+
+	useEffect(() => {
+		if (translationPane) return;
+		publishHighlightMirror(paperKey, highlights);
+	}, [highlights, paperKey, translationPane]);
 
 	// ---- Persisted marks (ask threads / translates / visual traces) ----
 

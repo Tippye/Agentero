@@ -508,6 +508,8 @@ type AnnotationCapabilityProvides = ReturnType<
 
 export type PdfPageLayersProps = {
 	inkEditor?: InkEditor | null;
+	/** Paint/edit ink over a translated reflow page too (companion pane). */
+	inkOverReflow?: boolean;
 	onBookmarkPage?: (pageIndex: number) => void;
 	pageBookmarked?: boolean;
 	bookmarkSaving?: boolean;
@@ -539,6 +541,7 @@ export type PdfPageLayersProps = {
 
 export const PdfPageLayers = memo(function PdfPageLayers({
 	inkEditor,
+	inkOverReflow = false,
 	onBookmarkPage,
 	pageBookmarked = false,
 	bookmarkSaving = false,
@@ -1229,21 +1232,23 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					className="pointer-events-none absolute inset-0 z-[2] bg-background/45"
 				/>
 			) : null}
-			{inkEditor && !reflowDocumentId && !mode.plainViewer && (
-				<UnrotatedPageFrame
-					rotation={pageRotation}
-					widthPx={frameWidth}
-					heightPx={frameHeight}
-					className="z-[9]"
-				>
-					<PdfInkLayer
-						editor={inkEditor}
-						page={pageIndex + 1}
-						width={pageSize?.width ?? frameWidth / pageScale}
-						height={pageSize?.height ?? frameHeight / pageScale}
-					/>
-				</UnrotatedPageFrame>
-			)}
+			{inkEditor &&
+				(!reflowDocumentId || inkOverReflow) &&
+				!mode.plainViewer && (
+					<UnrotatedPageFrame
+						rotation={pageRotation}
+						widthPx={frameWidth}
+						heightPx={frameHeight}
+						className="z-[9]"
+					>
+						<PdfInkLayer
+							editor={inkEditor}
+							page={pageIndex + 1}
+							width={pageSize?.width ?? frameWidth / pageScale}
+							height={pageSize?.height ?? frameHeight / pageScale}
+						/>
+					</UnrotatedPageFrame>
+				)}
 			<SearchLayer
 				documentId={docId}
 				pageIndex={pageIndex}

@@ -24,11 +24,13 @@ import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfCitationPreview } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
+import { PdfInkToolbar } from "@/components/viewer/pdf/chrome/pdf-ink-toolbar";
 import { PdfTranslateProgressChip } from "@/components/viewer/pdf/chrome/pdf-translate-progress";
 import { EMPTY_LAYOUT_REGIONS_BY_PAGE } from "@/components/viewer/pdf/constants";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
 import { usePdfCitations } from "@/components/viewer/pdf/hooks/use-pdf-citations";
 import { usePdfCrossrefPreview } from "@/components/viewer/pdf/hooks/use-pdf-crossref-preview";
+import { usePdfInk } from "@/components/viewer/pdf/hooks/use-pdf-ink";
 import { usePdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutTranslate } from "@/components/viewer/pdf/hooks/use-pdf-layout-translate";
 import { usePdfLinkUrlTip } from "@/components/viewer/pdf/hooks/use-pdf-link-url-tip";
@@ -50,13 +52,20 @@ import type {
 	ScreenPoint,
 } from "@/components/viewer/pdf/types";
 import { DockviewViewport } from "@/components/viewer/pdf/viewport/dockview-viewport";
+import { InkInputBridge } from "@/components/viewer/pdf/viewport/ink-input-bridge";
 import { KeyboardScrollHandler } from "@/components/viewer/pdf/viewport/keyboard-scroll-handler";
 import { PanDragHandler } from "@/components/viewer/pdf/viewport/pan-handler";
 import { PdfScroller } from "@/components/viewer/pdf/viewport/pdf-scroller";
 import { PdfVimKeyHandler } from "@/components/viewer/pdf/viewport/pdf-vim-key-handler";
 import { WheelZoomHandler } from "@/components/viewer/pdf/viewport/wheel-zoom-handler";
 import { openExternalUrl } from "@/lib/core/open-external";
+import type { PdfAskNormalizedRect } from "@/lib/pdf/ask/types";
 import { destinationInPageBox } from "@/lib/pdf/citation-dest-keys";
+import { useHighlightMirror } from "@/lib/pdf/highlight/mirror-store";
+import {
+	type HighlightColor,
+	normalizeHighlightColor,
+} from "@/lib/pdf/highlight/palette";
 import {
 	mirrorLayoutResultToTranslation,
 	translationSourceKey,
@@ -143,6 +152,8 @@ export function PdfTranslationViewerInner({
 	importIdentifier,
 	isActive = true,
 	onHandle,
+	onInkDirtyChange,
+	onInkModeChange,
 }: PdfViewerInnerProps) {
 	const capabilities = pdfViewerCapabilities(runtime);
 	usePdfScrollSync(docId);
@@ -153,6 +164,21 @@ export function PdfTranslationViewerInner({
 	const { provides: docCap } = useDocumentManagerCapability();
 	const docCapRef = useRef(docCap);
 	docCapRef.current = docCap;
+	const inkEditable = Boolean(paperRelPath && vaultPath && !isRemotePaper);
+	const { editor: inkEditor } = usePdfInk({
+		vaultPath,
+		paperRelPath,
+		enabled: inkEditable,
+		editable: inkEditable,
+		isActive,
+		onInkDirtyChange,
+		onInkModeChange,
+	});
+	const inkPageSize = useCallback(
+		(page: number) =>
+			docCapRef.current?.getDocument(docId)?.pages[page - 1]?.size ?? null,
+		[docId],
+	);
 	// Interaction manager is registered; keep the capability subscribed so
 	// GlobalPointerProvider / pan-zoom gestures stay wired.
 	useInteractionManagerCapability();
@@ -280,13 +306,39 @@ export function PdfTranslationViewerInner({
 	const linkInkByKey = linkSource.inkByKey;
 	const glyphRunsByPage = linkSource.glyphRunsByPage;
 
+	const mirroredHighlights = useHighlightMirror(paperKey);
+	const mirroredPaint = useMemo(() => {
+		const paints = new Map<
+			number,
+			{ id: string; color: HighlightColor; rects: PdfAskNormalizedRect[] }[]
+		>();
+		for (const highlight of mirroredHighlights) {
+			const rects = (
+				highlight.translatedRects?.length
+					? highlight.translatedRects
+					: highlight.rects
+			) as PdfAskNormalizedRect[];
+			if (!rects.length) continue;
+			const paint = {
+				id: highlight.id,
+				color: normalizeHighlightColor(highlight.color),
+				rects,
+			};
+			const list = paints.get(highlight.page);
+			if (list) list.push(paint);
+			else paints.set(highlight.page, [paint]);
+		}
+		return paints;
+	}, [mirroredHighlights]);
+
 	const pageMarks = useMemo<PdfPageMarksSlice>(
 		() => ({
 			...EMPTY_MARKS,
 			citationLinks: linkSource.citationLinks,
 			textLinks: linkSource.textLinks,
+			translatedHighlightsByPage: mirroredPaint,
 		}),
-		[linkSource],
+		[linkSource, mirroredPaint],
 	);
 
 	const pageLayout = useMemo<PdfPageLayoutSlice>(
@@ -497,6 +549,8 @@ export function PdfTranslationViewerInner({
 				tone={pdfTone}
 				zoomRef={zoomRef}
 				annotationCap={null}
+				inkEditor={inkEditor}
+				inkOverReflow
 				marks={pageMarks}
 				layout={pageLayout}
 				mode={PAGE_MODE}
@@ -511,6 +565,7 @@ export function PdfTranslationViewerInner({
 			pageLayout,
 			pageHandlers,
 			reflowDisplayDocumentId,
+			inkEditor,
 		],
 	);
 
@@ -526,6 +581,12 @@ export function PdfTranslationViewerInner({
 				className="agentero-scroll-both min-h-0 min-w-0 flex-1"
 			>
 				<WheelZoomHandler docId={docId} />
+				<InkInputBridge
+					editor={inkEditor}
+					documentId={docId}
+					enabled={inkEditable && isActive}
+					docCapRef={docCapRef}
+				/>
 				<KeyboardScrollHandler
 					documentId={docId}
 					active={isActive}
@@ -547,6 +608,13 @@ export function PdfTranslationViewerInner({
 					</GlobalPointerProvider>
 				</ZoomGestureWrapper>
 			</DockviewViewport>
+			{inkEditor && inkEditable && (
+				<PdfInkToolbar
+					editor={inkEditor}
+					editable={inkEditable}
+					pageSize={inkPageSize}
+				/>
+			)}
 			<PdfTranslateProgressChip
 				layoutTranslateRunning={layoutTranslateRunning}
 				layoutTranslatePreparing={layoutTranslatePreparing}

@@ -272,6 +272,8 @@ export function MobileReaderPage({
 										translationPane
 										translationOnly
 										isActive={active && translationVisible}
+										onInkDirtyChange={onInkDirtyChange}
+										onInkModeChange={onInkModeChange}
 										className="h-full"
 									/>
 									<Button
