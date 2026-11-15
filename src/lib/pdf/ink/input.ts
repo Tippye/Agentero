@@ -479,7 +479,18 @@ export function bindInkInput(options: {
 			consume(event);
 	};
 	const touch = (event: TouchEvent) => {
-		if (managed() && (stroke || palm || held !== null)) consume(event);
+		if (!managed()) return;
+		// One finger on the page is our own pan (the ink/selection layer owns the
+		// pointer). Consuming every move keeps WebView's native long-press/drag
+		// text selection from fighting the scroll. Two fingers are left to the
+		// zoom gesture wrapper.
+		if (
+			stroke ||
+			palm ||
+			held !== null ||
+			(touches.size === 1 && event.type === "touchmove")
+		)
+			consume(event);
 	};
 	const lostCapture = (event: PointerEvent) => {
 		if (

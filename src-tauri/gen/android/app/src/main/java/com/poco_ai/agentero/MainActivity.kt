@@ -17,6 +17,12 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    // The app is a native shell: browser page zoom would scale the whole UI
+    // (e.g. after pinching a full-screen image) and cannot be reset from the
+    // web layer. PDF/image zoom is implemented inside their own surfaces.
+    webView.settings.setSupportZoom(false)
+    webView.settings.builtInZoomControls = false
+    webView.settings.displayZoomControls = false
     // Wry invokes this before its first application URL load. Keep its lifecycle
     // intact while known unsupported engines receive native, CSS-independent UI.
     compatibilityGuard.onWebViewCreate(webView)
