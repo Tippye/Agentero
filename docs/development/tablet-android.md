@@ -429,7 +429,23 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；v3 签名与 16KB 对齐通过。
 - 真机重点验收：慢速短滑、快速甩动、停顿后抬起、连续滑动是否与调参时一致；设置页已无“阅读手感”入口；旧设置不再弹出/丢失其他配置。
 
-## 18. 参考
+## 18. 原文/译文手写与高亮共享（2026-11-15）
+
+本轮改动（commit `5a44a3e88`）：
+
+- **手写/绘制图形双向实时同步**：`PdfTranslationViewerInner` 也挂载 `usePdfInk`、`InkInputBridge`、`PdfInkLayer` 与 `PdfInkToolbar`。两个视图使用同一 paper key，因此共享同一个 `InkController`；任一侧落笔、擦除、移动、撤销都会立即更新另一侧的 `PdfInkLayer`，并写回同一 `marks/ink/pN.json`。
+- `PdfPageLayers` 新增 `inkOverReflow`，允许在译文 reflow 页上绘制/显示 ink；译文的笔工具栏使用译文文档页面尺寸。
+- **高亮/批注镜像**：原文把 `PdfHighlight[]` 发布到 paper-keyed 的内存 mirror；译文通过 `translatedHighlightsByPage` 在当前翻译 overlay 上实时绘制。原文新增、改色、改备注、删除后译文同步变化；有 `translatedRects` 时用译文框，否则回退到原文归一化框。
+- 边界：标注的**创建/写盘仍由原文的 EmbedPDF annotation plugin 负责**。译文 pane 是无 annotation plugin 的轻量视图，本轮只做实时镜像，不在译文侧新建 PDF annotation；视觉笔记卡片/comment rail 也仍只在原文 pane 操作。手写是完整双向，标注是原文→译文实时镜像。
+
+验证与产物：
+
+- TypeScript、Biome 通过；手写/移动工作区/PDF 能力/设置 4 个文件 46 项测试通过；Android ARM64 release 构建成功。
+- 新 APK：[Agentero-0.15.5-translation-sync-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-translation-sync-arm64-test.apk)，56,761,105 字节，SHA-256 `028b161f880fdefafd23c5221b98cf40fa297af75c230385e3edd755a364c67c`；包内 library SHA-256 `5cc635211914229ce0579252061501904da644918bf65515b85bf361a3b01926`。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；v3 签名与 16KB 对齐通过。
+- 真机重点验收：在原文画一笔，译文立即出现；在译文画一笔/擦除/撤销，原文立即变化且重启后保留；原文新建/改色/删除高亮，译文同步出现/变色/消失；译文 reflow 页的 ink 位置是否与原文页面尺寸一致。
+
+## 19. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
