@@ -58,6 +58,8 @@ export function bindInkInput(options: {
 		lastTime: number;
 		vx: number;
 		vy: number;
+		/** Recent touch samples (≤80 ms) used for a stable release velocity. */
+		samples: { x: number; y: number; t: number }[];
 	} | null = null;
 	let glideFrame = 0;
 	let hold: {
@@ -345,6 +347,7 @@ export function bindInkInput(options: {
 					lastTime: event.timeStamp,
 					vx: 0,
 					vy: 0,
+					samples: [{ x: event.clientX, y: event.clientY, t: event.timeStamp }],
 				};
 				capture(event.pointerId);
 			}
@@ -423,12 +426,21 @@ export function bindInkInput(options: {
 					HOLD_SLOP_PX
 				)
 					pan.moved = true;
-				const dt = Math.max(1, event.timeStamp - pan.lastTime);
-				pan.vx = (event.clientX - pan.lastX) / dt;
-				pan.vy = (event.clientY - pan.lastY) / dt;
+				// Average over a short window instead of the last (often 1 ms) event:
+				// a single noisy sample was the source of direction jitter at release.
+				const now = event.timeStamp;
+				pan.samples.push({ x: event.clientX, y: event.clientY, t: now });
+				while (pan.samples.length > 1 && now - pan.samples[0].t > 80)
+					pan.samples.shift();
+				const first = pan.samples[0];
+				const span = now - first.t;
+				if (span > 0) {
+					pan.vx = (event.clientX - first.x) / span;
+					pan.vy = (event.clientY - first.y) / span;
+				}
 				pan.lastX = event.clientX;
 				pan.lastY = event.clientY;
-				pan.lastTime = event.timeStamp;
+				pan.lastTime = now;
 				if (pan.moved) {
 					cancelGlide();
 					options.viewport()?.scrollTo({
@@ -498,25 +510,31 @@ export function bindInkInput(options: {
 			if (
 				released?.id === event.pointerId &&
 				released.moved &&
+				Math.abs(event.timeStamp - released.lastTime) < 80 &&
 				(Math.abs(released.vx) > 0.02 || Math.abs(released.vy) > 0.02)
 			) {
 				const viewport = options.viewport();
 				if (viewport) {
 					let { vx, vy } = released;
+					// Keep an accumulator instead of reading scrollLeft every frame:
+					// async scroll commits made the read-back position oscillate.
+					const metrics = viewport.getMetrics();
+					let x = metrics.scrollLeft;
+					let y = metrics.scrollTop;
 					let last = performance.now();
 					const tick = (now: number) => {
 						const dt = Math.min(32, Math.max(1, now - last));
 						last = now;
-						const metrics = viewport.getMetrics();
-						viewport.scrollTo({
-							x: metrics.scrollLeft - vx * dt,
-							y: metrics.scrollTop - vy * dt,
-							behavior: "instant",
-						});
-						vx *= 0.93;
-						vy *= 0.93;
+						// Time-based exponential friction (~600 ms tail), independent of
+						// refresh rate.
+						const friction = Math.exp(-0.005 * dt);
+						x -= vx * dt;
+						y -= vy * dt;
+						viewport.scrollTo({ x, y, behavior: "instant" });
+						vx *= friction;
+						vy *= friction;
 						glideFrame =
-							Math.abs(vx) > 0.02 || Math.abs(vy) > 0.02
+							Math.abs(vx) > 0.015 || Math.abs(vy) > 0.015
 								? requestAnimationFrame(tick)
 								: 0;
 					};
