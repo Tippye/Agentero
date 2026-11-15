@@ -453,7 +453,17 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 新 APK：[Agentero-0.15.5-translation-blackfix-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-translation-blackfix-arm64-test.apk)，56,761,105 字节，SHA-256 `91f7c4fd30f52cb847963e710efe92b7bcbe61ab5e5f167299459792dfdd89a7`；包内 library SHA-256 `83285298244b01d39f51a2a28cec5cffe44f2ca4216909649236e81287f2a49d`。
 - 真机验收：点击翻译应正常显示译文页，不再黑屏；译文内可手写并与原文同步。
 
-## 20. 参考
+## 20. 译文手写改用原文档唯一工具栏（2026-11-15）
+
+- 问题：译文 pane 也渲染了 `PdfInkToolbar`，两个工具栏各自绑定一个 `InkEditor`；手写笔在两侧切换时，工具状态互相覆盖，出现笔型切换错误。
+- 修复：`usePdfInk` 新增 `sharedEditor` 选项，原文与译文两个可编辑 pane 共享同一个 `InkEditor`（每个 paper 一个，只读嵌入仍隔离）。译文 pane 删除自己的 `PdfInkToolbar`，只保留原文档工具栏；笔/荧光笔/橡皮/撤销的模式由这一处统一驱动两侧文档。
+- 共享编辑器在最后一个可编辑 pane 卸载时清理，避免 paper 重开时持有旧 controller。
+- 边界：窄屏只显示译文 pane 时，原文档工具栏不可见；切回原文后仍可切换工具。译文 pane 本身不提供工具栏入口。
+- 验证：新增回归测试确认两个可编辑 pane 拿到同一个 editor 和同一 pen 模式；手写输入、ink viewer、移动工作区 39 项通过。
+- 新 APK：[Agentero-0.15.5-single-toolbar-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-single-toolbar-arm64-test.apk)，56,761,105 字节，SHA-256 `f6564ee1f4ea66ff0a1087bef41c9b6c42cc840f221e537d6f760caabfd8618a`；包内 library SHA-256 `b3898aa8fc8afdc0512daa27b43e98812c2e8d0fadf922967884f65334ebffe6`。
+- 真机验收：译文页无手写工具栏；原文工具栏切到手写/荧光笔/橡皮后，两侧笔型一致；双栏交替书写不再出现工具切换错乱。
+
+## 21. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
