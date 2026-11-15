@@ -279,7 +279,9 @@ it("opens the real settings page from the real Sidebar while keeping runtime own
 	const navButtons = [...page.querySelectorAll("nav button")];
 	expect(navButtons.map((item) => item.textContent)).toEqual([
 		"settings:nav.appearance",
+		"settings:nav.reading",
 		"settings:nav.translate",
+		"settings:general.easyScholar.section",
 		"settings:nav.layout",
 		"settings:nav.sync",
 		"mobile:background.title",

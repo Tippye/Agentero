@@ -617,19 +617,6 @@ describe("mobile paper info reuses catalog and business details", () => {
 		).toEqual(["#easyscholar:if=4.2", "method"]);
 		expect(document.body.textContent).toContain("method");
 	});
-	it("preserves user settings and keeps the saved EasyScholar secret masked", async () => {
-		await renderInfo();
-		const input = required<HTMLInputElement>('input[type="password"]');
-		await edit(input, "user-supplied-key");
-		await click("general.easyScholar.confirm");
-		expect(io.save).toHaveBeenCalledExactlyOnceWith({
-			easyScholarKey: "user-supplied-key",
-			batchImportConcurrency: 2,
-			locale: "en",
-			unrelated: "preserved",
-		});
-		expect(input.value).toBe("********");
-	});
 	it("opens shared-panel links in the native browser, rejects unsafe URLs and never falls back to WebView", async () => {
 		const fallback = vi.spyOn(window, "open").mockImplementation(() => null);
 		await renderInfo({
@@ -650,12 +637,6 @@ describe("mobile paper info reuses catalog and business details", () => {
 		io.open.mockRejectedValueOnce(new Error("Native opener denied"));
 		await act(async () => repository.click());
 		expect(io.error).toHaveBeenCalledWith("Native opener denied");
-		io.open.mockRejectedValueOnce(new Error("Console opener denied"));
-		await click("general.easyScholar.openKeyPage");
-		expect(io.open).toHaveBeenCalledWith(
-			"https://www.easyscholar.cc/console/user/open",
-		);
-		expect(io.error).toHaveBeenCalledWith("Console opener denied");
 		expect(fallback).not.toHaveBeenCalled();
 		expect(await openMobilePaperLink("javascript:alert(1)")).toBe(false);
 		expect(await openMobilePaperLink("file:///private/secret")).toBe(false);
