@@ -355,7 +355,23 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；FileProvider 与 PDF 分享边界未变。
 - 真机重点验收：设置里能保存/探测 EasyScholar 密钥且论文页不再出现；打开/恢复论文不再出现空右栏或错误预设按钮；1 秒选择、3 秒备注、图表 hover 放大与点击全屏；按钮 hover 浅灰反馈。
 
-## 14. 参考
+## 14. WebView 缩放与滑动选择修复重新打包验证（2026-11-15）
+
+本轮修复（commit `a0445ee39`）：
+
+- **全屏图片后整个应用被放大**：Android WebView 允许浏览器级页面缩放，查看全屏图片时双指/双击缩放会把壳层 UI 整体放大，且网页层无法复位。现在 `MainActivity.onWebViewCreate` 关闭 `supportZoom` / `builtInZoomControls` / `displayZoomControls`，并把页面 viewport 收紧为 `maximum-scale=1, user-scalable=no`；PDF 缩放与图片查看仍由应用内视图控制，不再影响全局界面。
+- **文字上直接滑动触发选中、翻页卡顿**：单指在 PDF 上滑动时，`bindInkInput` 现在会阻止单指 `touchmove` 的默认行为，避免 WebView 原生文字选择与自定义 pan 抢手势；双指缩放仍放行给 ZoomGestureWrapper。1 秒长按选择、3 秒长按备注不变。
+- 上一轮的 EasyScholar 设置、备注手势、图表 hover/全屏、双栏翻译等保持。
+
+验证与产物：
+
+- TypeScript 通过；Biome 无告警；手写输入 18 项（含单指 touchmove 被阻止、双指仍透传）与移动工作区/设置/PDF 能力相关测试通过。
+- Android ARM64 release 构建成功；v3 签名、ZIP 完整性与 ZIP/native 16KB 对齐通过。
+- 新 APK：[Agentero-0.15.5-zoom-touch-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-zoom-touch-arm64-test.apk)，56,757,009 字节，SHA-256 `b96de711135aad212cba9182839e2183d02f37510a0ea4e2736d560aa4f22aac`；包内 library SHA-256 `c7304cf0b14207d3adfacbe5efe4d03176cfbbf8325573034369dfd1c518fa03`。
+- 包名 `com.poco_ai.agentero`，版本 0.15.5/15005，API 33/36，仅 ARM64；FileProvider 与 PDF 分享边界未变。
+- 真机重点验收：查看图片后关闭，应用 UI 不再整体放大；双指缩放图片/页面不会改变壳层；单指在文字上滑动只滚动，不弹出选区或明显卡顿；长按 1 秒选择、3 秒备注仍可用。
+
+## 15. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
