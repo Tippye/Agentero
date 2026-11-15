@@ -259,6 +259,9 @@ describe("automatic stylus and long-press arbitration", () => {
 			behavior: "instant",
 		});
 		expect(r.editor.getState().selection).toBeNull();
+		const panMove = new Event("touchmove", { bubbles: true, cancelable: true });
+		r.page.dispatchEvent(panMove);
+		expect(panMove.defaultPrevented).toBe(true);
 		pointer(r.page, "pointerup", "touch");
 		const touchRoute = vi.fn();
 		r.target.addEventListener("touchstart", touchRoute);
