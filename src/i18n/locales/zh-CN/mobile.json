@@ -171,6 +171,7 @@
 		"cancel": "取消任务"
 	},
 	"reader": {
+		"closeTranslation": "关闭对照译文",
 		"title": "笔记",
 		"back": "返回论文库",
 		"pdf": "PDF",

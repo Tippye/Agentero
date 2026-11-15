@@ -171,6 +171,7 @@
 		"cancel": "Cancel task"
 	},
 	"reader": {
+		"closeTranslation": "Close translation",
 		"title": "Notes",
 		"back": "Back to library",
 		"pdf": "PDF",

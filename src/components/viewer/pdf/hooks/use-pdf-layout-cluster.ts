@@ -210,7 +210,6 @@ export function usePdfLayoutCluster({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
-		hideLayoutTranslate,
 		togglePageLayoutTranslate,
 	} = usePdfLayoutTranslate({
 		enabled: capabilities.layoutTranslation,
@@ -260,7 +259,6 @@ export function usePdfLayoutCluster({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
-		hideLayoutTranslate,
 		togglePageLayoutTranslate,
 	};
 }
