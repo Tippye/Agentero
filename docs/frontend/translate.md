@@ -269,4 +269,4 @@ TeX 符号字体（`txsys` / `txmi` / `txex`）与 Libertine Math 一并归入�
 
 ### 移动端打包与离线词典
 
-`mobile` / Android / iOS 的 Tauri 配置只额外打包 `dictionary/*`，不继承桌面的 PDFium、adapters、插件 sidecar 或 CLI，构建前统一执行 `pnpm dictionary:stage`。iOS 的 bundle 资源以普通文件路径提供，`dictionary_lookup` 可直接打开；Android 的 bundle 资源经 `asset://localhost/` 暴露，不是 rusqlite 可打开的文件。当前 Android 查词在资源不可读时按 miss 返回并由前端回退到当前翻译服务，不阻断划词翻译；后续需要由 Host 把词典原子解包到应用私有目录后再启用离线查词，不能仅靠增加资源 glob 宣称已支持。
+`mobile` / Android / iOS 的 Tauri 配置只额外打包 `dictionary/*`，不继承桌面的 PDFium、adapters、插件 sidecar 或 CLI，构建前统一执行 `pnpm dictionary:stage`。iOS 的 bundle 资源以普通文件路径提供，`dictionary_lookup` 可直接打开。Android 的 bundle 资源经 `asset://localhost/` 暴露，不是 rusqlite 可打开的文件；首次查词时原生适配器用 `AssetManager` 把 `lexicon.sqlite` 复制到应用私有 `files/dictionary/`，按 `dictionary/version.txt` 判断版本，经临时文件 + rename 原子提交，并把真实路径返回 Host；复制或版本校验失败仍按 miss 回退翻译服务，不阻断划词。进程内缓存成功路径，重复查词不再复制。

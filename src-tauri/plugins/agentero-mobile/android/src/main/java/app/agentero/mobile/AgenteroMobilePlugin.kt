@@ -9,7 +9,7 @@ import app.tauri.plugin.Plugin
 
 /** The shared branch advertises no unimplemented native background ability. */
 @TauriPlugin
-class AgenteroMobilePlugin(activity: Activity) : Plugin(activity) {
+class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private fun state(): JSObject = JSObject().apply {
         put("platform", "android")
         put("persistentConnection", false); put("finiteTasks", false)
@@ -25,6 +25,7 @@ class AgenteroMobilePlugin(activity: Activity) : Plugin(activity) {
         put("adapters", org.json.JSONArray()); put("presence", org.json.JSONArray())
     }) }
     @Command fun stylusSetTarget(invoke: Invoke) { stylusState(invoke) }
+    @Command fun ensureDictionary(invoke: Invoke) = DictionaryAssets.ensure(activity, invoke)
     @Command fun readState(invoke: Invoke) { invoke.resolve(state()) }
     @Command fun configure(invoke: Invoke) { invoke.reject("Android background adapter is unavailable") }
     @Command fun requestNotifications(invoke: Invoke) { invoke.reject("Android background adapter is unavailable") }
