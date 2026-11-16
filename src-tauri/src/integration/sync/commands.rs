@@ -356,6 +356,8 @@ pub struct SyncScopeSizes {
     pub pdf: u64,
     pub source: u64,
     pub attachments: u64,
+    pub ink: u64,
+    pub translated: u64,
 }
 
 #[tauri::command]
@@ -392,6 +394,8 @@ pub async fn sync_scope_sizes(
                     Some("pdf") => sizes.pdf += size,
                     Some("source") => sizes.source += size,
                     Some("attachments") => sizes.attachments += size,
+                    Some("ink") => sizes.ink += size,
+                    Some("translated") => sizes.translated += size,
                     _ => {}
                 }
             }

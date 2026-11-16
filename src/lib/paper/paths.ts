@@ -28,6 +28,7 @@ export const PAPER_INTERNAL_DIR_NAMES = [
 	"source",
 	"assets",
 	"marks",
+	"translated",
 	PAPER_ATTACHMENTS_DIR,
 ] as const;
 
@@ -54,7 +55,7 @@ export function isPaperAttachmentsDirName(
 export function isPaperAssetPath(path: string | null): boolean {
 	if (!path) return false;
 	const norm = normalizePath(path);
-	return /(^|\/)papers\/.+?\/(source|assets|marks|attachments)(\/|$)/i.test(
+	return /(^|\/)papers\/.+?\/(source|assets|marks|translated|attachments)(\/|$)/i.test(
 		norm,
 	);
 }

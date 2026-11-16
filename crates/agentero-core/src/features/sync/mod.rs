@@ -11,6 +11,12 @@
 //! and the headless CLI (`agentero sync …`), so both sides get the same
 //! merge, conflict and failure-recovery semantics.
 
+/// Wire code for a transport-level sync failure: the request never reached the
+/// server (DNS, refused/reset connection, timeout). Distinct from credential,
+/// configuration and HTTP-status errors because it is the only class that a
+/// later pass can clear on its own — the auto-sync scheduler retries it.
+pub const SYNC_UNREACHABLE: &str = "sync_unreachable";
+
 mod agentero;
 pub mod availability;
 pub mod config;

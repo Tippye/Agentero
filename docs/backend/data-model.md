@@ -44,6 +44,7 @@ papers/<id>/
 │   └── layout-index.json   # 侧栏同构索引（CLI/Agent；post-merge figure/table/…）
 ├── PAPER.md          # 无 TeX 时的派生正文（本地 liteparse 或云端引擎，见 paper-import.md § 正文解析引擎）
 ├── assets/           # NOTES 内嵌图等
+├── translated/       # 可选：全文翻译生成的译文 PDF（可重建；缓存开关打开时写入）
 └── attachments/      # 可选：用户支撑材料（supplement / 代码仓库等）
 ```
 

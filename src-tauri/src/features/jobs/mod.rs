@@ -14,6 +14,9 @@ use tokio_util::sync::CancellationToken;
 pub const JOB_CHANGED_EVENT: &str = "job:changed";
 pub const JOB_OFFER_EVENT: &str = "job:offer";
 
+/// Renderer-offer deadline, measured as **foreground idle** time since the last
+/// progress report: a locked phone suspends the process (and a long translation
+/// keeps reporting progress), neither of which means the renderer died.
 const RENDERER_JOB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -652,12 +655,54 @@ fn mark_running_locked(inner: &mut JobCenterInner, id: &JobId) -> Option<Started
 #[derive(Clone, Debug)]
 pub struct JobCenter {
     inner: Arc<Mutex<JobCenterInner>>,
+    /// Renderer deadlines only advance while the app is foregrounded.
+    background: Arc<std::sync::Mutex<RendererClock>>,
+}
+
+/// Wall-clock accounting for renderer offers. Mobile suspends the entire
+/// process while the device is locked; that stretch must not count as renderer
+/// inactivity, or unlocking after a longer pause would fail a job that was
+/// merely parked.
+#[derive(Debug, Default)]
+struct RendererClock {
+    backgrounded_at: Option<std::time::Instant>,
+    accumulated_background: std::time::Duration,
+}
+
+impl RendererClock {
+    fn set_foreground(&mut self, foreground: bool) {
+        match (foreground, self.backgrounded_at) {
+            (true, Some(since)) => {
+                self.accumulated_background += since.elapsed();
+                self.backgrounded_at = None;
+            }
+            (false, None) => self.backgrounded_at = Some(std::time::Instant::now()),
+            _ => {}
+        }
+    }
+    fn background_total(&self) -> std::time::Duration {
+        self.accumulated_background
+            + self
+                .backgrounded_at
+                .map(|since| since.elapsed())
+                .unwrap_or_default()
+    }
+}
+
+/// Time since `idle` with every backgrounded stretch removed.
+fn foreground_elapsed(
+    idle: std::time::Duration,
+    background_total: std::time::Duration,
+    background_at_idle: std::time::Duration,
+) -> std::time::Duration {
+    idle.saturating_sub(background_total.saturating_sub(background_at_idle))
 }
 
 impl JobCenter {
     pub fn new() -> Self {
         let center = Self {
             inner: Arc::new(Mutex::new(JobCenterInner::default())),
+            background: Arc::new(std::sync::Mutex::new(RendererClock::default())),
         };
         // Renderer-executed kinds are part of the scheduler's offer/report
         // protocol (no business feature involved), so this runner is built in
@@ -674,6 +719,22 @@ impl JobCenter {
 
     pub fn handle(&self) -> Self {
         self.clone()
+    }
+
+    /// Bound renderer deadlines to foreground time (mobile lifecycle). Desktop
+    /// never calls this and therefore keeps the plain wall-clock deadline.
+    pub fn set_renderer_foreground(&self, foreground: bool) {
+        self.background
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .set_foreground(foreground);
+    }
+
+    fn renderer_background_total(&self) -> std::time::Duration {
+        self.background
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .background_total()
     }
 
     /// Seed the layout-analyze cap from the current settings backend.
@@ -1796,14 +1857,20 @@ impl JobCenter {
         Some(snapshot)
     }
 
+    /// Wait for a renderer job's terminal report. The deadline is idle *foreground*
+    /// time since the last progress report — never the whole wall-clock runtime:
+    /// a renderer that keeps landing blocks is alive, and a locked device parks
+    /// the job without failing it.
     async fn wait_for_terminal(
         &self,
         job_id: &str,
         timeout: std::time::Duration,
     ) -> Option<JobState> {
-        let start = std::time::Instant::now();
+        let mut idle_start = std::time::Instant::now();
+        let mut background_at_idle = self.renderer_background_total();
+        let mut last_activity: Option<(Option<f32>, Option<String>)> = None;
         loop {
-            {
+            let activity = {
                 let inner = self.inner.lock().await;
                 let id = JobId(job_id.to_string());
                 let job = inner.jobs.get(&id)?;
@@ -1813,8 +1880,19 @@ impl JobCenter {
                 ) {
                     return Some(job.state);
                 }
+                (job.progress, job.phase.clone())
+            };
+            if last_activity.as_ref() != Some(&activity) {
+                last_activity = Some(activity);
+                idle_start = std::time::Instant::now();
+                background_at_idle = self.renderer_background_total();
             }
-            if start.elapsed() >= timeout {
+            let idle = foreground_elapsed(
+                idle_start.elapsed(),
+                self.renderer_background_total(),
+                background_at_idle,
+            );
+            if idle >= timeout {
                 return None;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -3762,5 +3840,54 @@ mod tests {
             StartOutcome::Waiting => {}
             other => panic!("expected Waiting under cap 2, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn renderer_deadline_counts_only_foreground_idle() {
+        use std::time::Duration;
+        // Parked for 25 of 30 minutes: only the foreground stretch counts.
+        assert_eq!(
+            foreground_elapsed(
+                Duration::from_secs(30 * 60),
+                Duration::from_secs(25 * 60),
+                Duration::ZERO
+            ),
+            Duration::from_secs(5 * 60)
+        );
+        // A whole background stretch longer than the idle window clamps to zero.
+        assert_eq!(
+            foreground_elapsed(
+                Duration::from_secs(60),
+                Duration::from_secs(600),
+                Duration::ZERO
+            ),
+            Duration::ZERO
+        );
+        // Background time before the idle window started is not subtracted twice.
+        assert_eq!(
+            foreground_elapsed(
+                Duration::from_secs(60),
+                Duration::from_secs(600),
+                Duration::from_secs(590)
+            ),
+            Duration::from_secs(50)
+        );
+    }
+
+    #[test]
+    fn renderer_clock_freezes_background_total_on_resume() {
+        use std::time::Duration;
+        let mut clock = RendererClock::default();
+        clock.set_foreground(false);
+        let parked = clock.background_total();
+        clock.set_foreground(true);
+        let frozen = clock.background_total();
+        assert!(frozen >= parked);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(clock.background_total(), frozen);
+        // A later lock starts accumulating again from the resume point.
+        clock.set_foreground(false);
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(clock.background_total() >= frozen + Duration::from_millis(5));
     }
 }

@@ -33,6 +33,9 @@ pub enum PaperAssetKind {
     Pdf,
     Source,
     Attachment,
+    /// Derived finished translation; bulky but rebuildable from the source
+    /// PDF + translation sidecar, so it follows the same on-demand policy.
+    Translated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -307,6 +310,7 @@ pub(super) fn asset(path: &str) -> Option<(&str, PaperAssetKind)> {
         "pdf" => PaperAssetKind::Pdf,
         "source" => PaperAssetKind::Source,
         "attachments" => PaperAssetKind::Attachment,
+        "translated" => PaperAssetKind::Translated,
         _ => return None,
     };
     Some((id, kind))
@@ -372,7 +376,7 @@ fn ensure_unlinked(vault: &Path, path: &str) -> Result<(), AppError> {
 /// even when this device currently excludes its old assets from the scan. A
 /// later remote paper with the same ID must start without stale deletion proof.
 pub(super) fn reconcile_remote_history(state: &mut AvailabilityState, remote: &snapshot::Manifest) {
-    if !remote.scope.is_all() {
+    if !remote.scope.is_all_for_paper_presence() {
         return;
     }
     let papers: BTreeSet<_> = remote

@@ -48,7 +48,12 @@ import { formatLocaleTimestamp } from "@/i18n";
 import { formatBytes } from "@/lib/core/background-tasks";
 import { events } from "@/lib/core/bindings";
 import type { ApiError } from "@/lib/core/ipc";
-import { errorMessage, notifyError, notifySuccess } from "@/lib/core/notify";
+import {
+	errorMessage,
+	isLikelyNetworkFailure,
+	notifyError,
+	notifySuccess,
+} from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { displayPath } from "@/lib/core/path";
 import { isTauri } from "@/lib/core/tauri";
@@ -313,10 +318,16 @@ export function SyncPane({
 							? (payload.error ?? t("sync.statusError"))
 							: null,
 					);
-					if (payload.status === "error")
-						notifyError(payload.error ?? t("sync.statusError"), {
+					if (payload.status === "error") {
+						// The Host retries transport failures on its own; telling
+						// the user what to check beats reqwest's error chain.
+						const detail = payload.error ?? t("sync.statusError");
+						const unreachable = isLikelyNetworkFailure(detail);
+						notifyError(unreachable ? t("sync.unreachable") : detail, {
 							id: `sync:${localVault}`,
+							description: unreachable ? detail : undefined,
 						});
+					}
 					if (payload.status !== "syncing") {
 						setProgress(null);
 						void refresh().catch(() => undefined);
@@ -408,14 +419,25 @@ export function SyncPane({
 	const reportSyncError = (error: unknown) => {
 		const detail = errorMessage(error);
 		const code = error instanceof Error ? (error as ApiError).code : undefined;
-		const message =
-			code === "git_auth_failed"
-				? t("sync.gitAuthFailed", { detail })
-				: code === "git_tls_failed"
-					? t("sync.gitTlsFailed", { detail })
-					: detail;
-		setSyncError(message);
-		notifyError(message);
+		if (code === "git_auth_failed" || code === "git_tls_failed") {
+			const message =
+				code === "git_auth_failed"
+					? t("sync.gitAuthFailed", { detail })
+					: t("sync.gitTlsFailed", { detail });
+			setSyncError(message);
+			notifyError(message);
+			return;
+		}
+		// DNS / connection / timeout failures are retried by the Host and can
+		// clear without user action; surface an actionable sentence and keep
+		// the raw chain as the secondary line for diagnostics.
+		if (code === "sync_unreachable" || isLikelyNetworkFailure(detail)) {
+			setSyncError(detail);
+			notifyError(t("sync.unreachable"), { description: detail });
+			return;
+		}
+		setSyncError(detail);
+		notifyError(detail);
 	};
 
 	const save = async () => {
@@ -1052,6 +1074,53 @@ export function SyncPane({
 						/>
 					</span>
 				</SyncSettingsRow>
+				<SyncSettingsRow
+					mobile={mobile}
+					label={
+						<HelpLabel
+							label={t("sync.scopeTranslated")}
+							help={t("sync.scopeTranslatedHint")}
+						/>
+					}
+					htmlFor="sync-scope-translated"
+				>
+					<span className="flex items-center gap-2">
+						{scopeSizes ? (
+							<span className="text-muted-foreground text-xs tabular-nums">
+								{formatBytes(scopeSizes.translated ?? 0)}
+							</span>
+						) : null}
+						<Switch
+							disabled={controlsDisabled}
+							className={mobile ? "after:-inset-y-3.5" : undefined}
+							id="sync-scope-translated"
+							checked={scope.translated}
+							onCheckedChange={(checked) => patchScope("translated", checked)}
+						/>
+					</span>
+				</SyncSettingsRow>
+				{mobile ? (
+					<SyncSettingsRow
+						mobile
+						label={t("sync.scopeInk")}
+						htmlFor="sync-scope-ink"
+					>
+						<span className="flex items-center gap-2">
+							{scopeSizes ? (
+								<span className="text-muted-foreground text-xs tabular-nums">
+									{formatBytes(scopeSizes.ink ?? 0)}
+								</span>
+							) : null}
+							<Switch
+								disabled={controlsDisabled}
+								className="after:-inset-y-3.5"
+								id="sync-scope-ink"
+								checked={scope.ink}
+								onCheckedChange={(checked) => patchScope("ink", checked)}
+							/>
+						</span>
+					</SyncSettingsRow>
+				) : null}
 			</SettingsGroup>
 
 			{form.backend === "s3" ? (

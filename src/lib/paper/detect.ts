@@ -16,7 +16,7 @@ type NameKind = {
 };
 
 const PAPER_FILE_MARKERS = new Set(["notes.md", "paper.md"]);
-const PAPER_DIR_MARKERS = new Set(["source", "assets", "marks"]);
+const PAPER_DIR_MARKERS = new Set(["source", "assets", "marks", "translated"]);
 
 function isDirectoryEntry(entry: NameKind): boolean {
 	const lower = entry.name.toLowerCase();

@@ -1,6 +1,6 @@
 # PDF 笔迹与原生编辑
 
-笔迹保存在 `papers/<folder>/marks/ink/p<一基页码>.json`，源 PDF 保持不变。格式与按 ID 合并位于 [ink.rs](../../crates/agentero-core/src/features/pdf/ink.rs)；文件存取位于 [ink_store.rs](../../crates/agentero-core/src/features/pdf/ink_store.rs)，原生命令壳位于[原生 ink.rs](../../src-tauri/src/features/pdf/ink.rs)。三者由桌面和平板共享，桌面阅读器当前提供只读显示和副本导出。
+笔迹保存在 `papers/<folder>/marks/ink/p<一基页码>.json`，源 PDF 保持不变；移动端设置可以关闭 `marks/ink/` 的云同步（桌面只读显示，始终按开启处理）。格式与按 ID 合并位于 [ink.rs](../../crates/agentero-core/src/features/pdf/ink.rs)；文件存取位于 [ink_store.rs](../../crates/agentero-core/src/features/pdf/ink_store.rs)，原生命令壳位于[原生 ink.rs](../../src-tauri/src/features/pdf/ink.rs)。三者由桌面和平板共享，桌面阅读器当前提供只读显示和副本导出。
 
 ## 格式与坐标
 

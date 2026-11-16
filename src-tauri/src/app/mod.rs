@@ -715,6 +715,7 @@ pub fn run() {
     {
         builder = builder.on_window_event(|window, event| {
             let service = window.state::<crate::integration::sync::SyncService>();
+            let jobs = window.state::<crate::features::jobs::JobCenter>();
             #[cfg(target_os = "ios")]
             {
                 let active = match event {
@@ -724,6 +725,7 @@ pub fn run() {
                 };
                 if let Some(foreground) = active.and_then(|active| window.state::<crate::features::mobile_background::scene::ForegroundScenes>().update(window.label(), active)) {
                     service.set_foreground(window.app_handle(), foreground);
+                    jobs.set_renderer_foreground(foreground);
                     let monitors = window.state::<Arc<remote_agent::background::RemoteBackgroundMonitors>>();
                     if foreground { monitors.resume(); } else {
                         monitors.suspend();
@@ -733,8 +735,14 @@ pub fn run() {
             }
             #[cfg(target_os = "android")]
             match event {
-                tauri::WindowEvent::Suspended => service.set_foreground(window.app_handle(), false),
-                tauri::WindowEvent::Resumed | tauri::WindowEvent::Focused(true) => service.set_foreground(window.app_handle(), true),
+                tauri::WindowEvent::Suspended => {
+                    service.set_foreground(window.app_handle(), false);
+                    jobs.set_renderer_foreground(false);
+                }
+                tauri::WindowEvent::Resumed | tauri::WindowEvent::Focused(true) => {
+                    service.set_foreground(window.app_handle(), true);
+                    jobs.set_renderer_foreground(true);
+                }
                 _ => {}
             }
         });

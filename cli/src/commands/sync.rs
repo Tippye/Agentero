@@ -89,9 +89,13 @@ pub struct ConfigureArgs {
     #[arg(long = "git-ssl-ca", value_name = "PATH")]
     pub git_ssl_ca_info: Option<String>,
     /// Bulky asset categories to keep out of sync (comma list of
-    /// pdf,source,attachments). Notes, sidecars and marks always sync.
+    /// pdf,source,attachments,ink,translated). Notes, sidecars and highlights
+    /// always sync.
     #[arg(long = "exclude", value_name = "LIST", value_delimiter = ',')]
     pub exclude: Vec<String>,
+    /// Categories to opt in that are off by default (`translated`).
+    #[arg(long = "include", value_name = "LIST", value_delimiter = ',')]
+    pub include: Vec<String>,
     /// Read the full config JSON (camelCase, incl. secrets) from stdin.
     /// For scripts: keeps credentials out of argv and shell history.
     #[arg(long = "stdin")]
@@ -308,8 +312,8 @@ fn assemble_config(
     if let Some(v) = env_non_empty(ENV_WEBDAV_PASSWORD) {
         cfg.webdav_password = v;
     }
-    if !args.exclude.is_empty() {
-        cfg.scope = scope_from_excludes(&args.exclude)?;
+    if !args.exclude.is_empty() || !args.include.is_empty() {
+        cfg.scope = scope_from_lists(&args.include, &args.exclude)?;
     }
 
     // Prompt for missing secrets only on an interactive TTY; `--json` and
@@ -367,19 +371,28 @@ fn env_non_empty(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn scope_from_excludes(exclude: &[String]) -> Result<SyncScope, CliError> {
-    let mut scope = SyncScope::all();
-    for item in exclude {
+fn scope_from_lists(include: &[String], exclude: &[String]) -> Result<SyncScope, CliError> {
+    let mut scope = SyncScope::default();
+    let mut apply = |item: &str, enabled: bool| -> Result<(), CliError> {
         match item.trim() {
-            "pdf" => scope.pdf = false,
-            "source" => scope.source = false,
-            "attachments" => scope.attachments = false,
+            "pdf" => scope.pdf = enabled,
+            "source" => scope.source = enabled,
+            "attachments" => scope.attachments = enabled,
+            "ink" => scope.ink = enabled,
+            "translated" => scope.translated = enabled,
             other => {
                 return Err(CliError::usage(format!(
-                    "unknown scope category '{other}' (expected pdf | source | attachments)"
+                    "unknown scope category '{other}' (expected pdf | source | attachments | ink | translated)"
                 )))
             }
         }
+        Ok(())
+    };
+    for item in include {
+        apply(item, true)?;
+    }
+    for item in exclude {
+        apply(item, false)?;
     }
     Ok(scope)
 }

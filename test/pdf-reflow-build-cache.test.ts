@@ -240,6 +240,40 @@ describe("reflow build cache", () => {
 		expect(await otherPdf.readFinal(ir, translations, fontBytes)).toBeNull();
 	});
 
+	it("stores finished PDFs in a local paper's translated/ directory", async () => {
+		const cache = createReflowBuildCache({
+			paperKey: "papers/demo",
+			paperAbsPath: "/vault/papers/demo",
+			pdfBytes: new TextEncoder().encode("pdf-one"),
+		});
+		const ir = {
+			version: 1 as const,
+			pages: [
+				{ index: 0, width: 100, height: 100, paragraphs: [], obstacles: [] },
+			],
+		};
+		const translations = new Map([["p0", "译文"]]);
+		const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+		await cache.writeFinal(ir, translations, fontBytes, bytes);
+		const stored = [...disk.files.keys()];
+		expect(stored).toHaveLength(1);
+		expect(stored[0]?.startsWith("/vault/papers/demo/translated/")).toBe(true);
+		expect(await cache.readFinal(ir, translations, fontBytes)).toEqual(bytes);
+	});
+
+	it("falls back to the app cache for remote paper handles", async () => {
+		const cache = createReflowBuildCache({
+			paperKey: "papers/demo",
+			paperAbsPath: "remote:session-1",
+			pdfBytes: new TextEncoder().encode("pdf-one"),
+		});
+		const ir = { version: 1 as const, pages: [] };
+		await cache.writeFinal(ir, new Map(), fontBytes, new Uint8Array([1]));
+		expect(
+			[...disk.files.keys()][0]?.startsWith("/app-cache/reflow-build/"),
+		).toBe(true);
+	});
+
 	it("hits when only paragraph draw order jitters between runs", async () => {
 		const cache = createReflowBuildCache({
 			paperKey: "papers/demo",

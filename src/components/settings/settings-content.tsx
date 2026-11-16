@@ -683,7 +683,7 @@ export function SettingsContent({
 							hidden={activeSection !== "about"}
 						>
 							<Suspense fallback={<PaneFallback />}>
-								<AboutPane />
+								<AboutPane vaultPath={vaultPath} />
 							</Suspense>
 						</div>
 					)}
