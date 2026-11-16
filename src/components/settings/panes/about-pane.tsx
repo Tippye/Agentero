@@ -67,7 +67,7 @@ const CLI_BREW_INSTALL_COMMAND =
 
 const GITHUB_REPO_URL = "https://github.com/poco-ai/Agentero";
 
-export function AboutPane() {
+export function AboutPane({ vaultPath }: { vaultPath?: string | null } = {}) {
 	const { t } = useTranslation("settings");
 	const [version, setVersion] = useState<string>();
 	const [update, setUpdate] = useState<UpdateSnapshot>(getUpdateSnapshot);
@@ -205,10 +205,10 @@ export function AboutPane() {
 
 	const refreshReflowUsage = useCallback(() => {
 		if (!isTauri()) return;
-		void reflowCacheUsage()
+		void reflowCacheUsage(vaultPath)
 			.then(setReflowUsage)
 			.catch(() => setReflowUsage(null));
-	}, []);
+	}, [vaultPath]);
 
 	useEffect(() => {
 		refreshReflowUsage();
@@ -216,7 +216,7 @@ export function AboutPane() {
 
 	const onClearReflowCache = () => {
 		setReflowBusy(true);
-		void clearReflowCaches()
+		void clearReflowCaches(vaultPath)
 			.then(async () => {
 				notifySuccess(t("about.reflowCache.clearDone"));
 				refreshReflowUsage();

@@ -71,7 +71,12 @@ const TREE_SYNC_STORE_ARTIFACT_NAMES = new Set([
 const PAPER_MARKER_FILE_NAMES = new Set(["NOTES.md", "PAPER.md"]);
 
 /** Paper-internal directory markers (mirrors `src/lib/paper/paths.ts`). */
-const PAPER_MARKER_DIR_NAMES = new Set(["source", "assets", "marks"]);
+const PAPER_MARKER_DIR_NAMES = new Set([
+	"source",
+	"assets",
+	"marks",
+	"translated",
+]);
 
 /** Paper subdirectory listed lazily (arXiv e-prints hold hundreds of files). */
 const LAZY_PAPER_DIR_NAME = "source";

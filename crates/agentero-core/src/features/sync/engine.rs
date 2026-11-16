@@ -872,7 +872,7 @@ fn merge_with_paper_presence(
             // A scoped publisher may hide the only surviving PDF/source. Its
             // absence cannot prove paper removal without an explicit marker.
             let remote_paper_deleted = b.is_some()
-                && remote_scope.is_all()
+                && remote_scope.is_all_for_paper_presence()
                 && !paper_presence.remote.contains(paper)
                 && (l.is_none() || same(l, b));
             !local_paper_deleted
@@ -1781,8 +1781,7 @@ mod tests {
     fn no_pdf_scope() -> snapshot::SyncScope {
         snapshot::SyncScope {
             pdf: false,
-            source: true,
-            attachments: true,
+            ..snapshot::SyncScope::default()
         }
     }
 

@@ -96,7 +96,7 @@ const PAPER_MARKER_FILES: &[&str] = &["NOTES.md", "PAPER.md"];
 /// Paper-internal directories (mirrors `src/lib/paper/paths.ts`). A folder
 /// holding one of them is a paper unit, so they are never scanned for nested
 /// papers.
-const PAPER_MARKER_DIRS: &[&str] = &["source", "assets", "marks"];
+const PAPER_MARKER_DIRS: &[&str] = &["source", "assets", "marks", "translated"];
 
 const LAZY_PAPER_DIR: &str = "source";
 

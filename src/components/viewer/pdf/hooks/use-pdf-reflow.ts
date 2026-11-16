@@ -113,6 +113,7 @@ export function usePdfReflow(
 			createReflowBuildCache(
 				{
 					paperKey: current.current.paperKey || current.current.paperAbsPath,
+					paperAbsPath: current.current.paperAbsPath,
 					pdfBytes: current.current.pdfBytes,
 				},
 				{ writesEnabled: () => cacheFlags.current.final },

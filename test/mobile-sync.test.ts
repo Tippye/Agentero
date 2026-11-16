@@ -243,7 +243,15 @@ beforeEach(async () => {
 		return reply(null);
 	});
 	host.run.mockImplementation(async () => reply(outcome));
-	host.sizes.mockResolvedValue(reply({ pdf: 2048, source: 0, attachments: 0 }));
+	host.sizes.mockResolvedValue(
+		reply({
+			pdf: 2048,
+			source: 0,
+			attachments: 0,
+			ink: 1024,
+			translated: 4096,
+		}),
+	);
 	host.policy = { mode: "full", pinnedPaperIds: ["previous"] };
 	host.availability = [
 		{
@@ -582,6 +590,16 @@ describe("tablet composition of mature sync settings", () => {
 		].find((button) => button.textContent === "Sync now");
 		expect(syncButton?.disabled).toBe(false);
 		expect(host.configure).not.toHaveBeenCalled();
+	});
+
+	it("offers translated PDFs everywhere and ink only on mobile", async () => {
+		await render(true);
+		expect(document.getElementById("sync-scope-translated")).not.toBeNull();
+		expect(document.getElementById("sync-scope-ink")).not.toBeNull();
+
+		await render(false);
+		expect(document.getElementById("sync-scope-translated")).not.toBeNull();
+		expect(document.getElementById("sync-scope-ink")).toBeNull();
 	});
 
 	it("preserves desktop Git and official-account composition when mobile mode is omitted", async () => {
