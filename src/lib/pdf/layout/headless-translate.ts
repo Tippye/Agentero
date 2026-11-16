@@ -117,9 +117,8 @@ async function runLayoutTranslateExecutor(
 			signal,
 			report: (args) => report(args),
 			force: ctx.force,
-apiOnly,
-			onItems: (key, items, layout) =>
-				publisher.publish(key, items, layout),
+			apiOnly,
+			onItems: (key, items, layout) => publisher.publish(key, items, layout),
 		});
 		await publisher.flush();
 		if (signal.aborted) {

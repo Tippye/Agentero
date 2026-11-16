@@ -31,7 +31,7 @@ import {
 } from "@/lib/pdf/layout/io";
 import type { LayoutTaskLike } from "@/lib/pdf/layout/run-analysis";
 import {
-assertRemoteLayoutProvider,
+	assertRemoteLayoutProvider,
 	enrichRawRegionsWithPageText,
 	runDocumentLayoutAnalysis,
 } from "@/lib/pdf/layout/run-analysis";

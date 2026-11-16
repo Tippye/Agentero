@@ -113,7 +113,7 @@ export function TranslatePane({
 	settings,
 	patch,
 	onOpenAgentSettings,
-apiOnly = false,
+	apiOnly = false,
 	vaultPath,
 }: {
 	settings: AppSettings;

@@ -820,7 +820,7 @@ export function usePdfLayoutTranslate({
 					);
 					if (ac.signal.aborted) return;
 					if (sidecar?.items.length) {
-const layout = paperAbsPath
+						const layout = paperAbsPath
 							? await readLayoutSidecar(paperAbsPath)
 							: null;
 						if (ac.signal.aborted) return;

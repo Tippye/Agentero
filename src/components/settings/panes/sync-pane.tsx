@@ -842,7 +842,7 @@ export function SyncPane({
 				</SettingsGroup>
 			) : isGit ? (
 				<SettingsGroup>
-<SyncSettingsRow
+					<SyncSettingsRow
 						mobile={mobile}
 						label={t("sync.gitRemote")}
 						description={t("sync.gitRemoteHint")}
@@ -858,7 +858,7 @@ export function SyncPane({
 						htmlFor="sync-gitBranch"
 					>
 						{field("gitBranch", { placeholder: "main" })}
-</SyncSettingsRow>
+					</SyncSettingsRow>
 					<SyncSettingsRow
 						mobile={mobile}
 						label={t("sync.gitAllowInsecureHttp")}

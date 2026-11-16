@@ -58,7 +58,7 @@ function hostError(error: unknown, fallback?: string): ApiError {
 	const thrown = new Error(
 		body?.message || fallback || "Host command failed",
 	) as ApiError;
-if (typeof body?.code === "string" && body.code) thrown.code = body.code;
+	if (typeof body?.code === "string" && body.code) thrown.code = body.code;
 	thrown.details = body?.details;
 	return thrown;
 }
