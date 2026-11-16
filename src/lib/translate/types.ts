@@ -152,7 +152,7 @@ export type TranslateTask = {
 };
 
 export type TranslateRunOptions = {
-/** Reject desktop Agent execution in an explicit mobile viewer preview. */
+	/** Reject desktop Agent execution in an explicit mobile viewer preview. */
 	apiOnly?: boolean;
 	/** Resolved terminology constraint for this source text. */
 	glossary?: string;

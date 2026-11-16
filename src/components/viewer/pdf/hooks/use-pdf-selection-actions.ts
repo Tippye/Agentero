@@ -32,7 +32,7 @@ import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 
 export type UsePdfSelectionActionsOptions = {
-capabilities?: PdfViewerCapabilities;
+	capabilities?: PdfViewerCapabilities;
 	runAnnotationBatch: (action: () => void) => void;
 	/** Placed menu; every action no-ops when null. */
 	selectionMenu: SelectionMenuState | null;
@@ -83,7 +83,7 @@ export type PdfSelectionActions = {
 };
 
 export function usePdfSelectionActions({
-capabilities = pdfViewerCapabilities(),
+	capabilities = pdfViewerCapabilities(),
 	runAnnotationBatch,
 	selectionMenu,
 	closeSelectionMenu,
