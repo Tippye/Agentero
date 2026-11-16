@@ -30,7 +30,10 @@ const dirty = vi.fn(),
 function Reader({
 	folder = "papers/ink-viewer",
 	shared = false,
-}: { folder?: string; shared?: boolean } = {}) {
+}: {
+	folder?: string;
+	shared?: boolean;
+} = {}) {
 	ink = usePdfInk({
 		vaultPath: "/vault",
 		paperRelPath: folder,
@@ -69,7 +72,11 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 it("shares one editable editor between the original and translated panes", async () => {
-	await act(() => root.render(createElement(Reader, { folder: "papers/shared-pane", shared: true })));
+	await act(() =>
+		root.render(
+			createElement(Reader, { folder: "papers/shared-pane", shared: true }),
+		),
+	);
 	await act(async () => {
 		await ink.editor?.controller.load(1);
 	});

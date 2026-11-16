@@ -287,7 +287,7 @@ export function usePdfSelectionTranslate({
 	);
 
 	const translateSelection = useCallback(
-(
+		(
 			anchor: PdfAskAnchor,
 			requestedMode?: SelectionTranslateMode,
 			existing?: PdfTranslateRecord,

@@ -29,7 +29,7 @@ import type { SelectionTranslateMode } from "@/lib/translate/types";
 type PdfCardStackProps = {
 	selectionMenu: {
 		state: SelectionMenuState | null;
-onHighlight: (color: HighlightColor, shape: PdfTextMarkupKind) => void;
+		onHighlight: (color: HighlightColor, shape: PdfTextMarkupKind) => void;
 		onAsk?: () => void;
 		onAddToChat?: () => void;
 		onTranslate: () => void;

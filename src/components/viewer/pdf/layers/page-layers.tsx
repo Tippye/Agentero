@@ -99,11 +99,11 @@ import {
 	sentenceHighlightTints,
 } from "@/lib/pdf/highlight/sentence-tint";
 import type { HighlightQuoteTint } from "@/lib/pdf/highlight/translated-geometry";
-import type { InkEditor } from "@/lib/pdf/ink/editor";
 import type {
 	PdfTextMarkupAnnoObject,
 	PdfTextMarkupKind,
 } from "@/lib/pdf/highlight/types";
+import type { InkEditor } from "@/lib/pdf/ink/editor";
 import {
 	isLayoutRegionActivation,
 	isLayoutTranslateItemPainted,
