@@ -1,3 +1,11 @@
+import { quoteContextFromText } from "@/lib/agent/selection-context";
+import { layoutAnalysisStore } from "@/lib/pdf/layout/store";
+import { loadSettings } from "@/lib/settings";
+import {
+	dictionarySurrounding,
+	selectionTranslateMode,
+} from "@/lib/translate/dictionary";
+import type { SelectionTranslateMode } from "@/lib/translate/types";
 /**
  * Selection → 翻译 workflow for the EmbedPDF viewer: the one ephemeral mark kind.
  * A translate card is created straight from the selection menu and streams into
@@ -52,6 +60,7 @@ export type UsePdfSelectionTranslateOptions = {
 	/** Gates both manual and automatic selection translation. */
 	enabled?: boolean;
 	isActive: boolean;
+	docId?: string;
 	/** Sidecar root for `marks/<id>.json` (null for loose PDFs — nothing persists). */
 	paperAbsPath: string | null;
 	/** Vault-relative provenance stamped into the record. */
@@ -81,7 +90,11 @@ export type PdfSelectionTranslate = {
 	translateStreaming: boolean;
 	translateError: string | null;
 	/** Selection-menu action: create the record and start the run. */
-	translateSelection: (anchor: PdfAskAnchor) => void;
+	translateSelection: (
+		anchor: PdfAskAnchor,
+		mode?: SelectionTranslateMode,
+		existing?: PdfTranslateRecord,
+	) => void;
 	/** Toggle whether the result survives dismissal, without affecting the run. */
 	toggleTranslatePin: (record: PdfTranslateRecord) => void;
 	/** Discard an unpinned result when its card is dismissed. */
@@ -97,6 +110,7 @@ export type PdfSelectionTranslate = {
 export function usePdfSelectionTranslate({
 	enabled = true,
 	isActive,
+	docId,
 	paperAbsPath,
 	paperRelPath,
 	vaultPath,
@@ -133,6 +147,9 @@ export function usePdfSelectionTranslate({
 	const stopTranslateSession = useCallback(() => {
 		translateGenerationRef.current += 1;
 		translateRunIdRef.current = null;
+		const unsubs = translateUnsubsRef.current;
+		translateUnsubsRef.current = null;
+		if (unsubs) for (const unsubscribe of unsubs) unsubscribe();
 		const sid = translateSessionRef.current;
 		if (sid) {
 			void cancelAgentRun(sid).catch(() => undefined);
@@ -270,22 +287,41 @@ export function usePdfSelectionTranslate({
 	);
 
 	const translateSelection = useCallback(
-		(anchor: PdfAskAnchor) => {
+(
+			anchor: PdfAskAnchor,
+			requestedMode?: SelectionTranslateMode,
+			existing?: PdfTranslateRecord,
+		) => {
 			if (!enabledRef.current) return;
 			const quote = anchor.quote?.trim();
 			if (!quote || !isActive) return;
+			const results = { ...existing?.results };
+			if (existing?.result?.trim() && !existing.error && !existing.mode)
+				results[existing.mode ?? selectionTranslateMode(quote)] =
+					existing.result;
+			const mode =
+				requestedMode ??
+				selectionTranslateMode(quote, loadSettings().translate.dictionary.mode);
 			stopTranslateSession();
 			const paperPath = paperRelPath || paperAbsPath || "paper";
 			const paperKey = paperRelPath || paperAbsPath || null;
-			const rec = createTranslateRecord({
-				paperPath,
-				page: anchor.page,
-				rects: anchor.rects,
-				quote,
-			});
+			const rec: PdfTranslateRecord = {
+				...(existing ??
+					createTranslateRecord({
+						paperPath,
+						page: anchor.page,
+						rects: anchor.rects,
+						selectionPages: anchor.selectionPages,
+						quote,
+					})),
+				mode,
+				results,
+				result: "",
+				error: undefined,
+			};
 			let currentRecord = upsertTranslate(rec);
 			protectedTranslateIdsRef.current.add(rec.id);
-			temporaryTranslateIdsRef.current.add(rec.id);
+			if (!rec.pinned) temporaryTranslateIdsRef.current.add(rec.id);
 			openCard({ kind: "translate", id: rec.id });
 			const generation = translateGenerationRef.current;
 			translateRunIdRef.current = rec.id;
@@ -299,6 +335,7 @@ export function usePdfSelectionTranslate({
 				currentRecord = upsertTranslate({
 					...currentRecord,
 					result: result.trim(),
+					results: { ...currentRecord.results, [mode]: result.trim() },
 					updatedAt: new Date().toISOString(),
 					error: undefined,
 				});
@@ -311,9 +348,32 @@ export function usePdfSelectionTranslate({
 				return true;
 			};
 
+			if (results[mode]) {
+				commitResult(results[mode]);
+				return;
+			}
 			void runSelectionTranslate({
 				text: quote,
-				context: { page: anchor.page, surface: "pdf-selection" },
+				mode,
+				context: {
+					page: anchor.page,
+					surface: "pdf-selection",
+					dictionarySurrounding: (() => {
+						const regions = docId
+							? (layoutAnalysisStore.getState().byDocument[docId]?.regions ??
+								[])
+							: [];
+						const matches = regions.filter(
+							(r) => r.pageIndex === anchor.page - 1 && r.text?.includes(quote),
+						);
+						return matches.length === 1
+							? dictionarySurrounding(
+									quote,
+									quoteContextFromText(matches[0].text ?? "", quote),
+								)
+							: undefined;
+					})(),
+				},
 				paperKey,
 				vaultPath,
 				noAgentText: () => t("selection.translateNoAgent"),
@@ -336,7 +396,9 @@ export function usePdfSelectionTranslate({
 					});
 				},
 				commitAgentResult: (ev) =>
-					commitResult(ev.content || currentRecord.result || ""),
+					ev.stopReason === "cancelled"
+						? false
+						: commitResult(ev.content || currentRecord.result || ""),
 				commitProviderResult: commitResult,
 				markFailed: (message) => {
 					if (!isCurrentRun()) return;
@@ -358,6 +420,7 @@ export function usePdfSelectionTranslate({
 		},
 		[
 			t,
+			docId,
 			isActive,
 			vaultPath,
 			paperAbsPath,

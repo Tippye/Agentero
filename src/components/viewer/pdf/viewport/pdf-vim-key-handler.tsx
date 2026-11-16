@@ -6,6 +6,7 @@ import { PdfKeySequence } from "@/lib/keyboard/pdf-key-sequence";
 import { ownsPdfKeyboard } from "@/lib/pdf/keyboard-ownership";
 import { handleScrollSyncIntent } from "@/lib/pdf/scroll-sync";
 import { loadSettings } from "@/lib/settings";
+import { matchesAriaShortcut } from "@/lib/shell/shortcuts";
 
 type PdfVimKeyHandlerProps = {
 	documentId: string;
@@ -52,12 +53,26 @@ export function PdfVimKeyHandler({
 			else scope.scrollToPreviousPage("instant");
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
+			// Selection actions win even when this capture listener was mounted first.
+			const selectionAction =
+				!event.shiftKey &&
+				Array.from(
+					document.querySelectorAll<HTMLButtonElement>(
+						"[data-selection-menu] button[aria-keyshortcuts]:not(:disabled)",
+					),
+				).some((button) =>
+					matchesAriaShortcut(
+						button.getAttribute("aria-keyshortcuts"),
+						event.key,
+					),
+				);
 			// Read the module cache so a settings window toggle applies even
 			// before this component re-renders.
 			const { pdfVimKeys, vimMode } = loadSettings();
 			if (
 				!pdfVimKeys ||
 				!vimMode ||
+				selectionAction ||
 				event.defaultPrevented ||
 				event.altKey ||
 				event.ctrlKey ||

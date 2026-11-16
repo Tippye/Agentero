@@ -35,7 +35,9 @@ async function renderCard(
 	onHide = vi.fn(),
 	onTogglePin = vi.fn(),
 	screen: Parameters<typeof TranslateCard>[0]["screen"] = { x: 600, y: 200 },
-	source?: Parameters<typeof TranslateCard>[0]["source"],
+	text = result,
+	sourceText?: string,
+	options?: Pick<Parameters<typeof TranslateCard>[0], "mode" | "onModeChange">,
 ) {
 	await act(() =>
 		root.render(
@@ -44,13 +46,14 @@ async function renderCard(
 				{ isStatic: true },
 				createElement(TranslateCard, {
 					screen,
-					source,
-					result,
+					result: text,
+					sourceText,
 					streaming: false,
 					error: null,
 					onOpenSettings: vi.fn(),
 					onTogglePin,
 					onHide,
+					...options,
 				}),
 			),
 		),
@@ -143,6 +146,88 @@ it("uses P for the pin action and leaves typing, composing and modified keys alo
 	expect(onTogglePin).toHaveBeenCalledTimes(2);
 });
 
+it("copies the latest translation with C and shows the copied feedback", async () => {
+	const writeText = vi
+		.spyOn(navigator.clipboard, "writeText")
+		.mockResolvedValue();
+	const card = await renderCard();
+	const copy = card.querySelector<HTMLButtonElement>('[aria-keyshortcuts="C"]');
+	expect(copy).not.toBeNull();
+	const key = () =>
+		document.body.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "c",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	await act(async () => expect(key()).toBe(false));
+	expect(writeText).toHaveBeenCalledExactlyOnceWith(result);
+	expect(copy?.getAttribute("aria-label")).toBe("selection.copied");
+
+	await renderCard(vi.fn(), vi.fn(), { x: 600, y: 200 }, "更新后的译文。");
+	await act(async () => expect(key()).toBe(false));
+	expect(writeText).toHaveBeenLastCalledWith("更新后的译文。");
+});
+
+it("leaves C to text fields, other dialogs, composing and modified keys", async () => {
+	const writeText = vi
+		.spyOn(navigator.clipboard, "writeText")
+		.mockResolvedValue();
+	await renderCard();
+	const input = document.createElement("input");
+	const editor = document.createElement("div");
+	editor.setAttribute("contenteditable", "true");
+	const dialog = document.createElement("div");
+	dialog.setAttribute("role", "dialog");
+	document.body.append(input, editor, dialog);
+	const key = (target: HTMLElement, init: KeyboardEventInit = {}) => {
+		const event = new KeyboardEvent("keydown", {
+			key: "c",
+			bubbles: true,
+			cancelable: true,
+			...init,
+		});
+		target.dispatchEvent(event);
+		return event.defaultPrevented;
+	};
+	expect(key(input)).toBe(false);
+	expect(key(editor)).toBe(false);
+	expect(key(dialog)).toBe(false);
+	for (const init of [
+		{ isComposing: true },
+		{ repeat: true },
+		{ ctrlKey: true },
+		{ metaKey: true },
+		{ altKey: true },
+		{ shiftKey: true },
+	]) {
+		expect(key(document.body, init)).toBe(false);
+	}
+	expect(writeText).not.toHaveBeenCalled();
+});
+
+it("leaves C alone without a translation or after the card closes", async () => {
+	const writeText = vi
+		.spyOn(navigator.clipboard, "writeText")
+		.mockResolvedValue();
+	const card = await renderCard(vi.fn(), vi.fn(), { x: 600, y: 200 }, " ");
+	expect(card.querySelector('[aria-keyshortcuts="C"]')).toBeNull();
+	const key = () =>
+		document.body.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "c",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	expect(key()).toBe(true);
+	await renderCard();
+	await act(() => root.render(null));
+	expect(key()).toBe(true);
+	expect(writeText).not.toHaveBeenCalled();
+});
+
 it("clamps dragging using the resized dimensions and keeps the offset as the page scrolls", async () => {
 	const card = await renderCard(vi.fn(), vi.fn(), {
 		x: 600,
@@ -189,4 +274,77 @@ it("clamps dragging using the resized dimensions and keeps the offset as the pag
 	});
 	expect(card.style.left).toBe("588px");
 	expect(card.style.top).toBe("328px");
+});
+
+it("opens at the width the user last dragged it to, still content-sized", async () => {
+	const map = new Map<string, string>();
+	vi.stubGlobal("localStorage", {
+		getItem: (key: string) => map.get(key) ?? null,
+		setItem: (key: string, value: string) => {
+			map.set(key, value);
+		},
+		removeItem: (key: string) => {
+			map.delete(key);
+		},
+	});
+	map.set("agentero-pdf-card-widths", JSON.stringify({ translate: 440 }));
+
+	const card = await renderCard();
+	expect(card.style.width).toBe("440px");
+	// Height stays content-sized: a remembered height would leave blank space
+	// under shorter translations.
+	expect(card.style.height).toBe("");
+});
+
+it("shows a dictionary headword and accepts a plain MT gloss with existing actions", async () => {
+	const onHide = vi.fn();
+	const onPin = vi.fn();
+	const card = await renderCard(
+		onHide,
+		onPin,
+		{ x: 600, y: 200 },
+		"分辨率",
+		"resolution",
+	);
+	expect(card.getAttribute("aria-label")).toBe("selection.dictionaryTitle");
+	expect(card.textContent).toContain("resolution");
+	expect(card.textContent).toContain("分辨率");
+	expect(card.querySelector('[aria-keyshortcuts="P"]')).not.toBeNull();
+	const writeText = vi
+		.spyOn(navigator.clipboard, "writeText")
+		.mockResolvedValue();
+	await act(() =>
+		card.querySelector<HTMLButtonElement>('[aria-keyshortcuts="C"]')?.click(),
+	);
+	expect(writeText).toHaveBeenCalledWith("分辨率");
+});
+it("keeps a sentence in the translation card", async () => {
+	const card = await renderCard(
+		vi.fn(),
+		vi.fn(),
+		{ x: 600, y: 200 },
+		"该图像具有高分辨率。",
+		"The image has high resolution.",
+	);
+	expect(card.getAttribute("aria-label")).toBe("selection.translateTitle");
+	expect(card.textContent).not.toContain("The image has high resolution.");
+});
+
+it("keeps an explicit translation view for a word and exposes the dictionary switch", async () => {
+	const onModeChange = vi.fn();
+	const card = await renderCard(
+		vi.fn(),
+		vi.fn(),
+		{ x: 600, y: 200 },
+		"注意力",
+		"attention",
+		{ mode: "translate", onModeChange },
+	);
+	expect(card.getAttribute("aria-label")).toBe("selection.translateTitle");
+	const button = card.querySelector<HTMLButtonElement>(
+		'[aria-label="selection.switchToDictionary"]',
+	);
+	expect(button).not.toBeNull();
+	await act(() => button?.click());
+	expect(onModeChange).toHaveBeenCalledWith("dictionary");
 });

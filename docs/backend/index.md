@@ -46,6 +46,12 @@ src-tauri/src/
 
 每域：`mod.rs` 对外 API + `commands.rs` 薄壳 + 按需 models。
 
+### 第三方依赖修正
+
+第三方依赖的本地修正统一放在根目录 `patches/`：pnpm 使用 `.patch` 文件；Cargo 的 `[patch.crates-io]` 使用完整 crate 目录。`patches/tesseract-rs/` 保留了上游 0.2.0 源码、README 和 MIT 许可证，将 LiteParse OCR 构建依赖中的 `zip` 升至修复安全问题的 9.x，并适配 `build.rs` 的解压 API。
+
+根 `Cargo.toml` 配置替换路径，并将该 crate 排除在 workspace members 之外；桌面 Host 和 CLI 经 `agentero-core → liteparse → tesseract-rs` 共用此修正。来源、修改范围及许可声明见根目录 [THIRD_PARTY.md](https://github.com/poco-ai/Agentero/blob/main/THIRD_PARTY.md)。
+
 ## Tauri 插件
 
 | 插件 | 用途 |
@@ -116,6 +122,7 @@ ACP / SSH 子进程由 Rust 与 ACP SDK 启动，不注册 Tauri shell 插件。
 | 论文入库 | [paper-import.md](paper-import.md) |
 | Identifier Lookup / 魔棒入库 | [identifier-lookup.md](identifier-lookup.md) |
 | 学术搜索 API | [academic-search-apis.md](academic-search-apis.md) |
+| 机构代理网关 | [institution-proxy.md](institution-proxy.md) |
 | Zotero Connector | [connector.md](connector.md) |
 | 双链索引 | [wiki.md](wiki.md) |
 | Vault Doctor | [doctor.md](doctor.md) |

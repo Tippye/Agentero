@@ -111,6 +111,23 @@ beforeEach(() => {
 });
 
 describe("translation compatibility and refresh", () => {
+	it("creates a translation with every selected page before opening its result card", () => {
+		const h = harness();
+		const rects = record("anchor").rects;
+		const selectionPages = [
+			{ page: 1, rects },
+			{ page: 2, rects },
+		];
+		h.hook.translateSelection({
+			page: 2,
+			rects,
+			quote: "cross-page source",
+			trigger: "selection",
+			selectionPages,
+		});
+		expect(h.records.current[0].page).toBe(2);
+		expect(h.records.current[0].selectionPages).toEqual(selectionPages);
+	});
 	it("keeps legacy records reachable while respecting explicit unpin", () => {
 		const { pinned: _, ...legacy } = record("old");
 		expect(parsePdfTranslateRecord(legacy)?.pinned).toBe(true);
@@ -258,4 +275,71 @@ describe("translation retention lifecycle", () => {
 		await vi.waitFor(() => expect(mocks.remove).toHaveBeenCalledOnce());
 		expect(mocks.write).not.toHaveBeenCalled();
 	});
+});
+
+it("keeps the same pinned PDF mark and both completed results when switching modes", () => {
+	const h = harness();
+	const initial = {
+		...record("switch"),
+		quote: "attention",
+		mode: "dictionary" as const,
+		result: "dictionary entry",
+		results: { dictionary: "dictionary entry" },
+		pinned: true,
+	};
+	h.records.current = [initial];
+	const anchor = {
+		page: 1,
+		rects: initial.rects,
+		quote: initial.quote,
+		trigger: "selection" as const,
+	};
+	h.hook.translateSelection(anchor, "translate", initial);
+	expect(h.records.current[0]).toMatchObject({
+		id: "switch",
+		mode: "translate",
+		pinned: true,
+		results: { dictionary: "dictionary entry" },
+	});
+	const run = mocks.run.mock.lastCall?.[0];
+	run?.commitProviderResult("translation result");
+	h.hook.translateSelection(anchor, "dictionary", h.records.current[0]);
+	expect(mocks.run).toHaveBeenCalledTimes(1);
+	expect(h.records.current[0]).toMatchObject({
+		id: "switch",
+		mode: "dictionary",
+		result: "dictionary entry",
+		results: {
+			dictionary: "dictionary entry",
+			translate: "translation result",
+		},
+		pinned: true,
+	});
+	const restored = parsePdfTranslateRecord(
+		JSON.parse(JSON.stringify(h.records.current[0])),
+	);
+	expect(restored?.mode).toBe("dictionary");
+	expect(restored?.results?.translate).toBe("translation result");
+});
+
+it("detaches the previous PDF stream before starting a different mode", () => {
+	const h = harness();
+	const run = h.start();
+	const unsubscribe = vi.fn();
+	run.unsubsRef.current = [unsubscribe];
+	const current = h.records.current[0];
+	h.hook.translateSelection(
+		{
+			page: current.page,
+			rects: current.rects,
+			quote: current.quote,
+			trigger: "selection",
+		},
+		"translate",
+		current,
+	);
+	expect(unsubscribe).toHaveBeenCalledOnce();
+	expect(run.disposedRef.current).toBe(true);
+	run.commitProviderResult("late result");
+	expect(h.records.current[0].result).not.toBe("late result");
 });

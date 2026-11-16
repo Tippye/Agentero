@@ -28,10 +28,12 @@ import {
 	DEFAULT_HIGHLIGHT_COLOR,
 	type HighlightColor,
 } from "@/lib/pdf/highlight/palette";
+import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 
 export type UsePdfSelectionActionsOptions = {
-	capabilities?: PdfViewerCapabilities;
+capabilities?: PdfViewerCapabilities;
+	runAnnotationBatch: (action: () => void) => void;
 	/** Placed menu; every action no-ops when null. */
 	selectionMenu: SelectionMenuState | null;
 	closeSelectionMenu: () => void;
@@ -41,6 +43,7 @@ export type UsePdfSelectionActionsOptions = {
 		color: HighlightColor,
 		quote: string,
 		translatedPages?: readonly VisibleSelectionPage[],
+		shape?: PdfTextMarkupKind,
 	) => { pageIndex: number; id: string }[];
 	/** Write the note body onto a freshly created highlight. */
 	updateHighlightComment: (
@@ -58,7 +61,7 @@ export type UsePdfSelectionActionsOptions = {
 };
 
 export type PdfSelectionActions = {
-	handleHighlight: (color: HighlightColor) => void;
+	handleHighlight: (color: HighlightColor, shape: PdfTextMarkupKind) => void;
 	/**
 	 * Create a highlight + comment from a snapped selection draft. Used by the
 	 * right-rail editor so typing can survive EmbedPDF clearing the live selection.
@@ -67,6 +70,7 @@ export type PdfSelectionActions = {
 		draft: {
 			pages: FormattedSelection[];
 			quote: string;
+			shape?: PdfTextMarkupKind;
 			visiblePages?: readonly VisibleSelectionPage[];
 		},
 		comment: string,
@@ -79,7 +83,8 @@ export type PdfSelectionActions = {
 };
 
 export function usePdfSelectionActions({
-	capabilities = pdfViewerCapabilities(),
+capabilities = pdfViewerCapabilities(),
+	runAnnotationBatch,
 	selectionMenu,
 	closeSelectionMenu,
 	createHighlights,
@@ -98,7 +103,7 @@ export function usePdfSelectionActions({
 	selectionMenuRef.current = selectionMenu;
 
 	const handleHighlight = useCallback(
-		(color: HighlightColor) => {
+		(color: HighlightColor, shape: PdfTextMarkupKind) => {
 			const menu = selectionMenuRef.current;
 			if (!menu?.pages.length) return;
 			createHighlights(
@@ -106,6 +111,7 @@ export function usePdfSelectionActions({
 				color,
 				menu.anchor.quote ?? "",
 				menu.visiblePages,
+				shape,
 			);
 			closeSelectionMenu();
 		},
@@ -117,24 +123,33 @@ export function usePdfSelectionActions({
 			draft: {
 				pages: FormattedSelection[];
 				quote: string;
+				shape?: PdfTextMarkupKind;
 				visiblePages?: readonly VisibleSelectionPage[];
 			},
 			comment: string,
 		) => {
 			const trimmed = comment.trim();
 			if (!trimmed || !draft.pages.length) return;
-			const created = createHighlights(
-				draft.pages,
-				DEFAULT_HIGHLIGHT_COLOR,
-				draft.quote,
-				draft.visiblePages,
-			);
-			const first = created[0];
-			closeSelectionMenu();
-			if (!first) return;
-			updateHighlightComment(first.pageIndex, first.id, trimmed);
+			runAnnotationBatch(() => {
+				const created = createHighlights(
+					draft.pages,
+					DEFAULT_HIGHLIGHT_COLOR,
+					draft.quote,
+					draft.visiblePages,
+					draft.shape,
+				);
+				const first = created[0];
+				closeSelectionMenu();
+				if (!first) return;
+				updateHighlightComment(first.pageIndex, first.id, trimmed);
+			});
 		},
-		[createHighlights, updateHighlightComment, closeSelectionMenu],
+		[
+			createHighlights,
+			updateHighlightComment,
+			closeSelectionMenu,
+			runAnnotationBatch,
+		],
 	);
 
 	const handleMenuAsk = useCallback(() => {

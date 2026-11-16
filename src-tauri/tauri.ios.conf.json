@@ -1,11 +1,11 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
 	"build": {
-		"beforeBuildCommand": "pnpm build"
+		"beforeBuildCommand": "pnpm dictionary:stage && pnpm build"
 	},
 	"bundle": {
 		"externalBin": [],
-		"resources": [],
+		"resources": ["dictionary/*"],
 		"iOS": {
 			"template": "src-tauri/ios-project.yml",
 			"minimumSystemVersion": "15.0",

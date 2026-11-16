@@ -20,9 +20,11 @@
  * resulting arrays.
  */
 
+import { useCapability } from "@embedpdf/core/react";
 import type {
 	PdfHighlightAnnoObject,
 	PdfLinkAnnoObject,
+	PdfUnderlineAnnoObject,
 } from "@embedpdf/models";
 import { PdfAnnotationSubtype } from "@embedpdf/models";
 import { type LockMode, LockModeType } from "@embedpdf/plugin-annotation";
@@ -54,9 +56,9 @@ import {
 	type HighlightCustom,
 	hasAnnotationsFile,
 	highlightViewFromObject,
-	isHighlightObject,
 	isLiveAnnotation,
 	isPreservedAnnotationConflict,
+	isTextMarkupObject,
 	loadAnnotationItems,
 	readAnnotationFileContent,
 	saveAnnotationItems,
@@ -71,13 +73,20 @@ import {
 	subscribeAnnotationPeer,
 } from "@/lib/pdf/highlight/annotation-sync";
 import { createAnnotationDeleteQueue } from "@/lib/pdf/highlight/delete-queue";
+import {
+	createAnnotationHistoryReplay,
+	type PdfHistoryPlugin,
+} from "@/lib/pdf/highlight/history";
 import { migrateHighlightMarks } from "@/lib/pdf/highlight/migrate-marks";
 import {
 	HIGHLIGHT_HEX,
 	HIGHLIGHT_OPACITY,
 	type HighlightColor,
 } from "@/lib/pdf/highlight/palette";
-import type { PdfHighlight } from "@/lib/pdf/highlight/types";
+import type {
+	PdfHighlight,
+	PdfTextMarkupKind,
+} from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 import type { NormalizedRect } from "@/lib/pdf/selection";
 import { marksDir } from "@/lib/pdf/selection";
@@ -118,6 +127,8 @@ export type UsePdfHighlightsOptions = {
 };
 
 export type PdfHighlights = {
+	runAnnotationBatch: (action: () => void) => void;
+	replayAnnotationHistory: (redo: boolean) => void;
 	highlights: PdfHighlight[];
 	/** Mirror for the imperative handle (must not re-register per change). */
 	highlightsRef: RefObject<PdfHighlight[]>;
@@ -127,7 +138,7 @@ export type PdfHighlights = {
 	citationLinks: Map<number, PdfLinkAnnoObject[]>;
 	/** Re-read the plugin scope; also the annotation-event handler. */
 	rebuildHighlights: () => void;
-	/** Create one highlight per selected page span; returns the new ids. */
+	/** Create one text-markup annotation per selected page span; returns the new ids. */
 	createHighlights: (
 		pages: FormattedSelection[],
 		color: HighlightColor,
@@ -137,6 +148,8 @@ export type PdfHighlights = {
 		 * glyph boxes and painted only while the translation overlay is on.
 		 */
 		translatedPages?: readonly VisibleSelectionPage[],
+		/** Markup shape; defaults to a highlight. */
+		shape?: PdfTextMarkupKind,
 	) => { pageIndex: number; id: string }[];
 	/** Write a 批注 comment onto an existing highlight (empty clears it). */
 	updateHighlightComment: (
@@ -163,6 +176,21 @@ export function usePdfHighlights({
 	onHighlightsChangeRef,
 	onReloadAnnotations,
 }: UsePdfHighlightsOptions): PdfHighlights {
+	const { provides: historyCap } = useCapability<PdfHistoryPlugin>("history");
+	const history = historyCap?.forDocument(docId);
+	const historyReplayRef = useRef<ReturnType<
+		typeof createAnnotationHistoryReplay
+	> | null>(null);
+	const runAnnotationBatch = useCallback(
+		(action: () => void) => {
+			if (history) history.batch(action);
+			else action();
+		},
+		[history],
+	);
+	const replayAnnotationHistory = useCallback((redo: boolean) => {
+		void historyReplayRef.current?.replay(redo);
+	}, []);
 	const [highlights, setHighlights] = useState<PdfHighlight[]>([]);
 	/** Normalized annotation rects for pin placement, keyed by annotation id. */
 	const [highlightAnchors, setHighlightAnchors] = useState(
@@ -223,18 +251,27 @@ export function usePdfHighlights({
 			const wasImporting = importingRef.current;
 			importingRef.current = true;
 			try {
-				if (event.type === "delete" && deleteQueueRef.current) {
-					const tracked = scope.getAnnotationById(event.annotation.id);
-					if (tracked && isLiveAnnotation(tracked))
-						deleteQueueRef.current.delete(event.pageIndex, event.annotation.id);
-				} else applyAnnotationMutation(scope, event);
+				history?.invalidate([event.annotation.id]);
+				const apply = () => {
+					if (event.type === "delete" && deleteQueueRef.current) {
+						const tracked = scope.getAnnotationById(event.annotation.id);
+						if (tracked && isLiveAnnotation(tracked))
+							deleteQueueRef.current.delete(
+								event.pageIndex,
+								event.annotation.id,
+							);
+					} else applyAnnotationMutation(scope, event);
+				};
+				if (history) history.withoutRecording(apply);
+				else apply();
+				scope.commit();
 			} catch (error) {
 				notifyError(errorText(error));
 			} finally {
 				importingRef.current = wasImporting;
 			}
 		},
-		[annotationCap, docId],
+		[annotationCap, docId, history],
 	);
 	const peerSubscriptionRef = useRef<(() => void) | null>(null);
 	useEffect(
@@ -253,7 +290,7 @@ export function usePdfHighlights({
 		// session). They must not reach the rail, pins or paint layers.
 		const all = scope.getAnnotations().filter(isLiveAnnotation);
 		const doc = docCap?.getDocument(docId);
-		const objects = all.map((a) => a.object).filter(isHighlightObject);
+		const objects = all.map((a) => a.object).filter(isTextMarkupObject);
 		const list = objects.map((o) => {
 			const view = highlightViewFromObject(o, paperKey ?? "");
 			const size = doc?.pages[o.pageIndex]?.size;
@@ -575,8 +612,11 @@ export function usePdfHighlights({
 						.map((item) => item.object),
 				);
 				if (plan.imports.length) scope.importAnnotations(plan.imports);
-				if (plan.highlightOverrides.length) {
-					scope.updateAnnotations(plan.highlightOverrides);
+				if (plan.annotationOverrides.length) {
+					const apply = () => scope.updateAnnotations(plan.annotationOverrides);
+					if (history) history.withoutRecording(apply);
+					else apply();
+					scope.commit();
 				}
 			}
 			setTimeout(() => {
@@ -614,6 +654,7 @@ export function usePdfHighlights({
 		paperAbsPath,
 		rebuildHighlights,
 		applyPeerEvent,
+		history,
 	]);
 
 	// Disk changes require reopening this PDF from its original bytes. An
@@ -697,39 +738,47 @@ export function usePdfHighlights({
 			color: HighlightColor,
 			quote: string,
 			translatedPages?: readonly VisibleSelectionPage[],
+			shape: PdfTextMarkupKind = "highlight",
 		) => {
 			const scope = annotationCap?.forDocument(docId);
 			if (!scope || reloadRequiredRef.current || !initialImportDoneRef.current)
 				return [] as { pageIndex: number; id: string }[];
+			const underline = shape === "underline";
 			const created: { pageIndex: number; id: string }[] = [];
-			for (const page of pages) {
-				const id = crypto.randomUUID();
-				const translatedRects = translatedPages?.find(
-					(item) => item.pageIndex === page.pageIndex,
-				)?.rects;
-				const custom: HighlightCustom = {
-					app: "agentero",
-					paletteKey: color,
-					quote,
-				};
-				if (translatedRects?.length) custom.translatedRects = translatedRects;
-				const obj: PdfHighlightAnnoObject = {
-					type: PdfAnnotationSubtype.HIGHLIGHT,
-					id,
-					pageIndex: page.pageIndex,
-					rect: page.rect,
-					segmentRects: page.segmentRects,
-					strokeColor: HIGHLIGHT_HEX[color],
-					opacity: HIGHLIGHT_OPACITY,
-					created: new Date(),
-					custom,
-				};
-				scope.createAnnotation(page.pageIndex, obj);
-				created.push({ pageIndex: page.pageIndex, id });
-			}
+			runAnnotationBatch(() => {
+				for (const page of pages) {
+					const id = crypto.randomUUID();
+					const translatedRects = translatedPages?.find(
+						(item) => item.pageIndex === page.pageIndex,
+					)?.rects;
+					const custom: HighlightCustom = {
+						app: "agentero",
+						paletteKey: color,
+						quote,
+					};
+					if (translatedRects?.length) custom.translatedRects = translatedRects;
+					const base = {
+						id,
+						pageIndex: page.pageIndex,
+						rect: page.rect,
+						segmentRects: page.segmentRects,
+						strokeColor: HIGHLIGHT_HEX[color],
+						// Underlines read as a solid stroke; highlights keep the
+						// translucent fill used by the palette.
+						opacity: underline ? 1 : HIGHLIGHT_OPACITY,
+						created: new Date(),
+						custom,
+					};
+					const obj: PdfHighlightAnnoObject | PdfUnderlineAnnoObject = underline
+						? { ...base, type: PdfAnnotationSubtype.UNDERLINE }
+						: { ...base, type: PdfAnnotationSubtype.HIGHLIGHT };
+					scope.createAnnotation(page.pageIndex, obj);
+					created.push({ pageIndex: page.pageIndex, id });
+				}
+			});
 			return created;
 		},
-		[annotationCap, docId],
+		[annotationCap, docId, runAnnotationBatch],
 	);
 
 	const updateHighlightComment = useCallback(
@@ -739,6 +788,7 @@ export function usePdfHighlights({
 				return;
 			const tracked = scope.getAnnotationById(id);
 			if (!tracked || !isLiveAnnotation(tracked)) return;
+			if ((tracked.object.contents?.trim() ?? "") === comment.trim()) return;
 			scope.updateAnnotation(pageIndex, id, {
 				contents: comment.trim() || undefined,
 			});
@@ -755,12 +805,17 @@ export function usePdfHighlights({
 			if (
 				!tracked ||
 				!isLiveAnnotation(tracked) ||
-				!isHighlightObject(tracked.object)
+				!isTextMarkupObject(tracked.object)
 			) {
 				return;
 			}
 			const obj = tracked.object;
 			const custom = (obj.custom ?? {}) as HighlightCustom;
+			if (
+				custom.paletteKey === color &&
+				obj.strokeColor === HIGHLIGHT_HEX[color]
+			)
+				return;
 			scope.updateAnnotation(pageIndex, id, {
 				strokeColor: HIGHLIGHT_HEX[color],
 				custom: { ...custom, paletteKey: color },
@@ -777,13 +832,33 @@ export function usePdfHighlights({
 				notifyError(i18n.t("viewer:pdf.annotationDeleteFailed"), {
 					description: error === undefined ? undefined : errorText(error),
 				}),
+			history
+				? (action) => {
+						history.withoutRecording(action);
+						annotationCap.forDocument(docId).commit();
+					}
+				: undefined,
 		);
 		deleteQueueRef.current = queue;
 		return () => {
 			queue.dispose();
 			if (deleteQueueRef.current === queue) deleteQueueRef.current = null;
 		};
-	}, [annotationCap, docId]);
+	}, [annotationCap, docId, history]);
+
+	useEffect(() => {
+		if (!annotationCap || !history) return;
+		const replay = createAnnotationHistoryReplay(
+			annotationCap.forDocument(docId),
+			history,
+			(error) => notifyError(errorText(error)),
+		);
+		historyReplayRef.current = replay;
+		return () => {
+			replay.dispose();
+			if (historyReplayRef.current === replay) historyReplayRef.current = null;
+		};
+	}, [annotationCap, docId, history]);
 
 	const deleteHighlightAnnotation = useCallback(
 		(pageIndex: number, id: string) => {
@@ -794,6 +869,8 @@ export function usePdfHighlights({
 	);
 
 	return {
+		runAnnotationBatch,
+		replayAnnotationHistory,
 		highlights,
 		highlightsRef,
 		highlightAnchors,

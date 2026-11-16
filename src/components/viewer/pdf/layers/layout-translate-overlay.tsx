@@ -7,7 +7,7 @@ import { ReflowPageOverlay } from "./reflow-page-overlay";
 
 import { Fragment, memo, useLayoutEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/core/utils";
-import { highlightFill } from "@/lib/pdf/highlight/palette";
+import { HIGHLIGHT_HEX, highlightFill } from "@/lib/pdf/highlight/palette";
 import {
 	sentenceHighlightTints,
 	type TranslateSentenceTint,
@@ -54,6 +54,10 @@ type LayoutTranslateOverlayProps = {
 	pageIndex: number;
 	/** Finished translated PDF document id for the shared render path. */
 	reflowDocumentId?: string | null;
+	/** Lightweight version currently loaded by the hidden translated document. */
+	reflowDocumentVersion?:
+		| import("@/lib/pdf/reflow/output-version").ReflowOutputVersion
+		| null;
 	/** Current viewer zoom, forwarded to the shared render layer. */
 	zoom: number;
 	/** Page pixel size (for font-size heuristic). */
@@ -698,10 +702,17 @@ export const LayoutTranslateParagraph = memo(function LayoutTranslateParagraph({
 							{index > 0 ? sentenceNodes.gap : null}
 							<span
 								data-sentence={node.index}
-								className={cn(tint && "rounded-[1px]")}
+								className={cn(tint?.shape !== "underline" && "rounded-[1px]")}
 								style={
 									tint
-										? { backgroundColor: highlightFill(tint.color) }
+										? tint.shape === "underline"
+											? {
+													textDecorationLine: "underline",
+													textDecorationColor: HIGHLIGHT_HEX[tint.color],
+													textDecorationThickness: "2px",
+													textUnderlineOffset: "2px",
+												}
+											: { backgroundColor: highlightFill(tint.color) }
 										: undefined
 								}
 							>
@@ -740,6 +751,7 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 	items,
 	pageIndex,
 	reflowDocumentId,
+	reflowDocumentVersion,
 	zoom,
 	pageWidthPx,
 	pageHeightPx,
@@ -826,6 +838,12 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 		[links, onPage],
 	);
 	const preview = items.find((item) => item.reflowPreview)?.reflowPreview;
+	const previewSources = items.find(
+		(item) => item.reflowPreview,
+	)?.reflowPreviewSources;
+	const displayMatchesPreview =
+		!previewSources ||
+		(reflowDocumentVersion && previewSources.has(reflowDocumentVersion));
 	if (preview || reflowDocumentId)
 		return (
 			<ReflowPageOverlay
@@ -838,7 +856,7 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 				items={items}
 				preview={preview ?? ""}
 				pageIndex={pageIndex}
-				renderDocumentId={reflowDocumentId}
+				renderDocumentId={displayMatchesPreview ? reflowDocumentId : null}
 				zoom={zoom}
 				width={pageWidthPx}
 				height={pageHeightPx}

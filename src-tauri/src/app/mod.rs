@@ -138,6 +138,9 @@ fn manage_state(app: &tauri::AppHandle) -> Result<(), crate::core::error::AppErr
         app.manage(Arc::new(
             crate::features::agent::session::pool::AgentWarmPool::new(),
         ));
+        app.manage(Arc::new(
+            crate::features::agent::session::query::AgentQueryPool::new(),
+        ));
         app.manage(crate::features::agent::AgentWarmGate::new());
         app.manage(crate::features::agent::PermissionGate::new());
         app.manage(crate::features::agent::ElicitationGate::new());
@@ -773,6 +776,8 @@ pub fn run() {
                 #[cfg(desktop)]
                 {
                     app.state::<Arc<crate::features::agent::session::pool::AgentWarmPool>>()
+                        .shutdown();
+                    app.state::<Arc<crate::features::agent::session::query::AgentQueryPool>>()
                         .shutdown();
                     app.state::<Arc<crate::features::agent::delegate::DelegateBridge>>()
                         .shutdown();
