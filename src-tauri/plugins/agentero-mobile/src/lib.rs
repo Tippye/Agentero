@@ -38,7 +38,8 @@ pub struct NativeImportFile {
     pub file: std::fs::File,
     pub display_name: Option<String>,
 }
-impl<R: Runtime> MobileBackground<R> {    /// Open a picker-authorized whole content document on a blocking worker.
+impl<R: Runtime> MobileBackground<R> {
+    /// Open a picker-authorized whole content document on a blocking worker.
     #[cfg(target_os = "android")]
     pub fn open_import_file(&self, uri: String) -> Result<NativeImportFile, String> {
         #[derive(serde::Deserialize)]

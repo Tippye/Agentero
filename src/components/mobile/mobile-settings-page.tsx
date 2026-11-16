@@ -166,6 +166,7 @@ export function MobileSettingsPage({
 								uiTheme={settings.uiTheme}
 								locale={settings.locale}
 								uiScale={settings.uiScale}
+								soundEnabled={settings.soundEnabled}
 								editorFontSize={settings.editorFontSize}
 								interfaceFontFamily={settings.interfaceFontFamily}
 								textFontFamily={settings.textFontFamily}
@@ -177,7 +178,12 @@ export function MobileSettingsPage({
 								patch={patch}
 							/>
 						) : section === "translate" ? (
-							<TranslatePane settings={settings} patch={patch} apiOnly />
+							<TranslatePane
+								settings={settings}
+								patch={patch}
+								vaultPath={vaultPath}
+								apiOnly
+							/>
 						) : section === "easyscholar" ? (
 							<div className="space-y-4">
 								<PageTitle title={t("settings:general.easyScholar.section")} />

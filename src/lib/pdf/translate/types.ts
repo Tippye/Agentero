@@ -3,6 +3,8 @@
  * Used for reading heatmap (page/rects) and reopenable result cards.
  */
 
+import type { SelectionTranslateMode } from "@/lib/translate/types";
+
 export type PdfTranslateRect = {
 	/** 0–1 relative to page box */
 	x: number;
@@ -24,10 +26,14 @@ export type PdfTranslateRecord = {
 	/** 1-based page number */
 	page: number;
 	rects: PdfTranslateRect[];
+	/** All selected pages for a cross-page translation; page/rects anchor the card. */
+	selectionPages?: { page: number; rects: PdfTranslateRect[] }[];
 	/** Source text that was translated */
 	quote?: string;
 	/** Translation body (persisted so the card can be reopened) */
 	result?: string;
+	mode?: SelectionTranslateMode;
+	results?: Partial<Record<SelectionTranslateMode, string>>;
 	/** Whether a page gutter marker keeps this result reachable after hiding. */
 	pinned: boolean;
 	/** Last error message if the run failed */

@@ -41,6 +41,10 @@ PDF 笔迹持久化继续使用共享的 page-space ink 数据；本模块只提
 
 笔在书写模式悬停时（`pointerType:"pen"`、`buttons:0`），新落下的手指不再启动平移、长按选择或笔迹，而是被记录为被抑制指针，直到抬起；这条规则只在 `mode !== "read"` 生效，阅读时笔只是握在手里不会冻结手指导航。悬停保护在收到笔接触、`pointerleave`、窗口失焦或 1.5 s 无新悬停样本后解除，阈值常量是 `INK_PEN_HOVER_GUARD_MS`（1500 ms）。已经开始的笔迹不被手指打断，笔接触期间的手指仍走原有 `palm` 逻辑。
 
+## 笔手势优先
+
+pen 指针接触归墨迹输入层所有。笔按下、拖动、跨页和抬起期间，阅读器的跨页文本选择不接管该手势：共享选择 hook 不为 pen 设置 DOM 拖动隔离、不释放原生选区，墨迹输入在页面层消费 pen 事件。笔静止长按仍可明确进入文字/笔迹选择（复用 SDK 的字词 handler），不代表 pen 拖动可以顺带形成跨页选区；松开笔后，下一次手指拖动才继续跨页选择。桌面鼠标与触控行为不受影响。
+
 ## 数据与路由
 
 共享插件的 Rust-only 方法是 `stylusState` 与 `stylusSetTarget`，原生事件通过 `stylus-event` 频道直接到 Rust。插件仍没有面向 WebView 的原生命令 handler；应用只开放生成绑定中的 `mobile_stylus_get_state` 与 `mobile_stylus_set_target`。

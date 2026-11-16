@@ -526,6 +526,7 @@ export function SettingsContent({
 									uiTheme={settings.uiTheme}
 									locale={settings.locale}
 									uiScale={settings.uiScale}
+									soundEnabled={settings.soundEnabled}
 									editorFontSize={settings.editorFontSize}
 									interfaceFontFamily={settings.interfaceFontFamily}
 									textFontFamily={settings.textFontFamily}
@@ -571,6 +572,7 @@ export function SettingsContent({
 							<Suspense fallback={<PaneFallback />}>
 								<TranslatePane
 									settings={settings}
+									vaultPath={vaultPath}
 									patch={patch}
 									onOpenAgentSettings={() => onSectionChange("agent")}
 								/>

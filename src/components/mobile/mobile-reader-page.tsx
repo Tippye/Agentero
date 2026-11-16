@@ -213,7 +213,7 @@ export function MobileReaderPage({
 										paperRelPath={paths.paperRelPath}
 										paperAbsPath={paths.paperAbsPath}
 										vaultPath={vaultPath}
-										reserveCommentRail={false}
+										insetCommentCards={false}
 										onOpenTranslationPane={() => {
 											setTranslationPaneOpen(true);
 											onTranslationPaneChange?.(true);

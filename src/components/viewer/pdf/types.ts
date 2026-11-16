@@ -17,7 +17,10 @@ import type {
 } from "@/lib/pdf/ask";
 import type { CrossrefKind } from "@/lib/pdf/citation-dest-keys";
 import type { HighlightColor } from "@/lib/pdf/highlight/palette";
-import type { PdfHighlight } from "@/lib/pdf/highlight/types";
+import type {
+	PdfHighlight,
+	PdfTextMarkupKind,
+} from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 import type { PdfNavigationTarget } from "@/lib/pdf/pending-pdf-page";
 import type { PdfReadingSnapshot } from "@/lib/pdf/reading-position";
@@ -87,8 +90,11 @@ export type PdfViewerProps = {
 	embeddedTarget?: PdfNavigationTarget | null;
 	/** Increment to return to the same embed target without reopening the PDF. */
 	embeddedTargetRequest?: number;
-	/** Reserve space beside the page for comment cards (off in note embeds). */
-	reserveCommentRail?: boolean;
+	/**
+	 * Draw comment cards inside the page instead of the page-outside rail.
+	 * Narrow note embeds cannot peek the rail without panning their content.
+	 */
+	insetCommentCards?: boolean;
 	/** Note embeds keep their own scroll position instead of changing the paper's last-read page. */
 	rememberReadingPosition?: boolean;
 	/** Applied once for this stable document identity, before position emission. */
@@ -262,6 +268,8 @@ export type SelectionCommentDraft = {
 	/** Normalized Y of the selection top (0–1). */
 	anchorY: number;
 	quote: string;
+	/** Markup shape to create when the note is committed; defaults to highlight. */
+	shape?: PdfTextMarkupKind;
 	/** EmbedPDF selection pages snapped when the editor was opened. */
 	pages: FormattedSelection[];
 	/**
@@ -335,6 +343,8 @@ export type PageAnnotationComment = {
 	comment: string;
 	color: HighlightColor;
 	kind: CommentRailKind;
+	/** Text-markup shape; visual marks leave it unset (defaults to highlight). */
+	shape?: PdfTextMarkupKind;
 	/** Pre-computed `[[alias|target]]` or null if no wiki target. */
 	linkAlias: string | null;
 	/** Visual marks with an Agent conversation show a truncated inline preview. */
@@ -358,6 +368,7 @@ export type RailEditState = {
 	comment: string;
 	quote: string;
 	color: HighlightColor;
+	shape?: PdfTextMarkupKind;
 	anchorY: number;
 	/** Normalized rects covering the highlighted text / visual region. */
 	rects: PdfAskNormalizedRect[];

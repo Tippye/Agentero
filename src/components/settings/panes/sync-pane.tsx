@@ -47,6 +47,7 @@ import {
 import { formatLocaleTimestamp } from "@/i18n";
 import { formatBytes } from "@/lib/core/background-tasks";
 import { events } from "@/lib/core/bindings";
+import type { ApiError } from "@/lib/core/ipc";
 import { errorMessage, notifyError, notifySuccess } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { displayPath } from "@/lib/core/path";
@@ -404,6 +405,19 @@ export function SyncPane({
 			cloudUsage.limit === 0 ||
 			(cloudSubject === "organization" && !activeOrgId));
 
+	const reportSyncError = (error: unknown) => {
+		const detail = errorMessage(error);
+		const code = error instanceof Error ? (error as ApiError).code : undefined;
+		const message =
+			code === "git_auth_failed"
+				? t("sync.gitAuthFailed", { detail })
+				: code === "git_tls_failed"
+					? t("sync.gitTlsFailed", { detail })
+					: detail;
+		setSyncError(message);
+		notifyError(message);
+	};
+
 	const save = async () => {
 		if (credentialBlocked || (credentialNeedsInput && !secretEntered)) return;
 		setSaving(true);
@@ -414,9 +428,7 @@ export function SyncPane({
 			setSyncError(null);
 			notifySuccess(t("sync.saved"));
 		} catch (error) {
-			const message = errorMessage(error);
-			setSyncError(message);
-			notifyError(message);
+			reportSyncError(error);
 		} finally {
 			setSaving(false);
 		}
@@ -441,9 +453,7 @@ export function SyncPane({
 				);
 			}
 		} catch (error) {
-			const message = errorMessage(error);
-			setSyncError(message);
-			notifyError(message);
+			reportSyncError(error);
 		} finally {
 			setSyncing(false);
 			setProgress(null);
@@ -459,9 +469,7 @@ export function SyncPane({
 			setSyncError(null);
 			void refresh().catch(() => undefined);
 		} catch (error) {
-			const message = errorMessage(error);
-			setSyncError(message);
-			notifyError(message);
+			reportSyncError(error);
 		}
 	};
 
@@ -834,13 +842,14 @@ export function SyncPane({
 				</SettingsGroup>
 			) : isGit ? (
 				<SettingsGroup>
-					<SyncSettingsRow
+<SyncSettingsRow
 						mobile={mobile}
 						label={t("sync.gitRemote")}
+						description={t("sync.gitRemoteHint")}
 						htmlFor="sync-gitRemote"
 					>
 						{field("gitRemote", {
-							placeholder: "git@github.com:you/papers.git",
+							placeholder: "https://git.example.com/you/papers.git",
 						})}
 					</SyncSettingsRow>
 					<SyncSettingsRow
@@ -849,6 +858,28 @@ export function SyncPane({
 						htmlFor="sync-gitBranch"
 					>
 						{field("gitBranch", { placeholder: "main" })}
+</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.gitAllowInsecureHttp")}
+						description={t("sync.gitAllowInsecureHttpHint")}
+						htmlFor="sync-gitAllowInsecureHttp"
+					>
+						<Switch
+							id="sync-gitAllowInsecureHttp"
+							checked={form.gitAllowInsecureHttp}
+							onCheckedChange={(checked) =>
+								patch({ gitAllowInsecureHttp: checked })
+							}
+						/>
+					</SyncSettingsRow>
+					<SyncSettingsRow
+						mobile={mobile}
+						label={t("sync.gitSslCa")}
+						description={t("sync.gitSslCaHint")}
+						htmlFor="sync-gitSslCaInfo"
+					>
+						{field("gitSslCaInfo", { placeholder: "/path/to/ca.pem" })}
 					</SyncSettingsRow>
 				</SettingsGroup>
 			) : isWebdav ? (

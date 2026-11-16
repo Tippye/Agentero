@@ -1,7 +1,7 @@
 /**
- * Slim dual-pane translation companion. Mounts only scroll / zoom / raster
- * plugins (no selection, annotation, search, or ONNX layout), so capability
- * hooks that throw on missing plugins are never called here.
+ * Slim dual-pane translation companion. It keeps selection, annotation, and
+ * ONNX layout unmounted; find searches the generated translated PDF instead
+ * of the source text layer.
  */
 
 import type { PdfLinkAnnoObject } from "@embedpdf/models";
@@ -11,6 +11,7 @@ import {
 	useInteractionManagerCapability,
 } from "@embedpdf/plugin-interaction-manager/react";
 import { type PageLayout, useScroll } from "@embedpdf/plugin-scroll/react";
+import { useSearch } from "@embedpdf/plugin-search/react";
 import { useZoom, ZoomGestureWrapper } from "@embedpdf/plugin-zoom/react";
 import {
 	useCallback,
@@ -24,11 +25,13 @@ import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { PdfCitationPreview } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
+import { PdfFindBar } from "@/components/viewer/pdf/chrome/pdf-find-bar";
 import { PdfTranslateProgressChip } from "@/components/viewer/pdf/chrome/pdf-translate-progress";
 import { EMPTY_LAYOUT_REGIONS_BY_PAGE } from "@/components/viewer/pdf/constants";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
 import { usePdfCitations } from "@/components/viewer/pdf/hooks/use-pdf-citations";
 import { usePdfCrossrefPreview } from "@/components/viewer/pdf/hooks/use-pdf-crossref-preview";
+import { usePdfFind } from "@/components/viewer/pdf/hooks/use-pdf-find";
 import { usePdfInk } from "@/components/viewer/pdf/hooks/use-pdf-ink";
 import { usePdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutTranslate } from "@/components/viewer/pdf/hooks/use-pdf-layout-translate";
@@ -65,6 +68,7 @@ import {
 	type HighlightColor,
 	normalizeHighlightColor,
 } from "@/lib/pdf/highlight/palette";
+import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import {
 	mirrorLayoutResultToTranslation,
 	translationSourceKey,
@@ -77,6 +81,7 @@ import {
 	linkPreviewDragActive,
 	subscribeLinkPreviewDrag,
 } from "@/lib/pdf/link-preview-drag";
+import { pickPdfSearchDocumentId } from "@/lib/pdf/search-target";
 
 const EMPTY_PAGE_MAP = new Map();
 
@@ -219,11 +224,44 @@ export function PdfTranslationViewerInner({
 		pdfBytes: pdfCacheBytes ?? sourceBytes,
 	});
 
-	const reflowDisplayDocumentId = useReflowDisplayDocument(
+	const reflowDisplayDocument = useReflowDisplayDocument(
 		docCap,
 		reflowOutput,
 		docId,
 	);
+	const searchDocumentId = pickPdfSearchDocumentId({
+		sourceDocumentId: docId,
+		translatedDocumentId: reflowDisplayDocument?.id,
+		translationVisible: layoutTranslatePageStateByPage.size > 0,
+	});
+	const { state: searchState, provides: search } = useSearch(searchDocumentId);
+	const searchScale = searchDocumentId === docId ? undefined : zoomLevel;
+	const {
+		findOpen,
+		findQuery,
+		setFindQuery,
+		findInputRef,
+		findTotal,
+		findActiveIndex,
+		findNext,
+		findPrev,
+		closeFind,
+	} = usePdfFind({ hostRef, search, searchState, scroll });
+	const findNextRef = useRef(findNext);
+	findNextRef.current = findNext;
+	const handleFindNext = useCallback(() => {
+		findNextRef.current();
+	}, []);
+	const findPrevRef = useRef(findPrev);
+	findPrevRef.current = findPrev;
+	const handleFindPrev = useCallback(() => {
+		findPrevRef.current();
+	}, []);
+	const closeFindRef = useRef(closeFind);
+	closeFindRef.current = closeFind;
+	const handleCloseFind = useCallback(() => {
+		closeFindRef.current();
+	}, []);
 
 	// `openTranslationTab` seeds a snapshot at open time; if layout analysis was
 	// still running then, mirror the source result when it lands so the
@@ -304,7 +342,12 @@ export function PdfTranslationViewerInner({
 	const mirroredPaint = useMemo(() => {
 		const paints = new Map<
 			number,
-			{ id: string; color: HighlightColor; rects: PdfAskNormalizedRect[] }[]
+			{
+				id: string;
+				color: HighlightColor;
+				shape: PdfTextMarkupKind;
+				rects: PdfAskNormalizedRect[];
+			}[]
 		>();
 		for (const highlight of mirroredHighlights) {
 			const rects = (
@@ -316,6 +359,7 @@ export function PdfTranslationViewerInner({
 			const paint = {
 				id: highlight.id,
 				color: normalizeHighlightColor(highlight.color),
+				shape: highlight.kind,
 				rects,
 			};
 			const list = paints.get(highlight.page);
@@ -537,7 +581,10 @@ export function PdfTranslationViewerInner({
 			<PdfPageLayers
 				docId={docId}
 				pageIndex={pageIndex}
-				reflowDocumentId={reflowDisplayDocumentId}
+				reflowDocumentId={reflowDisplayDocument?.id}
+				reflowDocumentVersion={reflowDisplayDocument?.version}
+				searchDocumentId={searchDocumentId}
+				searchScale={searchScale}
 				width={rotatedWidth || width}
 				height={rotatedHeight || height}
 				tone={pdfTone}
@@ -558,8 +605,10 @@ export function PdfTranslationViewerInner({
 			pageMarks,
 			pageLayout,
 			pageHandlers,
-			reflowDisplayDocumentId,
+			reflowDisplayDocument,
 			inkEditor,
+			searchDocumentId,
+			searchScale,
 		],
 	);
 
@@ -571,7 +620,6 @@ export function PdfTranslationViewerInner({
 			<DockviewViewport
 				documentId={docId}
 				hostRef={hostRef}
-				rightGutter={0}
 				className="agentero-scroll-both min-h-0 min-w-0 flex-1"
 			>
 				<WheelZoomHandler docId={docId} />
@@ -602,6 +650,17 @@ export function PdfTranslationViewerInner({
 					</GlobalPointerProvider>
 				</ZoomGestureWrapper>
 			</DockviewViewport>
+			<PdfFindBar
+				open={findOpen}
+				inputRef={findInputRef}
+				query={findQuery}
+				onQueryChange={setFindQuery}
+				total={findTotal}
+				activeResultIndex={findActiveIndex}
+				onFindNext={handleFindNext}
+				onFindPrev={handleFindPrev}
+				onClose={handleCloseFind}
+			/>
 			<PdfTranslateProgressChip
 				layoutTranslateRunning={layoutTranslateRunning}
 				layoutTranslatePreparing={layoutTranslatePreparing}
