@@ -8,6 +8,24 @@
  * once the page is visible and the network is back.
  */
 
+/** Runs covered by a Rust transfer lease may keep requesting while hidden. */
+let backgroundContinuations = 0;
+
+/**
+ * Allow hidden-page requests until the returned release runs. Only call this
+ * after the Host confirmed that a foreground service carries the process; iOS
+ * never does, which keeps the pause-on-lock behavior there.
+ */
+export function holdBackgroundContinuation(): () => void {
+	backgroundContinuations += 1;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		backgroundContinuations = Math.max(0, backgroundContinuations - 1);
+	};
+}
+
 function pageHidden(): boolean {
 	return (
 		typeof document !== "undefined" && document.visibilityState === "hidden"
@@ -20,7 +38,8 @@ function offline(): boolean {
 
 /** True when a request can be attempted without a lock-screen failure. */
 export function appIsAvailable(): boolean {
-	return !pageHidden() && !offline();
+	if (offline()) return false;
+	return !pageHidden() || backgroundContinuations > 0;
 }
 
 /**

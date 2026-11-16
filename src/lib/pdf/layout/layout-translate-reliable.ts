@@ -3,7 +3,12 @@
  * splitting live in the core runner so all entrypoints preserve the same
  * source text, styles and sentence anchors.
  */
+import { holdBackgroundContinuation } from "@/lib/core/app-availability";
 import { errorText } from "@/lib/core/error";
+import {
+	beginBackgroundTransfer,
+	endBackgroundTransfer,
+} from "@/lib/mobile/background";
 import { runLayoutRegionTranslate as runCoreLayoutRegionTranslate } from "@/lib/pdf/layout/layout-translate";
 import { splitTranslationChunks } from "@/lib/pdf/layout/translation-chunks";
 import type { LayoutTranslateItem } from "@/lib/pdf/layout/types";
@@ -95,8 +100,7 @@ function mergePass(
 	});
 }
 
-/** Retry terminal errors individually without changing paragraph identity. */
-export async function runLayoutRegionTranslate(options: {
+type LayoutTranslateOptions = {
 	apiOnly?: boolean;
 	items: LayoutTranslateItem[];
 	signal?: AbortSignal;
@@ -104,7 +108,12 @@ export async function runLayoutRegionTranslate(options: {
 	onUpdate: (items: LayoutTranslateItem[]) => void;
 	paperKey?: string | null;
 	vaultPath?: string | null;
-}): Promise<LayoutTranslateItem[]> {
+};
+
+/** Retry terminal errors individually without changing paragraph identity. */
+async function translateWithRetries(
+	options: LayoutTranslateOptions,
+): Promise<LayoutTranslateItem[]> {
 	let items = options.items.map((item) => ({ ...item }));
 	const publish = () => options.onUpdate(items.map((item) => ({ ...item })));
 
@@ -177,4 +186,23 @@ export async function runLayoutRegionTranslate(options: {
 	}
 
 	return items.map((item) => ({ ...item }));
+}
+
+/**
+ * Run one layout translation pass set under an OS transfer lease when the Host
+ * can carry it. Android with the background service enabled keeps requesting
+ * through a locked screen; iOS holds only a finite window, so `hidden_allowed`
+ * stays false there and the request gate keeps pausing on lock.
+ */
+export async function runLayoutRegionTranslate(
+	options: LayoutTranslateOptions,
+): Promise<LayoutTranslateItem[]> {
+	const lease = await beginBackgroundTransfer();
+	const release = lease?.hiddenAllowed ? holdBackgroundContinuation() : null;
+	try {
+		return await translateWithRetries(options);
+	} finally {
+		release?.();
+		if (lease?.leaseId != null) await endBackgroundTransfer(lease.leaseId);
+	}
 }

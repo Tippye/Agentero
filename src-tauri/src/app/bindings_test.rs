@@ -39,6 +39,8 @@ pub(crate) fn export_typescript_bindings() {
             crate::features::mobile_background::commands::mobile_background_configure,
             crate::features::mobile_background::commands::mobile_background_request_notifications,
             crate::features::mobile_background::commands::mobile_background_open_settings,
+            crate::features::mobile_background::commands::mobile_background_begin_transfer,
+            crate::features::mobile_background::commands::mobile_background_end_transfer,
             crate::features::mobile_route::commands::mobile_route_read,
             crate::features::mobile_route::commands::mobile_route_save,
             crate::features::mobile_stylus::commands::mobile_stylus_get_state,
