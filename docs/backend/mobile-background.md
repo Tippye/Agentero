@@ -10,6 +10,12 @@
 
 Android 使用独立的 Agent `specialUse` 与同步/传输 `dataSync` 服务；用户主动开启，新的服务只能在可见时启动，划掉任务和通知停止动作结束本机服务。iOS 仅给同步与传输提供系统允许的短时收尾窗口，Agent 计数不申请窗口。具体实施和设备边界由各平台分支的方案记录，接口见[平板共享方案](../development/tablet-shared.md)。
 
+## 锁屏、长任务与渲染截止时间
+
+锁屏会隐藏页面并挂起 WebView（iOS 连整个进程挂起），在途请求只能以传输错误结束。批量 PDF 翻译因此**不追求锁屏后继续联网**，而是按请求暂停与恢复：每次 provider 请求前经 `appIsAvailable()` 等待页面可见且在线，锁屏导致的传输失败不计入 provider-down，恢复后重试同一块，已完成的块仍从 `layout-translate.json` 续跑。iOS 没有通用后台联网权限；Android 的 `dataSync` 前台服务只覆盖同步/传输，不覆盖这类逐条请求的翻译循环。
+
+渲染任务的 15 分钟截止时间同样按**前台空闲**计算（[`RendererClock`](../../src-tauri/src/features/jobs/mod.rs)）：进度报告重置空闲窗口，后台累计时间在恢复时整体扣除；移动端窗口的 `Suspended` / `Resumed` 把前台状态同时写给 `SyncService` 与 `JobCenter`，桌面端不调用、语义不变。锁屏不再被误判为渲染器死亡，而真正停止上报的渲染器仍会在前台空闲 15 分钟后失败并释放并发槽。
+
 ## Rust 任务所有权与恢复
 
 [共享协调器](../../src-tauri/src/features/mobile_background/service.rs)按实际工作持有 Agent / 同步 / 传输三类 RAII guard；关闭页面不结束后台所有权。释放、失败、取消、过期与 admission future 中止都会减少对应计数。进程级单调十进制 `u64` generation 防止迟到更新重新启动旧工作；计数合并后，有限窗口过期仍强制先尝试有限计数归零、再提交新工作的正计数，归零回执不能提前放行新工作。原生错误允许前台工作继续，状态始终从 OS 读取，不由计数伪造成功。
