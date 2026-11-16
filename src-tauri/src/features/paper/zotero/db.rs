@@ -1844,6 +1844,11 @@ pub(crate) fn paper_pdf_file(paper_dir: &Path) -> Option<PathBuf> {
 
 /// Write highlights the viewer can paint. Re-runs skip ids already present.
 /// A missing or unreadable PDF leaves the paper's notes untouched.
+///
+/// Zotero PDF annotations are mapped through the desktop PDFium locator. The
+/// mobile targets have no local PDFium stack and expose no Zotero import
+/// surface, so they keep the signature and skip the write.
+#[cfg(desktop)]
 pub(crate) fn persist_zotero_highlights(
     paper_dir: &Path,
     pdf_path: &Path,
@@ -1879,6 +1884,16 @@ pub(crate) fn persist_zotero_highlights(
     }
 }
 
+#[cfg(mobile)]
+pub(crate) fn persist_zotero_highlights(
+    _paper_dir: &Path,
+    _pdf_path: &Path,
+    _marks: &[ZoteroPdfMark],
+) -> usize {
+    0
+}
+
+#[cfg(desktop)]
 fn zotero_highlight_items(pdf: &[u8], marks: &[ZoteroPdfMark]) -> Result<Vec<Value>, AppError> {
     use agentero_core::features::pdf_locate::annotations::{now_iso, text_markup_item};
     use agentero_core::features::pdf_locate::{map_pdf_user_rects, PdfUserRects};
@@ -1934,6 +1949,7 @@ fn zotero_highlight_items(pdf: &[u8], marks: &[ZoteroPdfMark]) -> Result<Vec<Val
     Ok(items)
 }
 
+#[cfg(desktop)]
 fn locate_mark(
     pdf: &[u8],
     mark: &ZoteroPdfMark,
@@ -1956,6 +1972,7 @@ fn locate_mark(
 
 /// Desktop swatches. A Zotero hex is kept as the painted color and snapped to
 /// the nearest swatch so the picker still has a selection.
+#[cfg(desktop)]
 fn annotation_paint(color: Option<&str>) -> (String, &'static str) {
     const SWATCHES: &[(&str, u8, u8, u8)] = &[
         ("yellow", 0xfc, 0xd3, 0x4d),
