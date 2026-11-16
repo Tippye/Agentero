@@ -7,7 +7,7 @@
 		"minVelocity": "Stop threshold",
 		"speedScale": "Release speed multiplier",
 		"reset": "Reset to defaults",
-		"saveAndRestart": "Save and restart",
+		"saveAndRestart": "Save",
 		"restartFailed": "Settings were saved, but the app could not restart automatically. Please reopen Agentero."
 	},
 	"bridge": {

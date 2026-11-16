@@ -122,7 +122,7 @@ export function MobileSettingsPage({
 		settings.pdfInertiaMinVelocity,
 		settings.pdfInertiaSpeedScale,
 	]);
-	const saveInertiaAndRestart = useCallback(async () => {
+	const saveInertia = useCallback(async () => {
 		const next = {
 			...loadSettings(),
 			pdfInertiaVelocityWindowMs: inertiaDraft.windowMs,
@@ -137,15 +137,7 @@ export function MobileSettingsPage({
 			notifyError(errorMessage(error));
 			return;
 		}
-		try {
-			const { relaunch } = await import("@tauri-apps/plugin-process");
-			await relaunch();
-		} catch (error) {
-			notifyError(t("mobile:readingFeel.restartFailed"), {
-				description: errorMessage(error),
-			});
-		}
-	}, [inertiaDraft, t]);
+	}, [inertiaDraft]);
 	useEffect(() => {
 		if (!open) return;
 		let active = true;
@@ -291,7 +283,7 @@ export function MobileSettingsPage({
 									<Button
 										type="button"
 										className="min-h-11"
-										onClick={() => void saveInertiaAndRestart()}
+										onClick={() => void saveInertia()}
 									>
 										{t("mobile:readingFeel.saveAndRestart")}
 									</Button>
@@ -303,6 +295,7 @@ export function MobileSettingsPage({
 								uiTheme={settings.uiTheme}
 								locale={settings.locale}
 								uiScale={settings.uiScale}
+								soundEnabled={settings.soundEnabled}
 								editorFontSize={settings.editorFontSize}
 								interfaceFontFamily={settings.interfaceFontFamily}
 								textFontFamily={settings.textFontFamily}
@@ -314,7 +307,12 @@ export function MobileSettingsPage({
 								patch={patch}
 							/>
 						) : section === "translate" ? (
-							<TranslatePane settings={settings} patch={patch} apiOnly />
+							<TranslatePane
+								settings={settings}
+								patch={patch}
+								vaultPath={vaultPath}
+								apiOnly
+							/>
 						) : section === "easyscholar" ? (
 							<div className="space-y-4">
 								<PageTitle title={t("settings:general.easyScholar.section")} />

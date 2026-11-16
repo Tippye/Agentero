@@ -7,7 +7,7 @@
 		"minVelocity": "停止阈值",
 		"speedScale": "释放速度倍率",
 		"reset": "恢复默认",
-		"saveAndRestart": "保存并重启",
+		"saveAndRestart": "保存",
 		"restartFailed": "设置已保存，但应用未能自动重启，请手动重新打开 Agentero。"
 	},
 	"bridge": {

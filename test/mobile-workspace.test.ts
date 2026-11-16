@@ -590,7 +590,7 @@ describe("stable tablet workspace DOM", () => {
 		).toBe("false");
 		expect(pane("notes")?.hidden).toBe(true);
 		// Fit-width must use the whole tablet pane: mobile has no comment rail.
-		expect(state.pdf?.reserveCommentRail).toBe(false);
+		expect(state.pdf?.insetCommentCards).toBe(false);
 		const pdf = container.querySelector("[data-pdf-document]");
 		const notes = container.querySelector<HTMLTextAreaElement>(
 			'[aria-label="test-notes"]',
