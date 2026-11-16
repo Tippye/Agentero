@@ -154,6 +154,7 @@ fn mobile_registers_scoped_api_processing_without_local_process_controls() {
         "crate::features::compile::",
         "crate::features::writing::",
         "crate::features::rtex::",
+        "crate::features::paper::zotero::",
         "crate::integration::word::",
         "crate::integration::remote::",
         "crate::integration::plugins::",
