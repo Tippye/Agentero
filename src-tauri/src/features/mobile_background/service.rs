@@ -2,7 +2,7 @@
 //! promise manufactured from work counts. Only the actor owns apply futures.
 use crate::core::error::AppError;
 use async_trait::async_trait;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex, MutexGuard, Weak,
@@ -12,6 +12,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 const MAX_WORK: usize = 128;
+/// Named transfer leases a WebView may hold at once (bulk translation runs).
+const MAX_TRANSFER_LEASES: usize = 8;
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +202,11 @@ pub struct MobileBackgroundService {
     shared: Arc<Shared>,
     updates: watch::Sender<u64>,
     progress: watch::Receiver<Progress>,
+    /// Transfer leases named by a WebView run (bulk PDF translation in the
+    /// viewer has no Rust future to enclose). Rust still owns the guard; JS can
+    /// only ask for and release an id.
+    transfer_leases: Mutex<HashMap<u64, BackgroundWork>>,
+    next_transfer_lease: AtomicU64,
 }
 impl MobileBackgroundService {
     pub fn new(driver: Arc<dyn BackgroundDriver>) -> Arc<Self> {
@@ -228,8 +235,45 @@ impl MobileBackgroundService {
             shared,
             updates,
             progress: observed,
+            transfer_leases: Mutex::new(HashMap::new()),
+            next_transfer_lease: AtomicU64::new(0),
         })
     }
+    /// Hold a transfer lease on behalf of a WebView-owned run. Admission uses
+    /// the same bounded ladder as [`Self::track`]; the count is returned to JS
+    /// only after the OS round-trip settles.
+    pub async fn begin_transfer(self: &Arc<Self>) -> Result<u64, AppError> {
+        let work = self.track(BackgroundReason::Transfer).await?;
+        let mut leases = self
+            .transfer_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if leases.len() >= MAX_TRANSFER_LEASES {
+            drop(work);
+            return Err(AppError::domain(
+                "mobile_background_capacity",
+                "Too many transfers are active",
+            ));
+        }
+        let id = self
+            .next_transfer_lease
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        leases.insert(id, work);
+        Ok(id)
+    }
+
+    /// Release one named transfer lease. Unknown or already-released ids are a
+    /// no-op, so a late JS acknowledgement cannot release another run's lease.
+    pub fn end_transfer(&self, id: u64) {
+        let work = self
+            .transfer_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&id);
+        drop(work);
+    }
+
     fn ensure_open(&self) -> Result<(), AppError> {
         if self.shared.lock().closed {
             Err(closed())

@@ -12,7 +12,7 @@ Android 使用独立的 Agent `specialUse` 与同步/传输 `dataSync` 服务；
 
 ## 锁屏、长任务与渲染截止时间
 
-锁屏会隐藏页面并挂起 WebView（iOS 连整个进程挂起），在途请求只能以传输错误结束。批量 PDF 翻译因此**不追求锁屏后继续联网**，而是按请求暂停与恢复：每次 provider 请求前经 `appIsAvailable()` 等待页面可见且在线，锁屏导致的传输失败不计入 provider-down，恢复后重试同一块，已完成的块仍从 `layout-translate.json` 续跑。iOS 没有通用后台联网权限；Android 的 `dataSync` 前台服务只覆盖同步/传输，不覆盖这类逐条请求的翻译循环。
+锁屏会隐藏页面并挂起 WebView（iOS 连整个进程挂起），在途请求只能以传输错误结束。批量 PDF 翻译因此**不追求锁屏后继续联网**，而是按请求暂停与恢复：每次 provider 请求前经 `appIsAvailable()` 等待页面可见且在线，锁屏导致的传输失败不计入 provider-down，恢复后重试同一块，已完成的块仍从 `layout-translate.json` 续跑。iOS 没有通用后台联网权限；Android 复用既有的 `dataSync` 前台服务（不新增服务类型）：批量翻译在开始/结束时经 `mobile_background_begin_transfer` / `mobile_background_end_transfer` 取得与释放 Rust 持有的 transfer 租约，原生计数进入 SYNC 泳道。租约存在且用户已开启后台（通知可用）时 `hiddenAllowed=true`，页面隐藏后仍继续发请求；否则（iOS、未开启、通知被关）按页面可见性暂停。
 
 渲染任务的 15 分钟截止时间同样按**前台空闲**计算（[`RendererClock`](../../src-tauri/src/features/jobs/mod.rs)）：进度报告重置空闲窗口，后台累计时间在恢复时整体扣除；移动端窗口的 `Suspended` / `Resumed` 把前台状态同时写给 `SyncService` 与 `JobCenter`，桌面端不调用、语义不变。锁屏不再被误判为渲染器死亡，而真正停止上报的渲染器仍会在前台空闲 15 分钟后失败并释放并发槽。
 

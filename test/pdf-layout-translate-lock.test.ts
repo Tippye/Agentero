@@ -43,6 +43,7 @@ vi.mock("@/lib/settings", () => ({
 
 import {
 	appIsAvailable,
+	holdBackgroundContinuation,
 	waitForAppAvailability,
 } from "@/lib/core/app-availability";
 import { runLayoutRegionTranslate } from "@/lib/pdf/layout/layout-translate";
@@ -76,6 +77,22 @@ describe("app availability gate", () => {
 		setVisibility("visible");
 		await waiting;
 		expect(settled).toBe(true);
+	});
+
+	it("keeps requesting while hidden under a Host transfer lease", () => {
+		setVisibility("hidden");
+		expect(appIsAvailable()).toBe(false);
+		const release = holdBackgroundContinuation();
+		expect(appIsAvailable()).toBe(true);
+		release();
+		release();
+		expect(appIsAvailable()).toBe(false);
+		// Losing the link still pauses even with the lease held.
+		const held = holdBackgroundContinuation();
+		setOnline(false);
+		expect(appIsAvailable()).toBe(false);
+		held();
+		setOnline(true);
 	});
 
 	it("waits for the link to come back", async () => {
