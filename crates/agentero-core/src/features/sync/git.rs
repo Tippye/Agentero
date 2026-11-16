@@ -902,9 +902,19 @@ fn scope_ignore_patterns(scope: &SyncScope) -> Vec<&'static str> {
     }
     if !scope.source {
         lines.push("papers/*/source/");
+        // Layout/translation sidecars are shared metadata and stay synced even
+        // with the TeX tree off; a directory-only ignore would drop them too.
+        lines.push("!papers/*/source/layout.json");
+        lines.push("!papers/*/source/layout-translate.json");
     }
     if !scope.attachments {
         lines.push("papers/*/attachments/");
+    }
+    if !scope.ink {
+        lines.push("papers/*/marks/ink/");
+    }
+    if !scope.translated {
+        lines.push("papers/*/translated/");
     }
     lines
 }
@@ -1276,11 +1286,16 @@ mod tests {
         let mut scope = SyncScope::all();
         scope.pdf = false;
         scope.source = false;
+        scope.translated = false;
         let once = sync_gitignore("*.log\n", &scope);
         assert_eq!(sync_gitignore(&once, &scope), once);
         assert!(once.starts_with("*.log\n\n# agentero-sync-start\n"));
         assert!(once.contains("papers/*/*.pdf\n"));
         assert!(once.contains("papers/*/source/\n"));
+        assert!(once.contains("!papers/*/source/layout.json\n"));
+        assert!(once.contains("!papers/*/source/layout-translate.json\n"));
+        assert!(once.contains("papers/*/translated/\n"));
+        assert!(!once.contains("marks/ink"));
         assert!(!once.contains("attachments"));
         assert_eq!(sync_gitignore(&once, &SyncScope::all()), "*.log\n");
         assert_eq!(sync_gitignore("", &SyncScope::all()), "");

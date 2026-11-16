@@ -5,10 +5,12 @@
  * PDFium text redaction, formula fragment extraction, full CJK font embedding
  * (each embedded copy is ~20 MB), and pdf-lib serialization. The bytes depend
  * only on the source geometry IR, the exact translations, the font bytes, and
- * the reflow schema — so the finished PDF is stored under the app cache
- * directory and reused verbatim. Per-page preview builds are deliberately NOT
- * cached: each embeds the full CJK font pair, so caching them would cost
- * ~20 MB per page for a marginal win over the single final entry.
+ * the reflow schema — so the finished PDF is stored and reused verbatim.
+ * Local papers keep it in `papers/<id>/translated/` so vault sync can carry the
+ * file to other devices; remote/pathless sessions fall back to the app cache.
+ * Per-page preview builds are deliberately NOT cached: each embeds the full CJK
+ * font pair, so caching them would cost ~20 MB per page for a marginal win over
+ * the single final entry.
  *
  * The file is named by a SHA-256 content key and re-read through
  * `pdf-lib.load`, which validates PDF structure. A truncated or corrupt file
@@ -27,10 +29,12 @@ import {
 import { errorText } from "@/lib/core/error";
 import { logger } from "@/lib/core/logger";
 import { isTauri } from "@/lib/core/tauri";
+import { isRemoteVaultHandle } from "@/lib/vault/remote/remote-vault";
 import { gunzipBytes, pdfSha256, sha256Bytes } from "./cache-utils";
 import type { ReflowFontBytes } from "./fonts";
 import type { ReflowDocument } from "./types";
 
+/** Fallback for remote/pathless sessions; local papers use `<paper>/translated/`. */
 const CACHE_DIR = "reflow-build";
 /** Font content pins the parser version too: new font bytes invalidate entries. */
 const FONT_ASSET_REVISION = "1eeeec2a63b05fe6fe7a1f45f0955a8fa98793c4";
@@ -52,6 +56,12 @@ const FINAL_KEEP_COUNT = 2;
 export type ReflowBuildCacheSource = {
 	/** Stable paper identifier, usually the vault-relative paper folder. */
 	paperKey: string | null | undefined;
+	/**
+	 * Absolute local paper folder. Finished PDFs live in its `translated/`
+	 * directory so vault sync can carry them to other devices. Remote handles
+	 * and untitled sessions fall back to the app cache.
+	 */
+	paperAbsPath?: string | null;
 	/** Viewer bytes; keyed by content so a changed PDF never reuses old builds. */
 	pdfBytes: ArrayBuffer | Uint8Array | null | undefined;
 };
@@ -155,9 +165,14 @@ async function resolveBase(
 ): Promise<BuildBase | null> {
 	if (!isTauri() || !source.pdfBytes) return null;
 	try {
+		const pdfHash = await pdfSha256(source.pdfBytes);
+		const paper = source.paperAbsPath;
+		if (paper && !isRemoteVaultHandle(paper)) {
+			return { dir: await join(paper, "translated"), pdfSha256: pdfHash };
+		}
 		return {
 			dir: await join(await appCacheDir(), CACHE_DIR),
-			pdfSha256: await pdfSha256(source.pdfBytes),
+			pdfSha256: pdfHash,
 		};
 	} catch (error) {
 		logger.warn("pdf.reflow.buildCache key failed", {

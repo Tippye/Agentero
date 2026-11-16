@@ -1116,6 +1116,7 @@
 		"statusDisconnected": "Not connected",
 		"statusSyncing": "Syncing",
 		"statusError": "Connection error",
+		"unreachable": "Cannot reach the sync server. Check the server address, that the NAS or server is online, and this device's network; sync retries in the background.",
 		"providerDocsAria": "Open {{name}} setup guide",
 		"lastSync": "Last synced {{time}}",
 		"neverSynced": "Not synced yet.",
@@ -1143,7 +1144,10 @@
 		"scopeHintGit": "Notes, metadata and highlights always sync. Unselected files are written to .gitignore and left out of new commits.",
 		"scopePdf": "PDFs",
 		"scopeSource": "LaTeX sources",
-		"scopeAttachments": "Attachments"
+		"scopeAttachments": "Attachments",
+		"scopeTranslated": "Translated PDFs",
+		"scopeTranslatedHint": "Finished translated PDFs live in the paper's translated/ folder. They are only produced when Settings → Translate → Cache → Cache translated PDFs is on; this switch controls whether they upload.",
+		"scopeInk": "Ink annotations"
 	},
 	"cloudSync": {
 		"title": "Cloud sync",

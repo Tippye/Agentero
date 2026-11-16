@@ -5,6 +5,10 @@
 
 import i18n from "@/i18n";
 import { listenAgentCompleted, listenAgentFailed, runOnce } from "@/lib/agent";
+import {
+	appIsAvailable,
+	waitForAppAvailability,
+} from "@/lib/core/app-availability";
 import { commands, type Json } from "@/lib/core/bindings";
 import { errorText } from "@/lib/core/error";
 import { callApi } from "@/lib/core/ipc";
@@ -1004,37 +1008,54 @@ export async function runLayoutRegionTranslate(options: {
 			text,
 			LAYOUT_TRANSLATE_BATCH_CHARS,
 		)) {
-			if (signal?.aborted) return "";
-			// The provider was already unreachable; a further request would only
-			// spend another timeout on the same dead endpoint.
-			if (providerDown) throw new Error(providerDown);
 			let translated: string;
-			try {
-				translated = await runTranslate(
-					{
-						text: chunk,
-						context: {
-							page: pageIndex != null ? pageIndex + 1 : undefined,
-							surface: "pdf-layout-bulk",
+			for (;;) {
+				// A locked device hides the page and iOS suspends the webview:
+				// wait for visibility/network instead of failing a run the user
+				// merely interrupted, then retry the same chunk.
+				await waitForAppAvailability(signal);
+				if (signal?.aborted) return "";
+				// The provider was already unreachable; a further request would
+				// only spend another timeout on the same dead endpoint.
+				if (providerDown) throw new Error(providerDown);
+				try {
+					translated = await runTranslate(
+						{
+							text: chunk,
+							context: {
+								page: pageIndex != null ? pageIndex + 1 : undefined,
+								surface: "pdf-layout-bulk",
+							},
 						},
-					},
-					{ ...agentOpts, apiOnly: options.apiOnly },
-				);
-			} catch (error) {
-				const message = errorText(error);
-				transportFailures = isTranslateTransportError(message)
-					? transportFailures + 1
-					: 0;
-				if (transportFailures >= LAYOUT_TRANSLATE_PROVIDER_DOWN_FAILURES) {
-					providerDown = message;
-					logger.warn("pdf.translate.provider-down", {
-						failures: transportFailures,
-						error: message,
-					});
+						{ ...agentOpts, apiOnly: options.apiOnly },
+					);
+				} catch (error) {
+					const message = errorText(error);
+					// A request cut off by a lock or a lost link says nothing
+					// about the provider; retry once the app is usable again.
+					if (
+						!signal?.aborted &&
+						isTranslateTransportError(message) &&
+						!appIsAvailable()
+					) {
+						transportFailures = 0;
+						continue;
+					}
+					transportFailures = isTranslateTransportError(message)
+						? transportFailures + 1
+						: 0;
+					if (transportFailures >= LAYOUT_TRANSLATE_PROVIDER_DOWN_FAILURES) {
+						providerDown = message;
+						logger.warn("pdf.translate.provider-down", {
+							failures: transportFailures,
+							error: message,
+						});
+					}
+					throw error;
 				}
-				throw error;
+				transportFailures = 0;
+				break;
 			}
-			transportFailures = 0;
 			if (!translated.trim()) throw new Error("Empty translation result");
 			parts.push(translated.trim());
 		}

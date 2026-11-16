@@ -670,7 +670,10 @@ mod tests {
         .unwrap();
         assert!(cfg.auto_sync);
         assert_eq!(cfg.interval_minutes, 30);
-        assert!(cfg.scope.is_all());
+        // Missing scope = product default: ink on, translated PDFs opt-in.
+        assert!(cfg.scope.pdf && cfg.scope.source && cfg.scope.attachments);
+        assert!(cfg.scope.ink);
+        assert!(!cfg.scope.translated);
     }
 
     #[test]
@@ -1015,6 +1018,8 @@ mod tests {
             pdf: false,
             source: false,
             attachments: false,
+            ink: false,
+            translated: false,
         };
         assert!(cfg.normalized().scope.is_all());
     }

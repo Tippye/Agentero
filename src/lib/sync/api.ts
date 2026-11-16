@@ -16,14 +16,19 @@ import {
 import { callApiResult } from "@/lib/core/ipc";
 
 /**
- * Which bulky paper assets take part in sync. Notes, metadata sidecars,
- * marks and embedded images always sync — they are small and irreplaceable,
- * while PDFs / LaTeX sources can be re-fetched from their upstream source.
+ * Which optional paper assets take part in sync. Notes, metadata sidecars,
+ * highlights and embedded images always sync — they are small and
+ * irreplaceable. Ink and translated PDFs are device-produced artifacts and are
+ * opt-in per category.
  */
 export type SyncScope = {
 	pdf: boolean;
 	source: boolean;
 	attachments: boolean;
+	/** Handwritten ink sidecars (`papers/<id>/marks/ink/`); mobile-only toggle. */
+	ink: boolean;
+	/** Finished translated PDFs (`papers/<id>/translated/`). */
+	translated: boolean;
 };
 
 /** Storage backend discriminator; legacy configs without one are S3. */
@@ -141,7 +146,14 @@ export const emptySyncConfig = (
 	autoSync: true,
 	intervalMinutes: 30,
 	conditionalWrites: true,
-	scope: { pdf: true, source: true, attachments: true },
+	// Product defaults: ink has always synced; translated PDFs are opt-in.
+	scope: {
+		pdf: true,
+		source: true,
+		attachments: true,
+		ink: true,
+		translated: false,
+	},
 });
 
 /** Interval choices shared with the Host (`config::INTERVAL_CHOICES`). */
@@ -152,6 +164,8 @@ export type SyncScopeSizes = {
 	pdf: number;
 	source: number;
 	attachments: number;
+	ink: number;
+	translated: number;
 };
 
 /** Fold the generated wire status into the local all-fields-present shape. */
@@ -196,6 +210,8 @@ function configFromWire(config: SyncBackendConfigWire): SyncBackendConfig {
 			pdf: config.scope?.pdf ?? true,
 			source: config.scope?.source ?? true,
 			attachments: config.scope?.attachments ?? true,
+			ink: config.scope?.ink ?? true,
+			translated: config.scope?.translated ?? false,
 		},
 	};
 }

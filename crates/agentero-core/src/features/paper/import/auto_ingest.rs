@@ -30,12 +30,13 @@ use super::{slug_from_stem, title_from_stem, write_paper_shell_opts, NoteShellMo
 
 /// Marker names mirroring the frontend paper-unit detection
 /// (`src/lib/paper/detect.ts`): files `NOTES.md`/`PAPER.md`, dirs
-/// `source`/`assets`/`marks`. `attachments/` is a paper-internal dir but not
-/// a marker — a folder holding only attachments + PDFs is still adoptable.
+/// `source`/`assets`/`marks`/`translated`. `attachments/` is a paper-internal
+/// dir but not a marker — a folder holding only attachments + PDFs is still
+/// adoptable.
 const PAPER_MARKER_FILES: &[&str] = &["NOTES.md", "PAPER.md"];
-const PAPER_MARKER_DIRS: &[&str] = &["source", "assets", "marks"];
+const PAPER_MARKER_DIRS: &[&str] = &["source", "assets", "marks", "translated"];
 /// Paper-internal dir names: never scanned for nested paper units.
-const PAPER_INTERNAL_DIRS: &[&str] = &["attachments", "source", "assets", "marks"];
+const PAPER_INTERNAL_DIRS: &[&str] = &["attachments", "source", "assets", "marks", "translated"];
 /// Suffixes (extension position) of browser/office in-flight downloads.
 const TEMP_DOWNLOAD_EXTS: &[&str] = &["crdownload", "part", "download", "partial", "opdownload"];
 

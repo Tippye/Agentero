@@ -4733,7 +4733,12 @@ export type PaperAssetAvailability = {
 	materialized: boolean,
 };
 
-export type PaperAssetKind = "pdf" | "source" | "attachment";
+export type PaperAssetKind = "pdf" | "source" | "attachment" |
+/**
+ *  Derived finished translation; bulky but rebuildable from the source
+ *  PDF + translation sidecar, so it follows the same on-demand policy.
+ */
+"translated";
 
 export type PaperAssetsReadyEvent = PaperFactPayload;
 
@@ -6370,8 +6375,10 @@ export type SyncProgressEvent = {
 
 /**
  *  Which bulky, re-derivable paper assets participate in sync. Notes,
- *  sidecars, marks and embedded images always sync — they are small and not
- *  recoverable from any upstream source.
+ *  metadata sidecars, highlights and embedded images always sync — they are
+ *  small and not recoverable from any upstream source. Ink strokes and
+ *  translated PDFs are optional because only some devices produce them or need
+ *  them.
  */
 export type SyncScope = {
 	/**  Paper-root PDFs: `papers/<id>/<id>.pdf`. */
@@ -6380,6 +6387,10 @@ export type SyncScope = {
 	source?: boolean,
 	/**  Supplementary material: `papers/<id>/attachments/`. */
 	attachments?: boolean,
+	/**  Handwritten ink sidecars: `papers/<id>/marks/ink/`. */
+	ink?: boolean,
+	/**  Finished translated PDFs: `papers/<id>/translated/`. */
+	translated?: boolean,
 };
 
 /**  Local disk usage per bulky-asset category (bytes), for the sync-scope UI. */
@@ -6387,6 +6398,8 @@ export type SyncScopeSizes = {
 	pdf: number,
 	source: number,
 	attachments: number,
+	ink: number,
+	translated: number,
 };
 
 /**
