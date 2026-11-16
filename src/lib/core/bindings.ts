@@ -31,6 +31,8 @@ export const commands = {
 	mobileBackgroundRequestNotifications: () => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_request_notifications")),
 	/**  Open a system settings page after an explicit user action. */
 	mobileBackgroundOpenSettings: (target: BackgroundSettingsTarget) => typedError<ApiResult<BackgroundState>, string>(__TAURI_INVOKE("mobile_background_open_settings", { target })),
+	mobileBackgroundBeginTransfer: () => typedError<ApiResult<MobileBackgroundTransferLease>, string>(__TAURI_INVOKE("mobile_background_begin_transfer")),
+	mobileBackgroundEndTransfer: (args: MobileBackgroundTransferEndArgs) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("mobile_background_end_transfer", { args })),
 	mobileRouteRead: (vaultPath: string) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_read", { vaultPath })),
 	mobileRouteSave: (vaultPath: string, expectedRevision: string, route: MobileWindowRoute) => typedError<ApiResult<MobileRouteSnapshot>, string>(__TAURI_INVOKE("mobile_route_save", { vaultPath, expectedRevision, route })),
 	/**  Read native adapter capabilities and provenance-tagged observations. */
@@ -4599,6 +4601,20 @@ export type MigrateProgress = {
 	current: number,
 	total: number,
 	phase: string,
+};
+
+export type MobileBackgroundTransferEndArgs = {
+	leaseId: number,
+};
+
+/**
+ *  Lease handed to a WebView-owned run. `hidden_allowed` reports whether the OS
+ *  carries this process while the page is hidden (Android + user-enabled
+ *  dataSync service); the JS gate only pauses when it does not.
+ */
+export type MobileBackgroundTransferLease = {
+	leaseId: number | null,
+	hiddenAllowed: boolean,
 };
 
 export type MobileExternalPdfPendingEvt = null;
