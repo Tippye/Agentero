@@ -1,6 +1,7 @@
 //! Automatic sync scheduling. Desktop watches files; mobile receives explicit
 //! native write/lifecycle signals and schedules only while foregrounded.
 use super::SyncService;
+use crate::core::error::AppError;
 use crate::integration::sync::config;
 #[cfg(desktop)]
 use notify_debouncer_full::notify::{RecursiveMode, Watcher};
@@ -15,11 +16,25 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 #[cfg(any(mobile, test))]
-use tokio::{sync::watch, time::Instant};
+use tokio::sync::watch;
+#[cfg(desktop)]
+use tokio::time::sleep_until;
+use tokio::time::Instant;
 
 const CHANGE_QUIET_SECS: u64 = 30;
 #[cfg(desktop)]
 const EXIT_FLUSH_TIMEOUT_SECS: u64 = 5;
+
+/// Backoff between automatic retries of a transport failure. A NAS whose DDNS
+/// name briefly stops resolving (or that reboots) recovers long before the
+/// regular interval; the last step caps retry frequency for a long outage.
+/// Credential, configuration and HTTP-status failures are not retried.
+#[cfg(desktop)]
+const RETRY_DELAYS: &[Duration] = &[
+    Duration::from_secs(30),
+    Duration::from_secs(2 * 60),
+    Duration::from_secs(10 * 60),
+];
 
 pub(super) struct ScheduledVault {
     task: tauri::async_runtime::JoinHandle<()>,
@@ -321,18 +336,55 @@ async fn run_desktop_loop(app: AppHandle, vault_key: String, dir: PathBuf, inter
         }
     }
     let mut ticker = tokio::time::interval(interval_duration(interval_minutes));
+    let mut failures = 0usize;
+    let mut retry_at: Option<Instant> = None;
     loop {
+        // `select!` needs a concrete deadline; the guard disables the branch
+        // while no retry is pending.
+        let retry_deadline =
+            retry_at.unwrap_or_else(|| Instant::now() + Duration::from_secs(86_400));
         tokio::select! {
             _ = ticker.tick() => {},
             changed = rx.recv() => { if changed.is_none() { break; } }
+            _ = sleep_until(retry_deadline), if retry_at.is_some() => {}
         }
-        if let Err(error) = {
+        let outcome = {
             let service = app.state::<SyncService>();
             super::commands::perform_sync(&app, &service, &vault_key).await
-        } {
-            log::warn!(target: "agentero::sync", "auto sync {vault_key}: {error}");
+        };
+        match outcome {
+            Ok(_) => {
+                failures = 0;
+                retry_at = None;
+            }
+            Err(error) => {
+                log::warn!(target: "agentero::sync", "auto sync {vault_key}: {error}");
+                match retry_delay(&error, failures) {
+                    Some(delay) => {
+                        retry_at = Some(Instant::now() + delay);
+                        failures = failures.saturating_add(1);
+                    }
+                    None => {
+                        // A failure that needs user action resets the ladder;
+                        // a later outage starts from the first step again.
+                        retry_at = None;
+                        failures = 0;
+                    }
+                }
+            }
         }
     }
+}
+
+/// Delay before re-attempting an automatic pass; `None` when the failure needs
+/// user action and the regular interval should take over again.
+#[cfg(desktop)]
+fn retry_delay(error: &AppError, consecutive_failures: usize) -> Option<Duration> {
+    if error.code() != agentero_core::features::sync::SYNC_UNREACHABLE {
+        return None;
+    }
+    let index = consecutive_failures.min(RETRY_DELAYS.len() - 1);
+    RETRY_DELAYS.get(index).copied()
 }
 
 fn is_ignored_path(path: &Path) -> bool {
@@ -690,6 +742,36 @@ mod tests {
             &alias,
             &alias.join("outside-link/removed.md")
         ));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn automatic_retries_only_transport_failures_with_bounded_backoff() {
+        use agentero_core::features::sync::SYNC_UNREACHABLE;
+
+        let unreachable = AppError::domain(SYNC_UNREACHABLE, "dns error");
+        assert_eq!(retry_delay(&unreachable, 0), Some(Duration::from_secs(30)));
+        assert_eq!(retry_delay(&unreachable, 1), Some(Duration::from_secs(120)));
+        assert_eq!(retry_delay(&unreachable, 2), Some(Duration::from_secs(600)));
+        // A long outage keeps the last step instead of growing without bound.
+        assert_eq!(retry_delay(&unreachable, 9), Some(Duration::from_secs(600)));
+
+        // Everything that needs user action waits for the regular interval.
+        assert_eq!(
+            retry_delay(&AppError::domain("sync_credentials_missing", "nope"), 0),
+            None
+        );
+        assert_eq!(
+            retry_delay(&AppError::message("sync is not configured"), 3),
+            None
+        );
+        assert_eq!(
+            retry_delay(
+                &AppError::domain("sync_backend_unavailable_mobile", "nope"),
+                1
+            ),
+            None
+        );
     }
 
     #[test]

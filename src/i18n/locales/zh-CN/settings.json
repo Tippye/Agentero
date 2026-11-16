@@ -1114,6 +1114,7 @@
 		"statusDisconnected": "未连接",
 		"statusSyncing": "同步中",
 		"statusError": "连接异常",
+		"unreachable": "无法连接同步服务器。请确认服务器地址、NAS 或服务器在线，以及本机网络；同步会在后台重试。",
 		"providerDocsAria": "打开 {{name}} 配置指南",
 		"lastSync": "上次同步 {{time}}",
 		"neverSynced": "尚未同步。",

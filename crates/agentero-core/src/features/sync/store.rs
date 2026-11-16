@@ -13,6 +13,7 @@ use crate::features::sync::agentero::AgenteroClient;
 use crate::features::sync::config::{SyncBackendConfig, SyncBackendKind};
 use crate::features::sync::s3::S3Client;
 use crate::features::sync::webdav::WebdavClient;
+use crate::features::sync::SYNC_UNREACHABLE;
 use std::future::Future;
 use std::path::Path;
 
@@ -160,10 +161,45 @@ pub(crate) async fn send_with_retries(
         }
     }
     let e = last_err.expect("loop sets last_err before exiting");
-    Err(AppError::message(format!(
-        "{method} {url}: {}",
-        error_chain(&e)
-    )))
+    let message = format!("{method} {url}: {}", error_chain(&e));
+    // Only failures that never reached the server are retryable by a later
+    // pass; anything the builder itself rejected would repeat verbatim.
+    if is_unreachable(&e) {
+        Err(AppError::domain(SYNC_UNREACHABLE, message))
+    } else {
+        Err(AppError::message(message))
+    }
+}
+
+/// Whether a transport error means "the server was not reached": DNS lookup
+/// failure, refused/reset connection, connect timeout. reqwest funnels DNS
+/// through the connect path but does not always flag it as `is_connect()`, so
+/// the chain is also inspected — that is the message users hit when a NAS's
+/// DDNS name briefly disappears.
+fn is_unreachable(error: &reqwest::Error) -> bool {
+    error.is_connect() || error.is_timeout() || chain_never_reached_server(&error_chain(error))
+}
+
+/// Text markers inside a reqwest source chain that mean the peer was never
+/// reached. reqwest reports DNS failures as a generic `Connect`, and their
+/// source text is the only part that names the cause the user can act on.
+fn chain_never_reached_server(chain: &str) -> bool {
+    let chain = chain.to_ascii_lowercase();
+    // A rejected certificate repeats on every attempt until the user fixes the
+    // server or its CA; it is a configuration error, not a network blip.
+    if chain.contains("certificate") || chain.contains("tls handshake") {
+        return false;
+    }
+    [
+        "dns error",
+        "failed to lookup",
+        "connection refused",
+        "connection reset",
+        "network is unreachable",
+        "timed out",
+    ]
+    .iter()
+    .any(|marker| chain.contains(marker))
 }
 
 /// Turn a non-success response into an error with a short body excerpt.
@@ -200,4 +236,33 @@ pub(crate) fn error_chain(err: &reqwest::Error) -> String {
         source = s.source();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_failures_that_never_reached_the_server() {
+        // Verbatim chain from a NAS whose DDNS name stopped resolving (macOS).
+        assert!(chain_never_reached_server(
+            "error sending request for url (https://dav.example.net/apps/Agentero/): \
+             client error (Connect): dns error: failed to lookup address information: \
+             No address associated with hostname: failed to lookup address information: \
+             No address associated with hostname"
+        ));
+        assert!(chain_never_reached_server(
+            "tcp connect error: Connection refused (os error 61)"
+        ));
+        assert!(chain_never_reached_server("operation timed out"));
+        // A rejected certificate repeats verbatim until the peer or CA is
+        // fixed, so it must not be retried as a network blip.
+        assert!(!chain_never_reached_server(
+            "invalid peer certificate: UnknownIssuer"
+        ));
+        // HTTP statuses never take this path; keep the predicate honest anyway.
+        assert!(!chain_never_reached_server(
+            "PROPFIND apps/Agentero: 401 Unauthorized"
+        ));
+    }
 }

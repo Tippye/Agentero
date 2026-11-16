@@ -85,9 +85,9 @@ vi.mock("@/lib/core/bindings", () => ({
 vi.mock("@/features/account/client", () => ({
 	authClient: { getSession: host.auth },
 }));
-vi.mock("@/lib/core/notify", () => ({
-	errorMessage: (error: unknown) =>
-		error instanceof Error ? error.message : String(error),
+vi.mock("@/lib/core/notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/core/notify")>()),
+	// Keep the real error classification and capture the toasts.
 	notifyError: host.error,
 	notifySuccess: host.success,
 }));

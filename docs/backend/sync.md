@@ -91,7 +91,7 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 - **连接测试**：PROPFIND 207 / 创建成功即凭据与目录可用；401/403 报凭证错误，不保存配置。随后做一次**无条件试写**（一次性 key，写完即删）：地址写不进去（不可写位置、权限或配额拒绝）在配置阶段就报错并带上目标目录 URL，不再静默保存坏配置、把错误推迟到首次同步。
 - **条件写**：WebDAV 实现差异大，探测针对 `If-Match`（HEAD CAS 的唯一依托）：无条件试写建出一次性 key 后，带过期 etag 再 PUT，412 = 真支持，2xx = 降级为普通 PUT（与 OSS 共用 `conditionalWrites=false` 与降级语义，见上节）；`If-None-Match: *` 不探测——被忽略也无害（blob 内容寻址、manifest key 唯一随机）。实测坚果云忽略 `If-None-Match` 但强制 `If-Match`，即 CAS 原子性完整保留。硬错误（非 2xx/412）直接让连接测试失败；只有探测无结论（如条件头被忽略/拒绝）才按支持处理（fail open——被忽略的头无害，漏掉 CAS 才有害）。`test_connection` 以 `conditionalWrites=true` 构造探测客户端，保证测的是服务器行为而非持久化的旧结论。
 - **无 ETag 的服务器**：`If-Match` 退化为普通 PUT，同降级语义收敛。
-- **重试**：与 S3 客户端一致的传输层 3 次重试（幂等操作）。
+- **重试**：与 S3 客户端一致的传输层 3 次重试（幂等操作）。三次都失败且请求从未到达服务器（DNS 解析失败、连接被拒绝/重置、连接超时）时，错误域码为 `sync_unreachable`；证书被拒不算——它每次都会以同样方式失败，需要用户改证书或地址。自动同步只对 `sync_unreachable` 退避重试（见「自动同步」）。
 - **安全约束同 S3**：`https://` 强制（仅 loopback 放行 http），密码掩码同 `secretKey`。NAS 场景的明文 http 与自签名证书 https 均不可用。
 - **兼容性（实测）**：路径段 percent-encode、请求带尾斜杠集合形式。坚果云特性：MKCOL 对根 `/dav` 返回 403 OperationNotAllowed（按「已存在/受保护」容忍）；根 `/dav` 不允许创建文件（PUT 一律 404 ObjectNotFound，[#681](https://github.com/poco-ai/Agentero/issues/681)），故根地址自动落到 `agentero/` 子文件夹（见「目录模型」）；顶层目录名长度有限制（`sandbox name is too long`）；顶层目录不可经 WebDAV 删除、非空目录删除需先清空子项——`sync_disconnect` 本就不动远端数据，仅测试清理需注意；**请求按账号限频**（免费 600 次/30 分钟、付费 1500 次/30 分钟），空转成本见「空转短路」。Nextcloud / Apache mod_dav 按标准实现工作。
 - **集成测试**：`engine.rs` `two_device_roundtrip_against_webdav`（`#[ignore]`，env `AGENTERO_SYNC_WEBDAV_TEST_URL` / `_USERNAME` / `_PASSWORD`，连接测试 + 发布/加入/编辑/分歧冲突/收敛全流程，镜像 MinIO 测试）。
@@ -129,6 +129,8 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 ## 自动同步
 
 配置项 `autoSync`（默认开）与 `intervalMinutes`（15/30/60，默认 30）随凭据存 `sync.json`。调度任务在 `sync_configure` 后（重新）启动、`sync_disconnect` 时停止、应用启动时按配置恢复；每次触发都重读凭据，改配置无需重启。触发器：调度启动即同步一次（≈打开 Vault）、Vault 改动静置 30s、定时间隔兜底；`RunEvent::Exit` 时对所有自动同步 Vault 尽力推送（超时 5s/Vault）。
+
+传输层失败（`sync_unreachable`：DDNS 名称短时消失、NAS 休眠/重启、Wi-Fi 切换）不等到下一个间隔：自动同步按 30s → 2min → 10min 退避重试，成功即复位，10 分钟封顶避免长期离线时持续打远端。凭证、配置、HTTP 状态类错误不重试，仍按间隔等待用户处理。设置页对这类失败用可操作文案提示（「无法连接同步服务器…，同步会在后台重试」），原始 reqwest 错误链作为副行保留，便于排查。
 
 同一 Vault 的手动、自动、退出同步共用 `SyncRunLease` 占用；不同 Vault 可独立运行。退出 flush 若该 Vault 已在同步则记录并跳过，避免并发改写本地 base/state。正常成功/失败先释放占用再广播既有终态，超时或 task abort 通过 guard 自动释放，后续同步可重新取得占用。
 

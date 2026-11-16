@@ -1114,6 +1114,7 @@
 		"statusDisconnected": "Not connected",
 		"statusSyncing": "Syncing",
 		"statusError": "Connection error",
+		"unreachable": "Cannot reach the sync server. Check the server address, that the NAS or server is online, and this device's network; sync retries in the background.",
 		"providerDocsAria": "Open {{name}} setup guide",
 		"lastSync": "Last synced {{time}}",
 		"neverSynced": "Not synced yet.",
