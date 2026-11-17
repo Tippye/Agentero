@@ -260,6 +260,21 @@ impl<R: Runtime> MobileBackground<R> {
         self.call("openSettings", serde_json::json!({"target":target}))
             .await
     }
+    /// Copy the bundled SQLite dictionary into app-private storage. Android
+    /// APK assets are not openable by SQLite, so the native side owns the
+    /// versioned, atomic extraction and returns the real file path.
+    #[cfg(target_os = "android")]
+    pub fn ensure_dictionary(&self) -> Result<std::path::PathBuf, String> {
+        #[derive(serde::Deserialize)]
+        struct Output {
+            path: String,
+        }
+        self.handle
+            .run_mobile_plugin::<Output>("ensureDictionary", serde_json::json!({}))
+            .map(|output| std::path::PathBuf::from(output.path))
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn apply(&self, counts: BackgroundCounts) -> Result<BackgroundState, String> {
         #[cfg(desktop)]
         if !counts.is_empty() {

@@ -60,6 +60,9 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     fun openImportFile(invoke: Invoke) = importFiles.open(invoke)
 
     @Command
+    fun ensureDictionary(invoke: Invoke) = DictionaryAssets.ensure(activity, invoke)
+
+    @Command
     fun takeExternalPdf(invoke: Invoke) = onUi(invoke) {
         val uri = externalPdfs.take()
         if (uri == null) {
