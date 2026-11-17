@@ -22,8 +22,10 @@ import { Shimmer } from "@/components/ui/shimmer";
 import { cn } from "@/lib/core/utils";
 import type { PaperMetadata } from "@/lib/paper/types";
 
-/** Width of the revealed row actions; must match the action layer class below. */
+/** Width of one revealed row action (delete or pin). */
 const ACTION_WIDTH_PX = 72;
+/** Delete plus pin; rows without a known sync state only reveal delete. */
+const PINNED_ACTION_WIDTH_PX = ACTION_WIDTH_PX * 2;
 /** A release past this offset keeps the row open. */
 const OPEN_THRESHOLD_PX = 36;
 /** Horizontal slop before a touch counts as a row swipe. */
@@ -96,6 +98,16 @@ export function MobileLibraryPage({
 		);
 	}, [papers, query]);
 
+	const hasPinAction = (paper: PaperMetadata) =>
+		Boolean(onPinChange && syncStates[paper.id]);
+
+	const actionWidthFor = (rowKey: string) => {
+		const paper = filtered.find((candidate) => rowKeyOf(candidate) === rowKey);
+		return paper && hasPinAction(paper)
+			? PINNED_ACTION_WIDTH_PX
+			: ACTION_WIDTH_PX;
+	};
+
 	const shouldSuppressClick = (rowKey: string) => {
 		const suppressed = suppressClick.current;
 		return (
@@ -106,12 +118,12 @@ export function MobileLibraryPage({
 	};
 
 	const handleTouchStart = (rowKey: string, event: TouchEvent<HTMLElement>) => {
-		if (!onDeletePaper) return;
+		if (!onDeletePaper && !onPinChange) return;
 		const touch = event.touches[0];
 		if (!touch) return;
 		// A fresh touch is a deliberate tap, so it ends the post-swipe click guard.
 		suppressClick.current = null;
-		const startOffset = openKey === rowKey ? ACTION_WIDTH_PX : 0;
+		const startOffset = openKey === rowKey ? actionWidthFor(rowKey) : 0;
 		gesture.current = {
 			key: rowKey,
 			startX: touch.clientX,
@@ -148,7 +160,7 @@ export function MobileLibraryPage({
 			}
 		}
 		const offset = Math.min(
-			ACTION_WIDTH_PX,
+			actionWidthFor(rowKey),
 			Math.max(0, current.startOffset - dx),
 		);
 		current.offset = offset;
@@ -195,8 +207,7 @@ export function MobileLibraryPage({
 		onSelect(paper);
 	};
 
-	const handlePin = (paper: PaperMetadata, rowKey: string, pinned: boolean) => {
-		if (shouldSuppressClick(rowKey)) return;
+	const handlePin = (paper: PaperMetadata, pinned: boolean) => {
 		onPinChange?.(paper, pinned);
 	};
 
@@ -245,10 +256,14 @@ export function MobileLibraryPage({
 								const rowKey = rowKeyOf(paper);
 								const isOpen = openKey === rowKey;
 								const activeDrag = drag?.key === rowKey ? drag : null;
+								const hasPin = hasPinAction(paper);
+								const actionWidth = hasPin
+									? PINNED_ACTION_WIDTH_PX
+									: ACTION_WIDTH_PX;
 								const offset = activeDrag
 									? activeDrag.offset
 									: isOpen
-										? ACTION_WIDTH_PX
+										? actionWidth
 										: 0;
 								const dragging = activeDrag?.dragging === true;
 								return (
@@ -262,21 +277,67 @@ export function MobileLibraryPage({
 											onTouchEnd={(event) => handleTouchEnd(rowKey, event)}
 											onTouchCancel={() => handleTouchCancel(rowKey)}
 										>
-											{onDeletePaper ? (
-												<div className="absolute inset-y-0 right-0 flex w-[4.5rem]">
-													<Button
-														type="button"
-														variant="destructive"
-														className="h-full min-h-11 w-full touch-manipulation rounded-none"
-														tabIndex={isOpen ? 0 : -1}
-														aria-label={t("library.deletePaper", {
-															title: paper.title,
-														})}
-														disabled={busy}
-														onClick={() => setPendingDelete(paper)}
-													>
-														<Trash2 className="size-5" />
-													</Button>
+											{onDeletePaper || hasPin ? (
+												<div
+													className="absolute inset-y-0 right-0 flex"
+													style={{ width: actionWidth }}
+												>
+													{hasPin ? (
+														<Button
+															type="button"
+															variant={
+																syncStates[paper.id].pinned
+																	? "secondary"
+																	: "outline"
+															}
+															className="h-full min-h-11 w-[72px] touch-manipulation rounded-none"
+															tabIndex={isOpen ? 0 : -1}
+															aria-pressed={syncStates[paper.id].pinned}
+															aria-label={t(
+																syncStates[paper.id].pinned
+																	? "sync.unpin"
+																	: "sync.pin",
+																{ title: paper.title },
+															)}
+															title={t(
+																syncStates[paper.id].pinned
+																	? "sync.unpin"
+																	: "sync.pin",
+																{ title: paper.title },
+															)}
+															disabled={syncStates[paper.id].busy}
+															onClick={() =>
+																handlePin(paper, !syncStates[paper.id].pinned)
+															}
+														>
+															{syncStates[paper.id].busy ? (
+																<LoaderCircle className="size-5 animate-spin" />
+															) : (
+																<Pin
+																	className={cn(
+																		"size-5",
+																		syncStates[paper.id].pinned &&
+																			"fill-current text-primary",
+																	)}
+																/>
+															)}
+														</Button>
+													) : null}
+													{onDeletePaper ? (
+														<Button
+															type="button"
+															variant="destructive"
+															className="h-full min-h-11 w-[72px] touch-manipulation rounded-none"
+															tabIndex={isOpen ? 0 : -1}
+															aria-label={t("library.deletePaper", {
+																title: paper.title,
+															})}
+															disabled={busy}
+															onClick={() => setPendingDelete(paper)}
+														>
+															<Trash2 className="size-5" />
+														</Button>
+													) : null}
 												</div>
 											) : null}
 											<div
@@ -328,47 +389,6 @@ export function MobileLibraryPage({
 													</span>
 													<ChevronRight className="size-5 shrink-0 text-muted-foreground" />
 												</button>
-												{syncStates[paper.id] && onPinChange ? (
-													<Button
-														type="button"
-														variant="ghost"
-														size="icon"
-														className="mr-3 size-11 shrink-0"
-														aria-pressed={syncStates[paper.id].pinned}
-														aria-label={t(
-															syncStates[paper.id].pinned
-																? "sync.unpin"
-																: "sync.pin",
-															{ title: paper.title },
-														)}
-														title={t(
-															syncStates[paper.id].pinned
-																? "sync.unpin"
-																: "sync.pin",
-															{ title: paper.title },
-														)}
-														disabled={syncStates[paper.id].busy}
-														onClick={() =>
-															handlePin(
-																paper,
-																rowKey,
-																!syncStates[paper.id].pinned,
-															)
-														}
-													>
-														{syncStates[paper.id].busy ? (
-															<LoaderCircle className="size-5 animate-spin" />
-														) : (
-															<Pin
-																className={cn(
-																	"size-5",
-																	syncStates[paper.id].pinned &&
-																		"fill-current text-primary",
-																)}
-															/>
-														)}
-													</Button>
-												) : null}
 											</div>
 										</div>
 									</li>

@@ -274,7 +274,7 @@ describe("mobile library row actions", () => {
 		expect(transform(row)).toBe("translateX(-72px)");
 	});
 
-	it("keeps plain selection and the pin action working", async () => {
+	it("keeps plain selection working without revealing row actions", async () => {
 		await render({
 			syncStates,
 			onPinChange,
@@ -283,12 +283,38 @@ describe("mobile library row actions", () => {
 		await act(async () => selectButton(row).click());
 		expect(onSelect).toHaveBeenCalledTimes(1);
 		expect(onSelect).toHaveBeenCalledWith(first);
+		const pin = row.querySelector<HTMLButtonElement>('[aria-label="sync.pin"]');
+		expect(pin).not.toBeNull();
+		expect(pin?.tabIndex).toBe(-1);
+	});
+
+	it("moves pin into the revealed actions, left of delete", async () => {
+		await render({
+			syncStates,
+			onPinChange,
+		});
+		const row = rows()[0];
+		await swipe(selectButton(row), 200, 100);
+		expect(transform(row)).toBe("translateX(-144px)");
 
 		const pin = row.querySelector<HTMLButtonElement>('[aria-label="sync.pin"]');
 		expect(pin).not.toBeNull();
+		expect(pin?.closest("[data-swipe-content]")).toBeNull();
+		expect(pin?.tabIndex).toBe(0);
+		const remove = deleteButton(row);
+		expect(pin?.compareDocumentPosition(remove) ?? 0).toBeTruthy();
+		expect(
+			(pin?.compareDocumentPosition(remove) ?? 0) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
 		await act(async () => pin?.click());
 		expect(onPinChange).toHaveBeenCalledTimes(1);
 		expect(onPinChange).toHaveBeenCalledWith(first, true);
-		expect(onSelect).toHaveBeenCalledTimes(1);
+		expect(onSelect).not.toHaveBeenCalled();
+
+		await act(async () => remove.click());
+		expect(dialog()).not.toBeNull();
+		expect(dialog()?.textContent).toContain("library.deletePaperTitle");
 	});
 });
