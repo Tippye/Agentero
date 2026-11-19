@@ -27,7 +27,15 @@ vi.mock("@/lib/workspace/navigation", () => ({
 	openWritingFile: vi.fn(),
 	rememberWritingSource: vi.fn(),
 }));
-vi.mock("@/lib/workspace/store", () => ({ updateTab: vi.fn() }));
+vi.mock("@/lib/workspace/store", () => ({
+	updateTab: vi.fn(),
+	// DocView subscribes to the companion-tab selector; an empty tab list keeps
+	// the plaza pane the only rendered content.
+	workspaceStore: {
+		getState: () => ({ tabs: [] }),
+		subscribe: () => () => {},
+	},
+}));
 vi.mock("@/lib/writing/project-target", () => ({
 	isWritingPath: () => false,
 	resolveWritingTarget: vi.fn(),
