@@ -92,7 +92,10 @@ export const PdfInkLayer = memo(function PdfInkLayer({
 				/>
 			))}
 			{tools.draft?.page === page && (
-				<InkPath stroke={tools.draft.stroke} complete={false} />
+				<InkPath
+					stroke={tools.draft.stroke}
+					complete={tools.draft.snapped === true}
+				/>
 			)}
 			{selection && (
 				<rect

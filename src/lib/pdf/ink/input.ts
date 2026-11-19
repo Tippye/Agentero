@@ -10,6 +10,8 @@ export type InkViewport = {
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
 export const INK_LONG_PRESS_MS = 500;
+/** Pausing this long at the end of a pen stroke snaps it to a clean shape. */
+export const INK_SHAPE_HOLD_MS = 500;
 const HOLD_SLOP_PX = 8;
 /** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {
@@ -32,6 +34,7 @@ export function bindInkInput(options: {
 		page: InkInputPage;
 		started: number;
 		lastTime: number;
+		eraser: boolean;
 	} | null = null;
 	const touches = new Map<number, { x: number; y: number }>();
 	let pan: {
@@ -48,6 +51,13 @@ export function bindInkInput(options: {
 		x: number;
 		y: number;
 		event: PointerEvent;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
+	/** Stillness anchor for hold-to-shape; jitter inside the slop keeps it. */
+	let shapeHold: {
+		id: number;
+		x: number;
+		y: number;
 		timer: ReturnType<typeof setTimeout>;
 	} | null = null;
 	let held: number | null = null;
@@ -83,6 +93,44 @@ export function bindInkInput(options: {
 		if (hold) clearTimeout(hold.timer);
 		hold = null;
 	};
+	const clearShapeHold = () => {
+		if (shapeHold) clearTimeout(shapeHold.timer);
+		shapeHold = null;
+	};
+	/**
+	 * Re-arm only after real movement: sub-slop pen jitter must not postpone
+	 * the snap forever. Moving again after a snap restores the freehand draft.
+	 */
+	const armShapeHold = (event: PointerEvent) => {
+		const active = stroke;
+		if (
+			!active ||
+			active.eraser ||
+			active.id !== event.pointerId ||
+			event.pointerType !== "pen"
+		)
+			return;
+		if (
+			shapeHold &&
+			shapeHold.id === event.pointerId &&
+			Math.hypot(event.clientX - shapeHold.x, event.clientY - shapeHold.y) <=
+				HOLD_SLOP_PX
+		)
+			return;
+		editor.unsnapDraft();
+		clearShapeHold();
+		const id = event.pointerId;
+		shapeHold = {
+			id,
+			x: event.clientX,
+			y: event.clientY,
+			timer: setTimeout(() => {
+				if (disposed || shapeHold?.id !== id || stroke?.id !== id) return;
+				flush();
+				editor.snapDraft();
+			}, INK_SHAPE_HOLD_MS),
+		};
+	};
 	const flush = () => {
 		if (frame) cancelAnimationFrame(frame);
 		frame = 0;
@@ -114,6 +162,7 @@ export function bindInkInput(options: {
 	const cancel = () => {
 		epoch++;
 		clearHold();
+		clearShapeHold();
 		held = null;
 		const active = stroke;
 		stroke = null;
@@ -167,6 +216,7 @@ export function bindInkInput(options: {
 				queued = [];
 				if (frame) cancelAnimationFrame(frame);
 				frame = 0;
+				clearShapeHold();
 				editor.cancel();
 				if (active) release(active.id);
 				pan = null;
@@ -209,6 +259,7 @@ export function bindInkInput(options: {
 		if (!page) return;
 		epoch++;
 		clearHold();
+		clearShapeHold();
 		held = null;
 		if (event.pointerType === "touch") {
 			touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -277,6 +328,7 @@ export function bindInkInput(options: {
 			page,
 			started: event.timeStamp,
 			lastTime: event.timeStamp,
+			eraser,
 		};
 		if (event.pointerType === "pen" && !eraser) armHold(event, page);
 		capture(event.pointerId);
@@ -319,6 +371,7 @@ export function bindInkInput(options: {
 				? event.getCoalescedEvents()
 				: [];
 		for (const sample of coalesced) moveHold(sample);
+		armShapeHold(event);
 		queued.push(...(coalesced.length ? coalesced : [event]));
 		if (!frame) frame = requestAnimationFrame(flush);
 		consume(event);
@@ -352,6 +405,15 @@ export function bindInkInput(options: {
 			return;
 		}
 		if (stroke?.id !== event.pointerId) return;
+		// Lifting far from the stillness anchor means drawing continued (moves
+		// can be coalesced away); commit the freehand ink, not the old snap.
+		if (
+			shapeHold?.id === event.pointerId &&
+			Math.hypot(event.clientX - shapeHold.x, event.clientY - shapeHold.y) >
+				HOLD_SLOP_PX
+		)
+			editor.unsnapDraft();
+		clearShapeHold();
 		queued.push(event);
 		flush();
 		const id = stroke.id;
