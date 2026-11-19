@@ -417,6 +417,8 @@ export const LayoutElementSelectionLayer = memo(
 
 			const onDown = (event: PointerEvent) => {
 				if (event.button !== 0) return;
+				if (!(event.target instanceof Node) || !shell.contains(event.target))
+					return;
 				origin = { x: event.clientX, y: event.clientY };
 			};
 
@@ -487,8 +489,11 @@ export const LayoutElementSelectionLayer = memo(
 			};
 
 			shell.addEventListener("pointermove", onMove);
-			shell.addEventListener("pointerdown", onDown);
-			shell.addEventListener("click", onClick);
+			// The mobile ink layer consumes page pointerdown/click at the viewport
+			// capture phase; document capture runs first so the tap origin and
+			// region activation survive that consumption on touch devices.
+			document.addEventListener("pointerdown", onDown, true);
+			document.addEventListener("click", onClick, true);
 			shell.addEventListener("pointerleave", onLeave);
 			paintSentenceRef.current = paintSentence;
 			const unsubscribeAction = layoutElementActionStore.subscribe(() => {
@@ -500,8 +505,8 @@ export const LayoutElementSelectionLayer = memo(
 
 			return () => {
 				shell.removeEventListener("pointermove", onMove);
-				shell.removeEventListener("pointerdown", onDown);
-				shell.removeEventListener("click", onClick);
+				document.removeEventListener("pointerdown", onDown, true);
+				document.removeEventListener("click", onClick, true);
 				shell.removeEventListener("pointerleave", onLeave);
 				unsubscribeAction();
 				unsubscribeSentence();

@@ -235,7 +235,7 @@ PDF 左侧 **Figures** 按钮 → 页内浮层（原「解析」：分析 / 叠�
 
 | 项 | 行为 | 原因 |
 |---|---|---|
-| 拖拽容差 | pointerdown 到 click 位移 > 6px 视为拖拽，不打开动作（`LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX`） | 浏览器只要 down/up 落在同一元素就派发 `click`，起手在区域内的选字或平移会误触发 |
+| 拖拽容差 | pointerdown 到 click 位移 > 4px 视为拖拽，不打开动作（`LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX`）；引文/链接命中 button 复用同一守卫 | 浏览器只要 down/up 落在同一元素就派发 `click`，起手在区域内的选字或平移会误触发；移动 ink 层在 viewport 捕获阶段消费页面 pointerdown/click，版面元素的原点记录与点击激活、链接命中的原点记录因此注册在 document/React 捕获阶段，先于消费执行 |
 | 键盘 | 类别 chip 在 Tab 序列内，Enter 打开动作；Esc 或点击外部关闭。`MouseEvent.detail === 0` 直接放行容差判定 | 键盘激活没有指针位移可测 |
 | 焦点 | 框与 chip 在 hover（`is-hot`）和 `:focus-within` 时显示，chip 有 `aria-label` | 半透明 UA 焦点环压在不可预测的页面内容上不可靠；指针移动只改 class，不 `setState` |
 | 预览阈值 | 区域实际尺寸小于 `LAYOUT_HINT_MIN_REGION_W/H_PX`（120×28）时 chip 只显示类别，并配 `max-w` + `truncate` | chip 是固定字号标签，容器随缩放变化，小区域下会溢出压住邻近内容 |

@@ -7,7 +7,7 @@
  */
 
 /** Maximum pointer travel (px) that still counts as a click, not a drag. */
-export const LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX = 6;
+export const LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX = 4;
 
 export type PointerOrigin = { x: number; y: number };
 
