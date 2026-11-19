@@ -218,6 +218,11 @@ export function MobileReaderPage({
 											setTranslationPaneOpen(true);
 											onTranslationPaneChange?.(true);
 										}}
+										onCloseTranslationPane={() => {
+											setTranslationPaneOpen(false);
+											onTranslationPaneChange?.(false);
+										}}
+										translationCompanionOpen={translationVisible}
 										isActive={active && pdfVisible}
 										initialReadingSnapshot={initialReadingSnapshot}
 										onReadingSnapshotChange={(snapshot, documentId) => {

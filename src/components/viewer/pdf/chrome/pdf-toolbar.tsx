@@ -1,5 +1,6 @@
 import type { PdfEngine } from "@embedpdf/models";
 import {
+	Columns2,
 	Download,
 	Highlighter,
 	Library,
@@ -54,6 +55,10 @@ type PdfToolbarProps = {
 	/** Pages done ÷ pages in the current stage, when the stage has a count. */
 	layoutTranslatePageCounts?: { done: number; total: number } | null;
 	onToggleLayoutTranslate?: () => void;
+	/** Desktop dual-pane layout control: open / close the translation pane. */
+	onToggleTranslationLayout?: () => void;
+	/** Whether the side-by-side translation companion is currently open. */
+	translationLayoutActive?: boolean;
 	/** True while jEV smart highlights are being generated. */
 	smartHighlightBusy?: boolean;
 	/** Trigger jEV smart highlighting for the current paper. */
@@ -87,6 +92,8 @@ export const PdfToolbar = memo(function PdfToolbar({
 	layoutTranslateProgress = null,
 	layoutTranslatePageCounts = null,
 	onToggleLayoutTranslate,
+	onToggleTranslationLayout,
+	translationLayoutActive = false,
 	smartHighlightBusy = false,
 	onSmartHighlight,
 	isRemotePaper = false,
@@ -280,6 +287,31 @@ export const PdfToolbar = memo(function PdfToolbar({
 									</TooltipTrigger>
 									<TooltipContent side="bottom">
 										{t("ink.lasso")}
+									</TooltipContent>
+								</Tooltip>
+							</div>
+						</div>
+					) : null}
+{!isRemotePaper && onToggleTranslationLayout ? (
+						<div className={asideClass} inert={meterOpen}>
+							<div className="min-w-0 overflow-hidden">
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											type="button"
+											size="icon-xs"
+											variant={translationLayoutActive ? "secondary" : "ghost"}
+											className="shrink-0 self-center"
+											aria-label={t("pdf.layoutTranslate.dualPane")}
+											aria-pressed={translationLayoutActive}
+											disabled={!engine}
+											onClick={onToggleTranslationLayout}
+										>
+											<Columns2 className="size-3.5" aria-hidden />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent side="bottom">
+										{t("pdf.layoutTranslate.dualPane")}
 									</TooltipContent>
 								</Tooltip>
 							</div>
