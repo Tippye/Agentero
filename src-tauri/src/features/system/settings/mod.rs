@@ -416,9 +416,10 @@ pub struct TranslateSettings {
     /// Persist extracted reflow character IR pages in the app cache (default on).
     #[serde(default = "default_true")]
     pub cache_reflow_ir: bool,
-    /// Persist the finished translated PDF in the app cache (default off;
-    /// each final is roughly 25 MB).
-    #[serde(default)]
+    /// Persist the finished translated PDF in the paper's `translated/`
+    /// directory (default on; each final is roughly 25 MB) so reopening a
+    /// translated paper reuses the built PDF instead of typesetting again.
+    #[serde(default = "default_true")]
     pub cache_reflow_final: bool,
     /// Full-document translation runs in the background after a paper is
     /// imported and its layout lands (default off: it spends provider quota).
@@ -450,7 +451,7 @@ impl Default for TranslateSettings {
             custom_system: String::new(),
             custom_user: String::new(),
             cache_reflow_ir: true,
-            cache_reflow_final: false,
+            cache_reflow_final: true,
             auto_translate_import: false,
             auto_translate_import_concurrency: default_auto_translate_import_concurrency(),
             always_show_translate_card: false,
