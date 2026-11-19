@@ -27,6 +27,12 @@
 - 每次打开会补种缺失的 bundled skills；第一方 `SKILL.md` 仅通过 frontmatter 整数 `version` 安全升级（盘上版本低于模板则覆盖并 toast）。无 `version`、同版本或更高版本的文件保持原样；返回值的 `updated` 列出本次安全升级路径。
 - Claude Code 只读项目内 `.claude/skills/`，不认 `.agents/skills/`：探测到 `claude` CLI 且 Vault 内没有 `.claude/skills` 时，创建一条目录链接 `.claude/skills → ../.agents/skills`（`agent_links.rs`），新增/删除 Skill 自动同步。用户自有的 `.claude/skills`（真实目录）保持原样，best-effort 失败只记日志、不影响脚手架。选整目录链接而非逐 Skill 链接：Claude Code 的 loader 用 `readdirSync` + `dirent.isDirectory()` 过滤，逐 Skill 的符号链接目录会被当作普通条目跳过。
 
+## Windows 路径边界
+
+- 创建 / 补齐 Vault 与 CLI、deep link、第二实例打开目录时，先 canonicalize，再通过 `dunce::simplified` 返回可安全表示的普通路径，避免把 `\\?\` 拼写写入前端 Vault 持久化状态；需要扩展路径语义的名称或长路径保留前缀。Host 的身份比较与任务去重继续使用 canonical 路径。
+- 前端绝对路径拼接统一使用 `joinPath` / `joinVaultPath`；论文 `NOTES.md` 同样走该入口。Windows 绝对路径的父、子段统一为反斜杠，避免扩展路径中混入 `/` 导致 `ERROR_INVALID_NAME (123)`。
+- 本地 Vault 文件读写、存在性检查及目录操作在 plugin-fs 边界归一分隔符，兼容旧版本已恢复的混合分隔符标签页；不移除文件 IO 的扩展前缀，远程 handle 与 POSIX 路径保持原样。
+
 ## 关闭 / 切换
 
 没有 `vault_close` 命令。vault 的生命期由前端 `vault:opened` 作用域的 teardown 表达（见 [../architecture.md](../architecture.md) 的「生命周期」）：
@@ -86,7 +92,7 @@
 
 ## 其它
 
-- `path_open_in_terminal`：用户在「设置 → 通用 → 系统 → 终端应用」选定的终端（`terminalApp`，留空 = 系统默认；macOS 支持 Terminal / iTerm2 / Otty，Windows 支持 Windows Terminal / PowerShell / CMD，Linux 按 PATH 探测常见终端）；所选终端未安装或启动失败时回退到系统默认并不报错。目录自身 / 文件父目录。Windows 复用 `core::process::windows_shell_path` 去掉本地盘符路径的 `\\?\` 前缀，Windows Terminal 的 `-d` 与 CMD 的进程工作目录使用同一结果；CMD 通过隐藏的 `start` 启动进程创建独立交互控制台，不再拼接 `cd` 命令，也不继承桌面应用的关闭 / 重定向输入输出句柄。
+- `path_open_in_terminal`：用户在「设置 → 通用 → 系统 → 终端应用」选定的终端（`terminalApp`，留空 = 系统默认；macOS 支持 Terminal / iTerm2 / Otty，Windows 支持 Windows Terminal / PowerShell / CMD，Linux 按 PATH 探测常见终端，含 Ghostty）；所选终端未安装或启动失败时回退到系统默认并不报错。目录自身 / 文件父目录。Windows 复用 `core::process::windows_shell_path` 去掉本地盘符路径的 `\\?\` 前缀，Windows Terminal 的 `-d` 与 CMD 的进程工作目录使用同一结果；CMD 通过隐藏的 `start` 启动进程创建独立交互控制台，不再拼接 `cd` 命令，也不继承桌面应用的关闭 / 重定向输入输出句柄。
 - 多窗口：`window_new`、`settings_window_open`。
 
 ## 代码

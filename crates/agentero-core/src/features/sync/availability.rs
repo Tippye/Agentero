@@ -129,7 +129,7 @@ pub fn set_policy(vault: &Path, mut policy: DownloadPolicy) -> Result<DownloadPo
 /// local file is present; unsynced edits remain local files, not missing assets.
 pub fn list_papers(vault: &Path) -> Result<Vec<PaperAvailability>, AppError> {
     let state = read_state(vault)?;
-    let base = local::read_base(vault);
+    let base = local::read_base(vault)?;
     engine::validate_manifest(&base)?;
     let mut papers = BTreeMap::new();
     for (path, entry) in &base.files {
@@ -195,7 +195,7 @@ pub fn evict_paper(vault: &Path, paper_id: &str) -> Result<usize, AppError> {
             "Unpin the paper before evicting its local assets",
         ));
     }
-    let base = local::read_base(vault);
+    let base = local::read_base(vault)?;
     engine::validate_manifest(&base)?;
     crate::fs::with_file_mutation(|| {
         let mut remove = Vec::new();

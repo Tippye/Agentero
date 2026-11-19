@@ -13,6 +13,8 @@ use crate::features::agent::doctor_agents::{diagnose_agents, AgentAcpDiagnostic}
 use crate::features::agent::registry::{interactive_cli, template_info};
 use crate::features::agent::{AgentRegistry, AgentWarmGate};
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+use crate::features::system::settings::AppSettingsStore;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::collections::HashMap;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::path::Path;
@@ -74,6 +76,7 @@ pub async fn doctor_check_agents(
 #[specta::specta]
 pub fn doctor_open_agent_login_terminal(
     registry: State<'_, AgentRegistry>,
+    store: State<'_, AppSettingsStore>,
     template_id: String,
 ) -> ApiResult<()> {
     let Some(info) = template_info(&template_id) else {
@@ -93,7 +96,7 @@ pub fn doctor_open_agent_login_terminal(
     };
     let environment = login_command_environment(registry.inner(), &template_id);
     let command = resolve_login_command(command, &environment);
-    match open_terminal_confirm_login(&command) {
+    match open_terminal_confirm_login(&command, &terminal_preference(&store)) {
         Ok(()) => ApiResult::ok(()),
         Err(error) => map_err(error),
     }
@@ -110,6 +113,7 @@ pub fn doctor_open_agent_login_terminal(
 #[specta::specta]
 pub fn doctor_open_agent_cli_terminal(
     registry: State<'_, AgentRegistry>,
+    store: State<'_, AppSettingsStore>,
     template_id: String,
 ) -> ApiResult<()> {
     let Some(info) = template_info(&template_id) else {
@@ -124,10 +128,21 @@ pub fn doctor_open_agent_cli_terminal(
     };
     let environment = login_command_environment(registry.inner(), &template_id);
     let command = resolve_login_command(&binary, &environment);
-    match open_terminal_agent_cli(&command) {
+    match open_terminal_agent_cli(&command, &terminal_preference(&store)) {
         Ok(()) => ApiResult::ok(()),
         Err(error) => map_err(error),
     }
+}
+
+/// Settings `terminalApp` used by both Agent terminal buttons. A poisoned lock or
+/// redacted settings fall back to the system default instead of blocking the
+/// action.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn terminal_preference(store: &AppSettingsStore) -> String {
+    store
+        .get()
+        .map(|result| result.settings.terminal_app)
+        .unwrap_or_default()
 }
 
 /// Environment used to resolve a template login command: the registered Agent's
@@ -183,7 +198,7 @@ fn resolve_login_command(command: &str, environment: &HashMap<String, String>) -
     resolved
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(all(test, not(any(target_os = "ios", target_os = "android"))))]
 mod tests {
     use super::resolve_login_command;
     use std::collections::HashMap;

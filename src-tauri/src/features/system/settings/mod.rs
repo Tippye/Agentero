@@ -34,6 +34,10 @@ pub use agentero_mcp::DEFAULT_MCP_PORT;
 /// 1–5; larger values would hammer translation providers and disk).
 pub const MAX_AUTO_TRANSLATE_IMPORT_CONCURRENCY: u32 = 5;
 
+/// Upper bound for the OpenAI-compatible full-document translation batch pool
+/// (the settings UI offers 1–8; higher values trigger provider rate limits).
+pub const MAX_TRANSLATE_CONCURRENCY: u32 = 8;
+
 /// Built-in provider id, re-exported so the Host never re-types the literal.
 pub use agentero_core::features::translate::BUILTIN_PROVIDER_ID;
 
@@ -142,6 +146,9 @@ pub struct AppSettings {
     /// PDF page layout: `none` (single page) | `odd` | `even` (two-page spread).
     #[serde(default = "default_pdf_spread_mode")]
     pub pdf_spread_mode: String,
+    /// In-page translate tab: `hover` (default) | `always` | `hidden`.
+    #[serde(default = "default_pdf_translate_tab")]
+    pub pdf_translate_tab: String,
     #[serde(default = "default_library_columns")]
     pub library_columns: Vec<LibraryColumnPref>,
     #[serde(default)]
@@ -378,13 +385,6 @@ pub struct TranslateSettings {
     pub provider_configs: HashMap<String, TranslateProviderConfig>,
     #[serde(default)]
     pub auto_translate_selection: bool,
-    /// Deprecated: kept for migration. Use `display_mode` + `dual_pane_source`.
-    #[serde(default)]
-    pub dual_pane_translate: bool,
-    #[serde(default = "default_translate_display_mode")]
-    pub display_mode: String,
-    #[serde(default = "default_translate_dual_pane_source")]
-    pub dual_pane_source: String,
     #[serde(default)]
     pub agent_id: String,
     #[serde(default)]
@@ -416,6 +416,11 @@ pub struct TranslateSettings {
     /// Seeded into the JobCenter `LayoutTranslate` cap (1–5, default 1).
     #[serde(default = "default_auto_translate_import_concurrency")]
     pub auto_translate_import_concurrency: u32,
+    /// Keep the selection translation result card open after a click elsewhere
+    /// on the page (default off: a completed click outside the card closes it).
+    /// Scrolling, page turns and viewer toolbars never close it.
+    #[serde(default)]
+    pub always_show_translate_card: bool,
 }
 
 impl Default for TranslateSettings {
@@ -427,9 +432,6 @@ impl Default for TranslateSettings {
             source_lang: default_translate_source(),
             provider_configs: HashMap::new(),
             auto_translate_selection: false,
-            dual_pane_translate: false,
-            display_mode: default_translate_display_mode(),
-            dual_pane_source: default_translate_dual_pane_source(),
             agent_id: String::new(),
             model_id: String::new(),
             custom_prompt: String::new(),
@@ -439,6 +441,7 @@ impl Default for TranslateSettings {
             cache_reflow_final: false,
             auto_translate_import: false,
             auto_translate_import_concurrency: default_auto_translate_import_concurrency(),
+            always_show_translate_card: false,
         }
     }
 }
@@ -461,7 +464,7 @@ impl Default for DictionarySettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslateProviderConfig {
     #[serde(default)]
@@ -474,6 +477,24 @@ pub struct TranslateProviderConfig {
     pub model: String,
     #[serde(default)]
     pub extra_request_body: String,
+    /// Full-document translation batch concurrency for the OpenAI-compatible
+    /// path (1–8, default 2). Selection translation and the Agent path stay
+    /// serial; other providers ignore it.
+    #[serde(default = "default_translate_concurrency")]
+    pub concurrency: u32,
+}
+
+impl Default for TranslateProviderConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: String::new(),
+            region: String::new(),
+            model: String::new(),
+            extra_request_body: String::new(),
+            concurrency: default_translate_concurrency(),
+        }
+    }
 }
 
 /// PDF layout-analysis backend selection.
@@ -552,6 +573,7 @@ impl Default for AppSettings {
             hint_mode_enabled: true,
             sound_enabled: true,
             pdf_spread_mode: default_pdf_spread_mode(),
+            pdf_translate_tab: default_pdf_translate_tab(),
             library_columns: default_library_columns(),
             connector_enabled: false,
             connector_port: default_connector_port(),
@@ -626,6 +648,9 @@ fn default_pdf_scroll_strategy() -> String {
 }
 fn default_pdf_spread_mode() -> String {
     "none".into()
+}
+fn default_pdf_translate_tab() -> String {
+    "hover".into()
 }
 /// Canonical papers-Library column keys, in default order.
 const LIBRARY_COLUMN_KEYS: &[&str] = &[
@@ -711,17 +736,14 @@ fn default_batch_import_concurrency() -> u32 {
 fn default_auto_translate_import_concurrency() -> u32 {
     1
 }
+fn default_translate_concurrency() -> u32 {
+    2
+}
 fn default_translate_target() -> String {
     "ui".into()
 }
 fn default_translate_source() -> String {
     "auto".into()
-}
-fn default_translate_display_mode() -> String {
-    "overlay".into()
-}
-fn default_translate_dual_pane_source() -> String {
-    "pdf".into()
 }
 /// Layout analysis stays on the bundled offline PP-DocLayoutV3 model: it is
 /// free, local, and a cloud backend would bill every PDF for no gain. The
@@ -1455,6 +1477,9 @@ fn normalize(s: &mut AppSettings) {
     if !PDF_SPREAD_MODES.contains(&s.pdf_spread_mode.as_str()) {
         s.pdf_spread_mode = default_pdf_spread_mode();
     }
+    if !["hover", "always", "hidden"].contains(&s.pdf_translate_tab.as_str()) {
+        s.pdf_translate_tab = default_pdf_translate_tab();
+    }
 
     // Library columns: drop unknown/duplicate keys, append missing ones
     // with their default visibility, and keep `title` visible.
@@ -1697,6 +1722,9 @@ fn normalize_translate_provider_configs(configs: &mut HashMap<String, TranslateP
         cfg.base_url = cfg.base_url.trim().to_string();
         cfg.region = cfg.region.trim().to_string();
         cfg.model = cfg.model.trim().to_string();
+        if cfg.concurrency < 1 || cfg.concurrency > MAX_TRANSLATE_CONCURRENCY {
+            cfg.concurrency = default_translate_concurrency();
+        }
     }
 }
 

@@ -124,14 +124,16 @@ export type PdfViewerProps = {
 	/** Called whenever visual agent-trace marks change (for the annotations panel) */
 	onVisualTracesChange?: (traces: PdfVisualSessionTrace[]) => void;
 	/**
-	 * Open a rendered-translation workspace tab split to the right.
-	 * Used when Settings → Translate → dualPaneTranslate is enabled.
+	 * Open a rendered-translation workspace tab split to the right. The reading
+	 * view switch calls this when the reader picks 对照.
 	 */
 	onOpenTranslationTab?: (
 		paperTabId: string,
 		paperAbsPath: string | null,
 		paperTitle?: string | null,
 	) => void;
+	/** Close the paired translation tab when the reader leaves 对照. */
+	onCloseTranslationTab?: (paperTabId: string) => void;
 	/**
 	 * Workspace active tab. Dock may keep inactive PDFs mounted (`keepMounted`);
 	 * only the active viewer should refresh marks/ (expensive base64 JSON list).
@@ -270,6 +272,8 @@ export type SelectionCommentDraft = {
 	shape?: PdfTextMarkupKind;
 	/** EmbedPDF selection pages snapped when the editor was opened. */
 	pages: FormattedSelection[];
+	/** Crop bounds for a visual note; these drafts have no text markup pages. */
+	visualRegion?: PdfAskNormalizedRect;
 	/**
 	 * Translation boxes to keep painted while the editor is open. Omitted for an
 	 * English text-layer selection, which EmbedPDF already tints.
@@ -304,13 +308,6 @@ export type CrossrefPreviewState = {
 	image: PromptImage | null;
 	/** 1:1 on-screen display size in CSS pixels matching the document's zoom. */
 	targetSize?: { width: number; height: number };
-};
-
-export type VisualDraftEditorState = {
-	screen: ScreenPoint;
-	page: number;
-	region: PdfAskNormalizedRect;
-	image: PromptImage;
 };
 
 /** Discriminator for a right-rail comment card. */

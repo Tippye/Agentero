@@ -5,7 +5,14 @@ pub mod citation;
 mod document_reading_order;
 pub mod ink;
 pub mod ink_store;
+/// Headless layout analysis (remote provider → layout.json / layout-index.json).
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod layout_analyze;
 pub mod layout_index;
+/// Sidecar / index region model shared by headless analysis and the sidebar.
+pub mod layout_region;
+/// Sidebar index builder (caption merge + NMS + ids).
+pub mod layout_sidebar;
 
 /// Minimal one-page PDF with a real xref table, so PDFium loads it without
 /// falling back to reconstruction. Shared by the `text` and `locate` tests.

@@ -39,6 +39,8 @@ shadcn/ui primitives → agent/ 应用组合与 rendering/ 科研渲染
 
 ## 面板行为
 
+- **弹出到功能窗**：Agent 面板卸载不退订事件，也不拒绝尚未回答的权限。主窗口把 Agent 交到新开的功能窗时，只在功能窗 ready 之后发一次 `agent:session-handoff` 快照。交接是这次快照被 ack 之后才 rebind。聊天行是第一帧；未发送的 composer（文本、mention、图片、视觉引用）、冻结的队列，以及尚未回答的 permission / elicitation / ask-user request id 都在这份 payload 里，因为两个 webview 不共用 localStorage。功能窗应用快照后回 ack，源窗口收到 ack 才把正在跑的 Host 事件改发到功能窗；在那之前事件仍发给源窗口。功能窗已经开着时不发送、也不用这份快照盖掉它。没收到 ack 就不算交接完成。
+
 - **Dsh 重启历史**：官方 ACP 桥仅支持 `session/resume` 时，本机历史从
   Dsh 标准落盘日志只读恢复；后台标题补全和点击历史项共用该路径。已有日志
   完整时可恢复文字、推理、工具记录，标题缺失时回退首条用户消息；  不会再向
@@ -53,13 +55,14 @@ shadcn/ui primitives → agent/ 应用组合与 rendering/ 科研渲染
   会随信任决策失效，下一轮冷启动）。提示按 agent + Vault 记住当前面板内的关闭；有
   运行中会话时按钮禁用，避免续用旧的 Agent 进程。远程 Vault 不显示该提示。文案在
   `agent.json` 的 `piTrust`。
+- **ACP 通知**：面板用 Toast 显示提供方的实时信息、警告和错误，不将其写入回答。旧 Codex 的指令预算告警保留专用提示；普通 `Warning:` 文本不做过滤。
 
 - 空态建议 chips → workflow：`summary` / `qa` / `related_work`。
 - **Agent 切换器列表**：App 启动即 `scanCatalog` + soft-probe（`prefetchAgentCatalog`，不依赖侧栏挂载）；面板挂载与 vault 变化时再 `listAgents + scanCatalog` 刷新。Settings 探测 / 安装 / 卸载 / 改默认会改 registry，Host 广播 `agent:registry-changed`（已纳入 lifecycle typed bus，见 [../architecture.md](../architecture.md) 的「生命周期」），面板经 `lifecycle.on` 防抖刷新——面板常驻不卸载，否则探测成功后切换器仍是旧列表。catalog 项仅 `acpStatus === "ready"`（ACP 握手成功）才显示，不可用项直接隐藏而非置灰。
 - **当前论文默认 context**（可 X 移除）；`@` 提及或文件树拖入 → 在输入正文光标处插入行内 mention chip（见下）。写作界面改为当前打开的稿件文件。空对话在写作时换成续写、收紧、检查论证和从文库起草引用，这些是普通提问，不走阅读工作流。
 - **选区上下文**：划词本身**不会**进入对话。划词工具栏顺序为 **翻译 → 复制（图标，成功后原地换成对勾，不弹 toast）→ 加入对话（`⇧⌘L`）（下拉含快速对话 `⌘K`）**。**加入对话** / 默认 `⇧⌘L` 直接把选区固定成输入框里的行内引用块并打开 Agent、聚焦输入框（文件树 / 文库「添加到对话」、视觉批注和已保存的文字批注「加入侧边栏对话」同样聚焦，`presentAgentComposer`），不经过批注框；**快速对话** / `⌘K` 打开页内 Ask 浮层，不写入 composer。`⌘L` 始终开关侧栏；无选区时 `⇧⌘L` 打开并聚焦 Agent。快捷键可在设置中修改。聚焦走 `src/lib/agent/composer-focus.ts`。发送时，文字批注和视觉批注按在正文里的出现顺序共用编号：所在位置写成 `[Annotation N]`，文末追加同一编号的 `## Annotation N`。文字批注的条目仍是 `Selected text from {path} (page N):`（PDF）或 `Selected text from {path} (lines A-B):`（CodeMirror 纯文本/代码划词，以及 Plate Markdown 笔记划词——源码行号由 `serializeBlocksAsMarkdown` 前缀计数 + frontmatter 偏移得出，与磁盘行一致；算不出时省略行号）+ `> 引用`；视觉批注的条目是页码和备注，裁剪图按这些视觉批注的编号顺序附上。chip 标签同样为 `文件名 A-B行`（`composer.selectionChipWithLine(s)`）。笔记块六点菜单「加入会话」序列化当前块（多选时为整组）并走同一条固定路径。选区与块引用插在输入框当前光标之后，与前后文字同一行内联（这一行放不下时整块换行），最大宽度省略。Backspace / Delete 整块删除；悬停查看原文：PDF 原文沿用笔记嵌入的高亮色，有译文时一并显示，引文可以框选；删除也在卡片里。悬浮卡片右缘停在窗口内侧；单击不移除。随该轮消费清空；不落 localStorage，超长截断 4000 字符。Store：`src/lib/agent/selection-store.ts`（`active` 仅作 ⇧⌘L 暂存，不展示、不发送）。实现：`src/lib/markdown/selection-source-lines.ts`。
 - **批注与引用块**：选区 token 直接写入对话草稿，插在当前光标之后，并在正文输入区渲染为行内引用块。悬停引用块查看该条原文和来源：PDF 原文沿用笔记嵌入的高亮色，有译文时一并显示，引文可以框选，删除也在卡片里。悬浮卡片右缘停在窗口内侧；单击引用块不移除。输入框上方不再显示批注计数。仅有引用块时不显示空态占位。删除同步清除该条引用的原文临时高亮、浏览器选区和临时锚点，不影响其他选区。选区 chip 不再提供批注输入，也不在原文旁画编号角标；PDF 高亮 / 视觉批注自带的备注仍通过「加入侧边栏对话」随引用一起发送。DOM Range / PDF 页面几何仅作为窗口内临时锚点，不写入提示词。Markdown / 聊天引用另存原文和前后邻近文字，点击来源路径可打开并定位原文。原文改变或匹配含糊时提示定位失败，仍保留原始引用。聊天同时保留 provider 会话标识和消息 ID，PDF 按页码、归一化区域复用已有引用跳转。
-- **发送后保留引用**：本地 `ChatLine.selections` 保存本轮引用快照，用户消息可展开查看原文、批注及来源定位；复制、编辑后重发、非 resume 模型的本地上下文回放均带上对应引用。提示词在引用所在位置写入 `[Annotation N]`，文末按同一编号附上原文，并明确引文是参考资料、批注只针对其对应原文。此验证覆盖数据与提示词，不等于保证模型逐条回答。应用重启或 ACP 远端 `session/load` 不保证恢复这些本地字段，尚未引入永久批注存储；PDF 文件被替换后的几何有效性仍需重新确认。
+- **发送后保留引用**：本地 `ChatLine.selections` 保存本轮引用快照，用户消息可展开查看原文、批注及来源定位；复制、编辑后重发、非 resume 模型的本地上下文回放均带上对应引用。提示词在引用所在位置写入 `[Annotation N]`，文末按同一编号附上原文，并明确引文是参考资料、批注只针对其对应原文。此验证覆盖数据与提示词，不等于保证模型逐条回答。应用重启或 ACP 远端 `session/load` 不保证恢复这些本地字段，尚未引入永久批注存储；PDF 文件被替换后的几何有效性仍需重新确认。回看时若消息正文里仍有发送时的附录或 Host 上下文快照，`[Annotation N]` 下方展示该快照；没有快照则保持编号，不编造内容。
 - **PDF 选区 → 对话卡片**：来自 PDF 且带页内几何（`rects` + `paperAbsPath`）的选区，在 **Agent 发送该轮** 时写入 `kind: ask` 对话线程（`anchor.quote` = 选中原文，`messages[]` = 用户问题 + Agent 回复）。页边针与浮层为**提问对话卡**（MessageSquare），**不是**视觉批注 `agent-trace`。Markdown 选区或缺少几何时仍只作对话引用，不落盘。
 - **Quick Chat 与侧边栏上下文**：两条入口把选区、当前论文和 `@` 提及交给同一个 Host 解析器（`src/lib/agent/context-request.ts`），不再各自把论文路径或引文拼进 prompt。Prompt 里只有 paper ref、标题、页/章节和引文。本地会话可以按 metadata → 章节/页继续读；工具返回的来源显示在回复下方，点击沿用引用跳转。远程会话会标明无法继续展开。广场和网页划词不进这层。见 [backend/context.md](../backend/context.md)。
 - **图片附件**：Composer 支持粘贴 / 点选 / 从 Finder、预览或其它 App 窗口拖入图片（`image/*` 与 macOS image UTI，最多 8 张、单张 ≤ 10 MiB）。拖入图片且指针在 Agent 面板/输入框上时显示虚线 overlay；能判定为非图片（`.md` / PDF）或**文件树内部拖拽**则不显示、不抢落点。窗口 `dragDropEnabled: false`，走 HTML5（Windows 上 Tauri 原生拖放会吞掉 HTML5）；`FileList` 有数据时直接附加，否则按路径读盘。不抢成 `@` 路径 chip。提交时转为 ACP `ContentBlock::Image`（与 PDF 视觉批注同一 `runOnce.images` 通路）；会话气泡以缩略 chip 展示，纯图消息无文字气泡。contenteditable 输入框从剪贴板 `items` / `files` 读取图片并交给同一附件校验；无文件时才走纯文本粘贴。图片仅会话本地保留，不随 `session/load` 历史回放。工具：`src/lib/agent/prompt-image.ts`。
@@ -144,6 +147,8 @@ Skill 语法由 Host 按 provider 分流（Claude `/id`，其它注入 `SKILL.md
 | 代码块 | `PlainCodeBlock` | 左上角语言小标签；悬停复制/下载（按语言后缀）；无外侧卡片、无全屏 |
 | Mermaid | `MermaidBlock` | 默认只显示图形；悬停右上角出现源码、缩放和全屏操作；源码模式使用带语言标题的高亮代码块，并显示复制按钮；图形可拖拽平移，无法编译时自动回退源码 |
 
+表格复制或下载为 Markdown 时，从 KaTeX 的 TeX annotation 恢复行内公式，保留 `$…$` 分隔符、TeX 反斜杠和单元格内的管道符转义。
+
 表格全屏是应用内覆盖层（portal），保留粘性表头、Esc 关闭和复制/下载操作；不再对 `<table>` 直接调用 Fullscreen API，避免浏览器把表格拉伸到视口高度、露出透明背景。
 
 `mermaid` 代码块不再交给 `@streamdown/mermaid` 的默认卡片：`MessageResponse` 的 `AgentCodeBlock` 在 code renderer 里拦截该语言，复用编辑器的 `MermaidCodeRenderer` / `MermaidBlock`。`MarkdownSurface` 的 `renderers` 在这里不会生效，因为 `components.code` 已替换 Streamdown 内置渲染器。渲染配色、字体与排版由 `lib/markdown/mermaid-theme.ts` 按亮/暗主题生成（主题令牌的 sRGB 等价色，Mermaid 的取色库无法解析 `oklch()`）。
@@ -154,7 +159,7 @@ Mermaid 聊天块使用固定高度的变换视口，缩放和平移只改变图
 
 Streamdown 的 `mode` 由 `isAnimating` 派生：流式中 `"streaming"`（跑 remend 补全未闭合标签），消息落定后 `"static"` 跳过 remend——否则公式里 `x_{<n}` 的 `<n…` 会被当成未闭合 HTML 标签截掉，KaTeX 报 `Expected '}', got 'EOF'`（#584，复盘见 [bug_fix/agent-message-math-less-than](../bug_fix/agent-message-math-less-than.md)）。
 
-**复制**：消息悬停的复制按钮复制该轮原始 Markdown（Agent 返回的就是 Markdown 文本，公式保持原样）；正文划词复制时，若选区包含渲染出来的公式，会先把 KaTeX 还原为 `$…$` / `$$…$$` 再写入剪贴板（否则浏览器只能拷到 KaTeX 字形、丢失 TeX）。不含公式的划词仍是默认纯文本复制。实现：`src/lib/markdown/rendered-math-copy.ts`，`MessageContent` 用 `data-markdown-copy` 标记作用域。
+**复制**：单击回复中的公式可复制不带定界符的 LaTeX 源码。公式块悬停时显示按钮式背景和复制光标；复制成功后短暂切换为对勾光标并播报，失败才弹 Toast。公式块可用 Tab 聚焦后按 Enter / Space 复制。拖选或滚动不触发复制，右键单个渲染公式同样可复制源码。消息悬停的复制按钮复制该轮原始 Markdown（Agent 返回的就是 Markdown 文本，公式保持原样）；正文划词复制时，若选区包含渲染出来的公式，会先把 KaTeX 还原为 `$…$` / `$$…$$` 再写入剪贴板（否则浏览器只能拷到 KaTeX 字形、丢失 TeX）。不含公式的划词仍是默认纯文本复制。实现：`src/lib/markdown/rendered-math-copy.ts`，`MessageContent` 用 `data-markdown-copy` 标记作用域，并用 `src/lib/markdown/rendered-math.ts` 读取 KaTeX 源码。
 
 
 ## 结构化 UI 块（只读 v1）

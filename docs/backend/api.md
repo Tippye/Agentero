@@ -118,7 +118,6 @@ Host 通过 Tauri event 向前端推送事件。文件系统、任务和菜单�
   另有 `event_names_match_emit_literals` 测试断言事件名与 emit 常量一致。改任何命令签名 / 事件 payload 后必须重新生成并提交 bindings.ts。Rust 类型的文档注释也会导出并参与一致性校验，因此只修改这些注释时同样需要重新生成。
   `scanned_emit_event_names_match_registered_contract` 扫描桌面 Host、`agentero-core` 与 `agentero-mcp` 的 Rust 源码，解析跨 crate 的事件常量并核对注册集合；抽取共享事件定义时需同步维护扫描范围。
   新增事件须同时登记 `events_contract.rs` 的类型和 `registered_event_names()` 集合，以及 `bindings_test.rs` 的导出列表；仅生成 TypeScript bindings 不会覆盖事件扫描检查。
-  插件事件也纳入生成契约：`plugins:changed` 的 payload 为 `null`，`plugins:data-changed` 为 Vault 路径字符串。
 - **`_Serialize` / `_Deserialize` 拆分**：specta 对 serde 不对称表示的忠实拆分——`X_Deserialize` 是 **TS→Rust 入参**形态（`#[serde(default)]` 字段可省略），`X_Serialize` 是 **Rust→TS 出参**形态（`skip_serializing_if` 字段可缺省）。二者一致时只生成单一 `X`。命令函数与 `events.*` 的签名已内嵌正确方向的类型，**调用点无需手写这些类型名**。
 - **论文域的派生范式**：`src/lib/paper/types.ts` 不再手写 `PaperRecord` 的孪生类型，而是 `PaperMetadata = Omit<PaperRecord_Serialize, …>`、`PaperLibraryRow = PaperMetadata & { has_pdf }`（源自 `PaperListRow_Serialize`）。只窄化四处：`status` / `body_source` / `body_quality`（Rust 侧仍是 `String` 列）与 `tags`（`PaperTag` 的序列化在无色时是裸字符串）。IPC → 域模型的唯一 unchecked 折叠点是 `src/lib/paper/wire.ts::paperFromWire`。给那三列加 Rust enum（照 `PaperKind` 先例：enum + `From<&str>` + `FromSql` + 未知值兜底）即可去掉窄化，列都是 TEXT，**不需要 schema migration**。
 - **前端调用形态（迁移说明）**：bindings 导出 `commands`（camelCase 命令函数）与 `events`（`events.jobChanged.listen(cb)` 等，payload 已按事件名类型化）。返回值有两种信封：
@@ -291,11 +290,12 @@ Agent：`agent_run_once` / `agent_warm` 在 vault 为 `remote:…` 时经 SSH `b
   - 路径为**目录**时：`cwd` = 该目录。
   - 路径为**文件**时：`cwd` = 父目录。
   - 路径不存在或无法解析父目录时返回错误。
-  - 读取 `settings.terminalApp`（`terminal_apps_probe` 返回的 id）；未知 id、未安装或启动失败只记 warning，随后走系统默认终端，不向上返回错误。
+  - 读取 `settings.terminalApp`（`terminal_apps_probe` 返回的 id，`system` / 空值 = 系统默认）；未知 id、未安装或启动失败只记 warning，随后走系统默认终端，不向上返回错误。
+  - 同一优先级也被 Agent「终端」「登录」按钮、远程安装终端复用（见 `agent.md`）。
   - 系统默认平台：
     - macOS：`open -a Terminal <cwd>`
     - Windows：优先 `wt -d <cwd>`，失败则 `cmd /K cd /d …`
-    - Linux：`xdg-terminal-exec` → `$TERMINAL` → 常见终端（gnome-terminal / konsole / …）→ `x-terminal-emulator`
+    - Linux：`xdg-terminal-exec` → `$TERMINAL` → `terminal_apps_probe` 中已安装的预设（gnome-terminal / konsole / xfce4-terminal / kitty / alacritty / wezterm / ghostty）→ mate-terminal / tilix → `x-terminal-emulator`
 
 #### `terminal_apps_probe`（已实现）
 
@@ -303,7 +303,11 @@ Agent：`agent_run_once` / `agent_warm` 在 vault 为 `remote:…` 时经 SSH `b
 
 - macOS：Terminal（系统内置）、iTerm2、Otty
 - Windows：Windows Terminal、PowerShell、Command Prompt
-- Linux：GNOME Terminal / Konsole / Xfce Terminal / kitty / Alacritty / WezTerm（按 PATH 检测）
+- Linux：GNOME Terminal / Konsole / Xfce Terminal / kitty / Alacritty / WezTerm / Ghostty（按 PATH 检测）
+
+设置页始终额外提供「系统默认」（`system`）项；所选 agent 终端 id 在 `run_terminal_script` 中按
+`-e bash -lc <cmd>` 形式启动（GNOME Terminal `--`、kitty 直接、xfce 单参引号、WezTerm `start --`、
+Ghostty `-e`），失败回退系统默认。
 
 #### `path_trash`
 
@@ -472,7 +476,7 @@ Updater 模块与命令注册均排除 Android / iOS，与 Cargo 的 updater 插
 
 #### `vault_hold`
 
-注册当前窗口对某个 vault 的持有（窗口 label 由 Host 注入，前端签名只有 `path`）。前端在 `vault:opened` 作用域 setup 时调用（remote handle 跳过），与 `vault_release` 成对。
+注册当前窗口对某个 vault 的持有（窗口 label 由 Host 注入，前端签名只有 `path`）。主窗在 `vault:opened` 作用域 setup 时调用；文档窗与功能窗在成功打开 Vault 后调用（remote handle 跳过），与 `vault_release` 成对。
 
 - **参数**：`{ path: string }`
 - **返回**：`{ ok: true; data: null }`
@@ -480,11 +484,11 @@ Updater 模块与命令注册均排除 Android / iOS，与 Cargo 的 updater 插
 
 #### `vault_release`
 
-释放 Host 侧为某个 vault 持有的资源。前端在释放 `vault:opened` 作用域时调用（remote handle 跳过）。
+释放 Host 侧为某个 vault 持有的资源。主窗在释放 `vault:opened` 作用域时调用；文档窗与功能窗在卸载或离开该 Vault 时调用（remote handle 跳过）。
 
 - **参数**：`{ path: string }`
 - **返回**：`{ ok: true; data: null }`
-- **行为**：先解除当前窗口的持有（键归一同 `vault_hold`）；仅当该 vault 不再被任何窗口持有时执行释放序列（取消该 vault 的 JobCenter 任务并 drain、清 paper caps cache、驱逐 catalog 连接缓存条目）。catalog 连接缓存是进程级、按 vault 根路径索引的，驱逐对正在进行的操作安全（它们持有连接的 `Arc` 克隆，这里只移除缓存条目）。**无持有记录时仍执行释放**：刻意保留的单窗口兼容回退（漏注册 `vault_hold`、或目录已删导致 canonicalize 回退原串而查不到 entry 时都不回归旧行为）。窗口销毁时 Host 的 `on_window_event(Destroyed)` 兜底清理该窗口的全部持有，对变为空的 vault 异步执行同一释放序列。
+- **行为**：先解除当前窗口的持有（键归一同 `vault_hold`）；仅当该 vault 不再被任何窗口持有时执行释放序列（取消该 vault 的 JobCenter 任务并 drain、清 paper caps cache、驱逐 catalog 连接缓存条目）。catalog 连接缓存是进程级、按 vault 根路径索引的，驱逐对正在进行的操作安全（它们持有连接的 `Arc` 克隆，这里只移除缓存条目）。**无持有记录时不释放**：key 没有记录（从未 hold，或目录已删导致 canonicalize 回退原串而对不上已登记的 key）返回 false，不执行全局释放，避免放掉仍被其他窗口使用的资源；对不上的 canonical entry 留到窗口销毁时由 drain 清理。窗口销毁时 Host 的 `on_window_event(Destroyed)` 兜底清理该窗口的全部持有，对变为空的 vault 异步执行同一释放序列。
 - **不负责**：文件监听。`fs_watch_start` 本身就会替换该窗口的既有 watcher，窗口销毁时由 Host 的 `on_window_event(Destroyed)` 停止。
 - **没有 `vault:close` 命令**：vault 的生命期由前端 `vault:opened` 作用域的 teardown 表达，见 [../architecture.md](../architecture.md) 的「生命周期」。
 
@@ -1716,9 +1720,9 @@ Host 作为 ACP Client：按注册表 spawn 用户本机 Agent（`cwd` = 当前 
   - `taskId` 来自设置页 Agent 行内安装进度条；用于匹配 Host progress tick 与接收协作取消信号。
 - **返回**：`{ ok: true; data: null }` 或错误（stderr/stdout 末尾若干行）
 - **行为**
-  - `install`：未装 host 时走官方 installer（POSIX curl→临时文件再 bash，非 `curl|bash`）或 npm；Claude/Codex/Pi 在 host 已存在但 ACP 缺失时只装适配器；两者都缺则 host && adapter；Hermes 走官方 installer；Pi 无原生 ACP，ACP 入口是社区适配器 `pi-acp`（detect 用 host `pi`）；host 与 adapter 两层都走 npm，因为 `pi.dev/install.sh` 是交互式 TUI installer，不能静默执行。Dsh 是 umbrella CLI 的内置 ACP profile（`dsh --profile acp`，需 `@deepseek-ai/dsh` 0.1.2+，npm latest 0.1.5-rc.2；旧的独立包 `dsh-acp-demo` 停更于 0.1.1-rc.2 已弃用）：host 与 ACP 同二进制，`npm i -g @deepseek-ai/dsh@latest`（Unix `--prefix "$HOME/.local"`）安装/更新。Kimi Code 优先官方 installer（`code.kimi.com`，单二进制装入 `~/.kimi-code`），失败回退 `npm i -g @moonshot-ai/kimi-code`。Qoder CLI 优先官方 installer（`https://qoder.com/install`，Windows 为 `install.ps1`），失败回退 `npm i -g @qoder-ai/qodercli@latest`；host 与 ACP 同二进制（`qodercli --acp`）。Cursor Agent 只有官方 installer（`https://cursor.com/install`，Windows 为 `install?win32=true`），host 与 ACP 同二进制（`cursor-agent acp`）。ZCode 的 desktop host 与 npm 适配器 `zcode-acp-server server` 分层探测；Windows 安装适配器时加 `--ignore-scripts`，跳过包内与 cmd 不兼容的通知脚本。MiniMax Code 是原生 ACP 单包 CLI（`mcode acp`），安装/更新使用带 `--ignore-scripts=false`、`--include=optional`、`--allow-scripts=@minimax-ai/code,better-sqlite3` 和 `--foreground-scripts` 的 npm 命令，确保 native SQLite 依赖完成安装。CodeBuddy 优先官方 installer（`https://copilot.tencent.com/cli/install.sh`，Windows 为 `install.ps1`），失败回退 `npm i -g @tencent-ai/codebuddy-code@latest`（Unix `--prefix "$HOME/.local"`）；host 与 ACP 同二进制（`codebuddy --acp`），update 优先 `codebuddy update`，卸载保留 `~/.codebuddy` 登录与配置。
-  - `update`：模板优先 `tool update` / 官方链，失败再 npm；Codex 固定 npm（避免假成功）；Pi 使用 `pi update --self` 后 fallback npm；Windows 上 OpenCode 不用交互式 `upgrade`。Kimi 的 `kimi upgrade` 是交互式，静默 update 直接重跑官方 installer（幂等）。Qoder 优先 `qodercli update`，Qoder CN 优先 `qodercn update`，失败再走官方 installer / npm。
-  - `uninstall`：其他模板镜像安装矩阵做 best-effort 清理（先 `resolve_command("npm")` 预检，缺失即报错而非假成功）——npm 全局包逐个 `npm uninstall -g`（unix 上适配器带 `--prefix "$HOME/.local"`，与安装一致）；dsh 在 npm 卸载后删除废弃方案的遗留目录 `~/.agentero/dsh-acp`（旧 dsh-acp-demo 受管安装），kimi-code 在 npm 卸载后删除 `~/.kimi-code`（Windows 为 `%USERPROFILE%\.kimi-code`），qodercli 在 npm 卸载后删除官方脚本写入的 `~/.qoder/bin/qodercli`、`~/.qoder/entry` 和 `~/.local/bin/qodercli`（只删这个链接，不删 `~/.local/bin`；符号链接用 unlink，悬空链接也删；Windows 额外尝试同目录的 `qodercli.exe` / `qodercli.cmd`）。本机没有 npm 时 qodercli 仍删除这些路径，其它模板仍因缺少 npm 报错。**不改 shell rc**（官方 installer 写入的 PATH 行保留）、不删除 `~/.qoder` 会话与登录、不处理 Homebrew cask，也不处理其它官方脚本安装的 CLI（无法可靠定位）。Hermes 与 Antigravity 无 npm 包/受管目录 → 仅移除注册项（不跑命令）。成功后同命令联动删除该模板的 catalog 注册项（`catalog-{templateId}`，或 command+args 匹配），避免二进制已删而注册项残留；phase 用 `agent-lifecycle-uninstall` 推送进度。
+  - `install`：未装 host 时走官方 installer（POSIX curl→临时文件再 bash，非 `curl|bash`）或 npm；Claude/Codex/Pi 在 host 已存在但 ACP 缺失时只装适配器；两者都缺则 host && adapter；Hermes 走官方 installer；Pi 无原生 ACP，ACP 入口是社区适配器 `pi-acp`（detect 用 host `pi`）；host 与 adapter 两层都走 npm，因为 `pi.dev/install.sh` 是交互式 TUI installer，不能静默执行。Dsh 是 umbrella CLI 的内置 ACP profile（`dsh --profile acp`，需 `@deepseek-ai/dsh` 0.1.2+，npm latest 0.1.5-rc.2；旧的独立包 `dsh-acp-demo` 停更于 0.1.1-rc.2 已弃用）：host 与 ACP 同二进制，`npm i -g @deepseek-ai/dsh@latest`（Unix `--prefix "$HOME/.local"`）安装/更新。Kimi Code 优先官方 installer（`code.kimi.com`，单二进制装入 `~/.kimi-code`），失败回退 `npm i -g @moonshot-ai/kimi-code`。Qoder CLI 优先官方 installer（`https://qoder.com/install`，Windows 为 `install.ps1`），失败回退 `npm i -g @qoder-ai/qodercli@latest`；host 与 ACP 同二进制（`qodercli --acp`）。Cursor Agent 只有官方 installer（`https://cursor.com/install`，Windows 为 `install?win32=true`），host 与 ACP 同二进制（`cursor-agent acp`）。Antigravity 也只有官方 installer（`https://antigravity.google/cli/install.sh`，Windows 为 `irm https://antigravity.google/cli/install.ps1 | iex`）：扁平 `agy` 二进制装入 `~/.local/bin`（Windows 为 `%LOCALAPPDATA%\agy\bin`），再由 `agy install` 写 PATH；host 与 ACP 同二进制（`agy acp`）。ZCode 的 desktop host 与 npm 适配器 `zcode-acp-server server` 分层探测；Windows 安装适配器时加 `--ignore-scripts`，跳过包内与 cmd 不兼容的通知脚本。MiniMax Code 是原生 ACP 单包 CLI（`mcode acp`），安装/更新使用带 `--ignore-scripts=false`、`--include=optional`、`--allow-scripts=@minimax-ai/code,better-sqlite3` 和 `--foreground-scripts` 的 npm 命令，确保 native SQLite 依赖完成安装。CodeBuddy 优先官方 installer（`https://copilot.tencent.com/cli/install.sh`，Windows 为 `install.ps1`），失败回退 `npm i -g @tencent-ai/codebuddy-code@latest`（Unix `--prefix "$HOME/.local"`）；host 与 ACP 同二进制（`codebuddy --acp`），update 优先 `codebuddy update`，卸载保留 `~/.codebuddy` 登录与配置。
+  - `update`：模板优先 `tool update` / 官方链，失败再 npm；Codex 固定 npm（避免假成功）；Pi 使用 `pi update --self` 后 fallback npm；Windows 上 OpenCode 不用交互式 `upgrade`。Kimi 的 `kimi upgrade` 是交互式，静默 update 直接重跑官方 installer（幂等）。Qoder 优先 `qodercli update`，Qoder CN 优先 `qodercn update`，失败再走官方 installer / npm。Antigravity 的官方 installer 在 `agy` 已存在时是 no-op（CLI 后台自更新），静默 update 用 `agy update`，失败再重跑 installer。
+  - `uninstall`：其他模板镜像安装矩阵做 best-effort 清理（先 `resolve_command("npm")` 预检，缺失即报错而非假成功）——npm 全局包逐个 `npm uninstall -g`（unix 上适配器带 `--prefix "$HOME/.local"`，与安装一致）；dsh 在 npm 卸载后删除废弃方案的遗留目录 `~/.agentero/dsh-acp`（旧 dsh-acp-demo 受管安装），kimi-code 在 npm 卸载后删除 `~/.kimi-code`（Windows 为 `%USERPROFILE%\.kimi-code`），qodercli 在 npm 卸载后删除官方脚本写入的 `~/.qoder/bin/qodercli`、`~/.qoder/entry` 和 `~/.local/bin/qodercli`（只删这个链接，不删 `~/.local/bin`；符号链接用 unlink，悬空链接也删；Windows 额外尝试同目录的 `qodercli.exe` / `qodercli.cmd`）。本机没有 npm 时 qodercli 仍删除这些路径，其它模板仍因缺少 npm 报错。**不改 shell rc**（官方 installer 写入的 PATH 行保留）、不删除 `~/.qoder` 会话与登录、不处理 Homebrew cask，也不处理其它官方脚本安装的 CLI（无法可靠定位）。Hermes 无 npm 包/受管目录 → 仅移除注册项（不跑命令）；Antigravity 同样无 npm 包，删除官方 installer 写入的 `~/.local/bin/agy`（Windows 为 `%LOCALAPPDATA%\agy\bin\agy.exe`）和 updater 留下的 `agy.*.old` 备份，保留 `~/.gemini/antigravity-cli` 的登录/会话/设置与 shell rc 的 PATH 行。成功后同命令联动删除该模板的 catalog 注册项（`catalog-{templateId}`，或 command+args 匹配），避免二进制已删而注册项残留；phase 用 `agent-lifecycle-uninstall` 推送进度。
   - 本机 lifecycle 全局串行执行，避免多个 npm 全局安装/升级任务并发抢锁或互相覆盖临时脚本；设置页在对应 Agent 卡片内展示安装 / 扫描 / 探测阶段进度（#250）。
   - 安装子进程运行期间，Host 以 `agent-lifecycle:progress` 推送 `agent-lifecycle-*` phase tick，供设置页行内进度条消费，避免快捷下载脚本长时间停在无进度状态。
   - 若传入 `taskId`，等待 lifecycle 锁和执行安装子进程时会检查 agent 域内的 lifecycle 取消注册表（`agent_lifecycle_cancel` 写入，命令出口清理）；取消是尽力而为，不回滚已完成的包管理器写入。设置页 Agent 目录行与引导页 Agent 卡片在行内进度条上提供取消（X）按钮，点击即以本次 lifecycle 的 `taskId` 调 `agent_lifecycle_cancel`（参数 `{ taskId: string }`）；取消为静默处理（不弹错误 toast、不显示错误条）。
@@ -1748,7 +1752,7 @@ Host 作为 ACP Client：按注册表 spawn 用户本机 Agent（`cwd` = 当前 
   - `updateAvailable`：仅当目标版本**严格新于**本地时为 `true`；无法判定时省略/`null`（UI 不显示升级）
 - **行为**
   - 同步 PATH scan 后，在 `spawn_blocking` 中跑 `--version` / `npm view`（尊重代理设置）。
-  - npm 包映射：`@opencode/cli` / `@anthropic-ai/claude-code` / `@openai/codex` / `@earendil-works/pi-coding-agent` / `@xai-official/grok` / `@qoder-ai/qodercli` / `@qodercn-ai/qoderclicn` / `@deepseek-ai/dsh` / `@moonshot-ai/kimi-code` / `zcode-acp-server` / `@minimax-ai/code` / `mimocode`；**antigravity-acp 与 hermes 本轮不探测**（无稳定 npm 源），`cursor-agent` 同理（官方 installer，仅自动更新）。OpenCode 卸载额外清理旧版 `opencode-ai`。
+  - npm 包映射：`@opencode/cli` / `@anthropic-ai/claude-code` / `@openai/codex` / `@earendil-works/pi-coding-agent` / `@xai-official/grok` / `@qoder-ai/qodercli` / `@qodercn-ai/qoderclicn` / `@deepseek-ai/dsh` / `@moonshot-ai/kimi-code` / `zcode-acp-server` / `@minimax-ai/code` / `mimocode`；**antigravity-acp 与 hermes 本轮不探测**（无稳定 npm 源；Antigravity 的更新路径是 `agy update`，因此没有 Upgrade 目标），`cursor-agent` 同理（官方 installer，仅自动更新）。OpenCode 卸载额外清理旧版 `opencode-ai`。
   - 不写入 registry；设置页打开/刷新与 lifecycle 成功后调用。
 - **实现**：`registry/version_check.rs` · `commands::agent_check_catalog_updates`
 
@@ -2385,6 +2389,14 @@ UI 入口见 `settings_window_open`：Settings 现为独立原生单例窗口，
 - **`ActivityRecord`**：`{ ts?, vault?, kind, path?, mode?, durMs?, extra? }`。调用方不要自己填 `paper_path` / `facet` / `qty` / `status`。
 - **返回**：写入条数（`number`）。空数组为 `0`。单批上限 200。
 - **说明**：浏览器预览（非 Tauri）前端短路为 `0`。
+
+#### `usage_board_query`（已实现）
+
+当前 Vault 的使用情况，给设置里的看板。只读 `usage_daily`。阅读时长只累加 `paper.session`，不把同一次停留的 `paper.blur` 再加一遍。
+
+- **参数**（`args`）：`{ vault, startDay, endDay, weekStart }`，日期都是本地 `YYYY-MM-DD`。`startDay`–`endDay` 覆盖热力图；`weekStart`–`endDay` 是本周论文和 workflow。
+- **返回** `UsageBoard`：`{ days, papers, workflows, weekPaperCount }`。`days[]` 为 `{ day, readingMs, agentRuns, tokens }`。`papers` 最多 8 篇，标题由 catalog 按路径补上，不写入 usage 库。
+- **说明**：空 `vault` 返回空看板。日期不是 `YYYY-MM-DD` 时失败。
 
 #### `usage_clear`（已实现）
 

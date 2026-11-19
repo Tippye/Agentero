@@ -50,11 +50,6 @@ const MarkdownEditor = lazy(() =>
 		default: m.MarkdownEditor,
 	})),
 );
-const ExcalidrawViewer = lazy(() =>
-	import("@/components/viewer/excalidraw-viewer").then((m) => ({
-		default: m.ExcalidrawViewer,
-	})),
-);
 
 const TableViewer = lazy(() =>
 	import("@/components/research-table/table-viewer").then((m) => ({
@@ -132,23 +127,15 @@ export type DocViewPdfProps = {
 	onVisualTracesChange: (tabId: string, list: PdfVisualSessionTrace[]) => void;
 	/**
 	 * Open a rendered-translation tab split to the right of the current PDF panel.
-	 * Called by the full-document translate button when dual-pane mode is on.
+	 * Called by the reading-view switch when the reader picks 对照.
 	 */
 	onOpenTranslationTab?: (
 		paperTabId: string,
 		paperAbsPath: string | null,
 		paperTitle?: string | null,
 	) => void;
-};
-
-/** Excalidraw editor props. */
-export type DocViewExcalidrawProps = {
-	onPersistFile: (
-		path: string,
-		json: string,
-		lastSaved: string,
-	) => Promise<boolean>;
-	onTabPatch: (id: string, patch: Partial<DocTab>) => void;
+	/** Close that tab again when the reader leaves 对照. */
+	onCloseTranslationTab?: (paperTabId: string) => void;
 };
 
 /** Plain-text (CodeMirror) editor props. */
@@ -179,7 +166,6 @@ export type DocViewProps = {
 	library: DocViewLibraryProps;
 	editor: DocViewEditorProps;
 	pdf: DocViewPdfProps;
-	excalidraw: DocViewExcalidrawProps;
 	text: DocViewTextProps;
 	onTrashChanged: () => void;
 	/** Bump to reload recycle bin after Empty Recycle Bin from the sidebar. */
@@ -276,8 +262,6 @@ function docViewPropsEqual(prev: DocViewProps, next: DocViewProps): boolean {
 	switch (viewerModeSpec(tab.mode).props) {
 		case "editor":
 			return prev.editor === next.editor;
-		case "excalidraw":
-			return prev.excalidraw === next.excalidraw;
 		case "text":
 			return prev.text === next.text;
 		case "pdf":
@@ -296,7 +280,6 @@ const DocumentContent = memo(function DocumentContent({
 	library,
 	editor,
 	pdf,
-	excalidraw,
 	text,
 	onTrashChanged,
 	trashReloadSignal = 0,
@@ -427,12 +410,21 @@ const DocumentContent = memo(function DocumentContent({
 		)
 			return null;
 		return (
-			<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/30">
+			<div
+				data-paper-notes={isNotes || undefined}
+				className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/30"
+			>
 				<Suspense fallback={<TabLoadingSkeleton />}>
 					<MarkdownEditor
 						// Stable per-tab key: external disk changes reload in place via
-						// `reloadKey` instead of remounting the whole editor.
-						key={isNotes ? `notes-center-${tab.id}` : `file-${tab.id}`}
+						// `reloadKey` instead of remounting the whole editor. A source
+						// swap inside a writing project bumps `textEpoch` (new file,
+						// flushed first) so the file path is re-captured.
+						key={
+							isNotes
+								? `notes-center-${tab.id}`
+								: `file-${tab.id}-${tab.textEpoch}`
+						}
 						className="h-full min-h-0"
 						tabId={tab.id}
 						active={active}
@@ -503,6 +495,7 @@ const DocumentContent = memo(function DocumentContent({
 						onAsksChange={handlePdfAsksChange}
 						onVisualTracesChange={handlePdfVisualTracesChange}
 						onOpenTranslationTab={pdf.onOpenTranslationTab}
+						onCloseTranslationTab={pdf.onCloseTranslationTab}
 					/>
 				</Suspense>
 				{tab.texCompiling && <TexCompilingIndicator />}
@@ -557,28 +550,6 @@ const DocumentContent = memo(function DocumentContent({
 			</div>
 		);
 	}
-	if (tab.mode === "excalidraw") {
-		if (!active && !keepMounted) return <TabLoadingSkeleton />;
-		return (
-			<div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-				<Suspense fallback={<TabLoadingSkeleton />}>
-					<ExcalidrawViewer
-						// Stable per-tab key: external disk changes reload in place
-						// via `reloadKey` instead of remounting the whole viewer.
-						key={`excalidraw-${tab.id}`}
-						seed={tab.excalidrawSeed}
-						path={tab.path}
-						reloadKey={tab.excalidrawKey}
-						onPersist={excalidraw.onPersistFile}
-						onDirtyChange={(d) =>
-							excalidraw.onTabPatch(tab.id, { excalidrawDirty: d })
-						}
-						className="h-full w-full"
-					/>
-				</Suspense>
-			</div>
-		);
-	}
 	if (tab.mode === "research-table") {
 		if (!active && !keepMounted) return <TabLoadingSkeleton />;
 		return (
@@ -610,8 +581,10 @@ const DocumentContent = memo(function DocumentContent({
 				<Suspense fallback={<TabLoadingSkeleton />}>
 					<TextEditor
 						// Stable per-tab key: external disk changes swap the document
-						// in place via `reloadKey` (view state and scroll survive).
-						key={`text-${tab.id}-${cloud.shared ? (cloud.shared.readOnly ? "cloud-view" : "cloud-edit") : "local"}`}
+						// in place via `reloadKey` (view state, scroll and undo
+						// survive). A writing source swap bumps `textEpoch` instead —
+						// the new file must not inherit the old file's undo history.
+						key={`text-${tab.id}-${tab.textEpoch}-${cloud.shared ? (cloud.shared.readOnly ? "cloud-view" : "cloud-edit") : "local"}`}
 						shared={cloud.shared ?? undefined}
 						panelId={tab.id}
 						hideLintFooter={isWritingSource(tab, vaultPath)}

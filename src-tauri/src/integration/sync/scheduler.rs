@@ -1,6 +1,7 @@
 //! Automatic sync scheduling. Desktop watches files; mobile receives explicit
 //! native write/lifecycle signals and schedules only while foregrounded.
 use super::SyncService;
+#[cfg(any(desktop, test))]
 use crate::core::error::AppError;
 use crate::integration::sync::config;
 #[cfg(desktop)]
@@ -283,10 +284,17 @@ impl SyncService {
                 log::info!(target: "agentero::sync", "exit flush {key}: sync already running; skipped");
                 continue;
             };
+            let Some(_lock) = agentero_core::features::sync::lock::SyncLock::try_acquire(&dir)
+                .ok()
+                .flatten()
+            else {
+                log::info!(target: "agentero::sync", "exit flush {key}: vault lock busy; skipped");
+                continue;
+            };
             let result = tauri::async_runtime::block_on(async {
                 tokio::time::timeout(
                     Duration::from_secs(EXIT_FLUSH_TIMEOUT_SECS),
-                    super::engine::sync_vault_locked(&dir, &cfg, &|_, _, _| {}),
+                    super::engine::sync_vault_locked(&_lock, &cfg, &|_, _, _| {}),
                 )
                 .await
             });
@@ -404,7 +412,7 @@ fn relevant_to_vault(vault: &Path, path: &Path) -> bool {
     relevant_canonical_paths(&vault, &path)
 }
 
-#[cfg(any(mobile, test))]
+#[cfg(mobile)]
 fn canonical_changed_path(path: &Path) -> Option<PathBuf> {
     let mut cursor = path;
     let mut missing = Vec::new();

@@ -44,6 +44,7 @@ macro_rules! common_commands {
             crate::features::system::network::commands::doctor_check_network,
             crate::features::system::desktop_apps::commands::desktop_apps_probe,
             crate::features::system::desktop_apps::commands::desktop_app_open,
+            crate::features::agent::commands::agent_rebind_event_window,
             crate::features::agent::commands::agent_cancel_run,
             crate::features::jobs::commands::job_parse_refs_enqueue,
             crate::features::jobs::commands::job_parse_body_enqueue,
@@ -152,6 +153,7 @@ macro_rules! common_commands {
             crate::features::markdown::tables::commands::research_table_backlinks,
             crate::core::usage::commands::activity_record_events,
             crate::core::usage::commands::usage_clear,
+            crate::core::usage::commands::usage_board_query,
             crate::app::logging::logs_clear,
             crate::features::paper::discovery::feeds::commands::feeds_list,
             crate::features::paper::discovery::feeds::commands::feeds_add,
@@ -213,26 +215,6 @@ pub fn attach_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             crate::integration::bridge::client_commands::bridge_client_disconnect,
             crate::integration::bridge::client_commands::bridge_client_status,
             crate::integration::bridge::client_commands::bridge_client_rpc,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_editor_state,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_list,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_inspect,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_install,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_configure,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_remove,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_activate,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_dev_load,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_unload,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            crate::integration::plugins::plugin_run,
             crate::integration::bridge::commands::bridge_start,
             crate::integration::bridge::commands::bridge_stop,
             crate::integration::bridge::commands::bridge_status,

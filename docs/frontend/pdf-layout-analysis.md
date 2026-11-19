@@ -9,7 +9,7 @@
 | | |
 |---|---|
 | 上游 | [EmbedPDF Layout Analysis](https://www.embedpdf.com/docs/react/headless/plugins/plugin-layout-analysis) |
-| 代码 | `src/lib/pdf/layout/`、`viewer/panels/figures-panel.tsx`（header 按钮）、`viewer/pdf/hooks/use-pdf-layout-{regions,run,hover,translate}.ts`、`viewer/pdf/layers/page-layers.tsx`（页内命中框与 bbox 叠加） |
+| 代码 | `src/lib/pdf/layout/`、`viewer/panels/figures-panel.tsx`（header 按钮）、`viewer/pdf/hooks/use-pdf-layout-{regions,run,hover,translate}.ts`、`viewer/pdf/layers/layout-element-selection-layer.tsx`（元素选择）、`layout-element-actions.tsx`（元素工具卡）、`page-layers.tsx`（Eye 叠加） |
 | 持久化 | Paper PDF 写入 `{paper}/source/layout.json`（raw text-enriched regions）+ `{paper}/source/layout-index.json`（侧栏同构，供 CLI）；`layoutAnalysisStore` 仍是运行时 UI store |
 
 ---
@@ -81,7 +81,7 @@ PP-DocLayoutV3  每页: render → detect → map to PDF points（仅无 sidecar
         │  某一页没读完则不打标记，下次打开再抽。正文词序变了的块，译文缓存按原文 miss 后重译
         ▼
 ② mergeCaptionsIntoHosts（联图 / 表题 / 算法题 / 公式按编号框几何合并）
-        │  输出 PdfLayoutRegion[]（图题可缺失；公式仅保留有 formula_number 锚点）
+        │  输出 PdfLayoutRegion[]（保留正文 / 摘要 / 标题及未合并图题；图题可缺失；公式仅保留有 formula_number 锚点）
         ▼
 ③ 侧栏展示: isSidebarLayoutKind + dedupeLayoutRegions(minScore 默认 0.3)
         │  分区顺序：插图 → 表 → 算法 → **公式（最底）**
@@ -94,22 +94,34 @@ PP-DocLayoutV3  每页: render → detect → map to PDF points（仅无 sidecar
         │  叠加层画 **rawRegions**（合并前、全 kind、无 NMS；score ≥ 0.3）
         │  每框标注分类 + 置信度（如「图片 87%」「摘要 91%」）
         │  标签映射须覆盖 PP-DocLayoutV3 全量（含 abstract）；未映射 label 会在 normalize 被丢弃
-        │  侧栏 / hover 仍用 **regions**（post-merge；不含 abstract）
+        │  侧栏仍用 **regions** 里的插图 / 表 / 算法 / 公式（post-merge）
+        │  元素选择用同一份 post-merge **regions** 的全部 kind
         │  不用 EmbedPDF LayoutAnalysisLayer 画框：sidecar 缓存命中时插件无 page layout
         │
-④ PDF 页交互 → 视觉批注卡
-        │  hit 层用 **post-merge** 区域（与侧栏同源，非插件 raw 框）
-        │  插图 / 表 / 算法 / 有编号公式：hover 框右上角提示「单击进行批注」；
-        │    单击 → VisualAnnotationEditor
-        │  实现：`hit-test.ts` + `pdf-viewer`
+④ 普通阅读持续提供句子悬停与双栏同句联动；工具栏「选择版面元素」或 ⌘. 开启元素框 / 类别 / 点击动作（默认关闭，再次点击 / Esc 退出）
+        │  hit 层用 **post-merge regions**（全 kind；非 Eye 的 rawRegions，也不是侧栏子集）
+        │  hover 只画当前元素，指针进入立即点亮。文本类有句对时主视觉是当前句浅底（含跨页链），
+        │    合并框（bbox，以及同页 titleBbox / captionBbox）左上方显示可点击的类别标签；边框 / 背景使用纸面墨色（`--pdf-paper-ink`）的 55% / 8%
+        │  类别标签单击 / Enter 选择整个段落或元素；段内单击选择当前句，选中句亮到工具卡关闭
+        │  文字元素支持高亮 / 下划线和文字批注；图表、公式、算法可保存整块区域批注
+        │  工具卡还提供翻译和复制（有文本时）、加入对话、快速对话及书签（可编辑时）
+        │  双栏 PDF：左右同一句一起浅亮，不滚动对侧；LaTeX 双栏无句子表面，先只做 PDF
+        │  实现：`hit-test.ts`（selectable*）+ `layout-element-selection-layer.tsx`
+        │  ⌘. 与工具栏复用同一个元素选择开关
         │
 ⑤ 正文 / 摘要 / 标题文字抽取（PDF text layer → region.text）
         │  分析或 sidecar 回填时 enrich；供调试与 bulk 翻译
         │  同一行按字形底边对齐（加粗或更大的字头顶更高，底边仍和邻字对齐），
         │  行内从左往右，再接下一行。抽正文和英文句子对字形共用
         │  `reading-order.ts`
+        │  基线容差按 **em 字号** 而不是盒子高度：个别 PDF 的
+        │  `/FontBBox` 有 3.7 em（Elsevier 的 Type1 子集把 2048/em 的
+        │  数值写进了 1000/em 的 Type1），PDFium 会把 8pt 字报成 29pt 高，
+        │  按盒高算会把相邻三行并成一行、再按 x 排序造成逐词交错。
+        │  sidecar 的 `source.textOrderVersion` 落后时只重走文字层（保留
+        │  `generatedAt`），不重跑版面模型
         │
-⑥ 工具栏「翻译」icon（视觉批注旁）：按阅读顺序批量翻译文字类区域
+⑥ 工具栏「翻译」icon（元素选择旁）：按阅读顺序批量翻译文字类区域
         │  并发 2；每完成一块立刻盖译文图层（`LayoutTranslateOverlay`）
         │  再次点击：运行中=停止；已有译文=清除
 ```
@@ -175,6 +187,19 @@ LayoutAnalysisPluginPackage: {
 - 每次远程版面分析独立提交，使用唯一 `requestId`；重试不会复用旧版面请求，已取消请求的进度也不会覆盖新任务。取消会通过 `layout_remote_cancel` 终止对应 Host 等待；已提交的云端 batch 仍由服务端处理。
 - 无 paper 目录（拿不到 PDF 字节）或页数未知时自动回退本地 ONNX。
 
+### Headless CLI（`agentero layout analyze`）
+
+无 GUI（服务器 / 纯 CLI Vault）时，远程 Provider 现在可以直接跑：`agentero layout analyze <ref>` 与 `agentero import pdf --layout` 在 Rust 侧复用同一套 Provider 引擎，读取桌面 `settings.json` 的 `layout.backend` / `layout.providerConfigs.*`，写出 `source/layout.json` + `source/layout-index.json`。
+
+- **产物同 schema**：`schemaVersion`、`source.mode`（`paddle-layout` / `mineru-layout`）、`completeness` 与 region 字段与桌面一致；桌面打开论文时直接读缓存，CLI 写出的 index 也能被 `layout list/get`、`mark add --region` 使用。
+- **本地 ONNX 仍是桌面专属**：PP-DocLayoutV3 依赖 WebView / EmbedPDF 渲染栈，CLI 不加载；`layout.backend=local` 时用 `--provider paddle|mineru` 指定远程引擎。
+- **merge 是 Rust 移植但非全量**：联图 panel 聚类、图注 / 表注绑定、按 `formula_number` 合并公式、NMS 去重与 id 规则都已移植（实论文上与桌面侧栏条目、id、标题逐项对齐）。未移植子图注（(a)(b)）吸收、跨页图注、图注被正文覆盖抑制等少数规则，因此个别联图/跨页排版可能少一条标题。桌面端打开论文仍按当前 TS 规则重新 merge 并刷新 `layout-index.json`，不需要重跑模型。
+- **公式列表**：与桌面一致，侧栏只列 merge 后带 `formula_number` 的公式；远程 Provider 不返回编号框时 `layout list --kind formula` 为空，但 `source/layout.json` 仍保留公式区域（`--kind paragraph` / 章节查询不受影响）。
+- **缓存与 `--pages`**：完整 sidecar 直接复用，`--force` 重跑；`--pages` 只在真正跑分析时生效（命中缓存请配 `--force`），只保留指定页并故意写不完整 sidecar，桌面打开时再补全。
+- 命令细节（flag、缓存策略、错误码、`--json` 形状）见 [../backend/cli.md](../backend/cli.md) §运行版面分析。
+
+实现位于 `crates/agentero-core/src/features/pdf/layout_analyze/`（与桌面共享 `paper::analyze::layout::hosted` 的 Provider 引擎）；CLI 入口见 `cli/src/commands/layout.rs` / `import.rs`。
+
 ### Layout sidecar
 
 `{paper}/source/layout.json` 保存 **初步解析结果**：模型标签映射后的 `PdfLayoutRegion[]`，并已尽力补充 caption 文本与 `captionRole`（公式编号文本不解析）。它不保存侧栏最终卡片列表，也不保存缩略图；后续 `mergeCaptionsIntoHosts`、去重和置信度筛选都从该 raw sidecar 重新计算。因此修改联图、公式合并或筛选规则后，不需要重新运行 PP-DocLayoutV3。
@@ -186,6 +211,7 @@ type LayoutSidecar = {
     mode: "embedpdf-layout" | "paddle-layout" | "mineru-layout";
     generatedAt: string;
     textLayerExtracted?: boolean; // 文字层整篇已抽过；缺省则打开时再抽一次
+    textOrderVersion?: number; // 正文文字用的阅读顺序版本；落后/缺省只重走文字层
     completeness?: {
       pageCount: number;
       processedPages: number[];
@@ -220,7 +246,7 @@ type LayoutSidecar = {
 - 分区：figure（image+chart）→ table → algorithm → formula
 - 字段：`id`（如 `figure-3`）、`stableKey`、`kind`、`section`、`page`（**1-based**）、`pageIndex`、`bbox`（0–1）、`score`、`title?`、`layoutRegionId`
 - 代码：`src/lib/pdf/layout/layout-index.ts`、`writeLayoutIndexFromRaw`（`io.ts`）
-- CLI：`agentero layout list|get`、`agentero mark add --region <id>`（见 [../backend/cli.md](../backend/cli.md)）
+- CLI：`agentero layout analyze`（headless 生成）、`layout list|get`、`agentero mark add --region <id>`（见 [../backend/cli.md](../backend/cli.md)）
 
 缓存只在已知 paper folder 时启用；散落 PDF 没有 `{paper}` 路径，仍使用当前内存流程（也不写 index）。
 
@@ -243,40 +269,43 @@ type LayoutSidecar = {
 | **A1** | 模型 label → kind | 映射：`image` `chart` `table` `algorithm` `formula` `formula_number` `figure_title` `header` `text`/`aside_text`→`text`；其余丢弃 |
 | **A2** | 侧栏种类 | 展示 **image / chart / table / algorithm / formula（有 formula_number 框并成功合并）**；**不展示** 无编号框 formula / 裸 `formula_number` / caption |
 | **A3** | image+chart 同区 | 侧栏「插图」分区；NMS 时同属 `figure` 组；**公式分区固定在列表最下方** |
-| **A4** | 纯 text/header 不得当图片 | 若 image/chart 被 score≥0.3 的 text/header/abstract **覆盖 ≥55%** 且正文置信度不低于图的 ~85%，则 **丢弃** 该 image/chart（双标 / 段落误检）。Eye 叠加层与 merge 共用 `suppressSpuriousFigureDetections` |
+| **A4** | 纯 text/header 不得当图片 | 若 image/chart 被 score≥0.3 的 text/header/abstract **覆盖 ≥55%** 且正文置信度不低于图的 ~85%，则 **丢弃** 该 image/chart（双标 / 段落误检）。高度超过页高 12% 的 header 可能是图误分类，不单独作为否决证据；普通正文与正常高度 header 的抑制保持生效。Eye 叠加层与 merge 共用 `suppressSpuriousFigureDetections` |
 
 ### B. 文字角色（4）
 
 | # | 规则 | 说明 |
 |---|---|---|
 | **B1** | 文本角色优先 | `Figure N` / `Fig. N \|` / `Extended Data Fig. N \|`→`figure_main`；`Table N`→`table_main`；`Algorithm N`→`algorithm_main`；`(a)` / 单字母 `a`→`subpanel`（即使模型标成 figure_title） |
-| **B2** | 无文本时几何兜底 | 宽≥0.45 且矮 → 可能主图题；窄短框保持未定角色，已知主图题优先聚合后，再用邻近图框恢复无文字图题（单栏 / 多子图均可）。旧 sidecar 中无文字的几何 `subpanel` 重新判断 |
-| **B3** | 角色驱动绑定 | `table_main` 只绑 table；`figure_main` 只绑图；`subpanel` 不当整图锚点 |
-| **B4** | 正文误标与漏检图题恢复 | `text` / `header` 以**带编号 + 标点**的主图题开头时，在 merge 中提升为 `figure_main`；也从 PDF text runs 恢复模型漏检的图注并缓存真实几何。包含无检测框的图注页。双栏续文仅在字符序连续且几何匹配时合并；`Figure 5 contains …` 等正文引用不提升 |
+| **B2** | 无文本时几何兜底 | 宽≥0.45 且矮 → 可能主图题；无文字的通用 `figure_title` 在 merge 时比较图上方 / 表和算法下方宿主的贴题分数，非图宿主领先另一族至少 0.2 时才改判为表注 / 算法题，否则保持原图题兜底。已有文字语义不被几何覆盖。窄短框保持未定角色，已知主图题优先聚合后，再用邻近图框恢复无文字图题（单栏 / 多子图均可）。旧 sidecar 中无文字的几何 `subpanel` 重新判断 |
+| **B3** | 角色驱动绑定 | `table_main` 只绑 table；`figure_main` 只绑图；`subpanel` 不当整图锚点。未分类的 `header` 不作为主图注绑定，仅有明确 caption 角色时可绑定。图注一对一分配仅允许 score≥0.3 的宿主参与，防止最终会被筛除的低分表 / 算法候选先抢走图注；内部图例处理保持独立，避免页眉 / 章节标题因距离近而扩入裁剪框 |
+| **B4** | 正文误标与漏检图题恢复 | `text` / `header` 以**带编号的主图题**开头时（编号后有标点，或紧接大写开头单词，兼容 `Fig.3Values…` 的 OCR 缺空格），在 merge 中提升为 `figure_main`；也从 PDF text runs 恢复模型漏检的图注并缓存真实几何。包含无检测框的图注页。同一基线在栏间空隙处分组，避免邻栏正文混入图注；文字层恢复双栏续文仍要求字符序连续且几何匹配；模型已检出的跨栏图注另见 D6；`Figure 5 contains …` 等正文引用不提升 |
 
 ### C. 类型分家与贴题方向（2）
 
 | # | 规则 | 说明 |
 |---|---|---|
 | **C1** | 宿主族隔离 | figure / table / algorithm 不交叉绑主标题 |
-| **C2** | 贴题方向 | **图：标题在下**；**表 / 算法：标题在上**（学术惯例） |
+| **C2** | 贴题方向 | **图：标题在下**；**表 / 算法：标题在上**（学术惯例）。明确编号的图注也可位于左右侧：水平间隔≤页宽 10%、垂直重叠≥50%，图注不宽于图、也不高于图的 1.25 倍，水平间隙内存在正文 / 表格阻断时拒绝，保留一对一归属 |
 
-### D. 联图与 figure_title（5）
+### D. 联图与 figure_title（6）
+
+编号图注被 OCR 漏行拆成两段时，可用唯一完整图注候选补全区域：两个正文段均须达到展示置信度，其拼接文本须与候选全文精确一致；前段不能以句末标点结束，续段须以小写字母开始。候选与首段顶部、宽度差均不超过 0.01，候选高度不超过 0.2；续段同页、左边差不超过 0.01、纵向间隔不超过 0.02，两个文字框均至少 95% 被候选覆盖。该规则仅恢复已有文字和裁剪范围，不生成缺失文字。重复图注去重时，低于展示置信度的候选不能淘汰高分图注。
 
 | # | 规则 | 说明 |
 |---|---|---|
 | **D1** | 主图题锚点 | `figure_main`（或宽 figure_title）优先启动联图；无文字的窄 figure_title 延后匹配，不能抢占已知主图题的子图 |
 | **D2** | 竖向带 | panel 须在「水平方向相交的上一主图题底边 → 本图题顶边」内；另一栏图题不截断当前栏 |
-| **D3** | 全宽 vs 半宽 | 先过滤置信度 < **0.3** 的图框和图题 / 图例候选，再从距图题 ≤ **0.12** 的子图所在连通组聚合；正文 / 表 / 算法在竖向间隙内阻断连接和贴题。图题宽 ≥ **0.55** 可同时锚定多个不连通的列，保留多行联图且不设高度软上限；半宽只取最贴近图题的组，保留高度软上限 0.55。远处孤立框不因全宽图题而被收入 |
+| **D3** | 全宽 vs 半宽 | 先过滤置信度 < **0.3** 的图框和图题 / 图例候选，再从距图题 ≤ **0.12** 的子图所在连通组聚合；正文 / 表 / 算法在竖向间隙内阻断连接和贴题。图题宽 ≥ **0.55** 可同时锚定多个不连通的列，保留多行联图且不设高度软上限；半宽只取最贴近图题的组，默认高度软上限 0.55；明确编号且文字包含至少两个不同子图引用（如 `(a)` / `(b)` 或 `panel A` / `panel B`）时允许连通组向上延伸，仍遵守同栏、前图注边界、正文阻断与贴题种子约束。远处孤立框不因全宽图题而被收入 |
 | **D4** | 可选图题 | 同页 `titleBbox` 必须完整包含在 figure `bbox` 中；缺图题或仅有图题文字的可靠图仍保留，继续经过正文 / 表格重复框抑制、面积 / 分数门槛和 NMS |
 | **D5** | 保守跨页关联 | 前页底部或后页顶部的编号图注，只与唯一、面积≥0.15、内部无正文阻断且没有同页主图题的连通图组配对；图号冲突或多个候选时保留未命名图。`See next page for caption` 仅作图号约束。跨页图注写入独立的 `captionPageIndex` / `captionBbox`，不扩张图片页 bbox，也不伪造 `titleBbox` |
+| **D6** | 跨栏组合图 | 左栏必须有明确编号图注，右栏必须是模型检出的有文字、角色未定的 `figure_title`（不是普通正文），且唯一、同页、两栏顶边差≤0.012、栏间距≤0.06、宽比 0.6–1.67、高均≤0.2，合宽≥0.55。同一带内存在其他编号图注则拒绝。复用正文 / 表格阻断与贴题连通组，要求至少两行左右对齐面板（垂直重叠≥75%、高度差≤25%），重复框不算新行。通过后用完整图注横向范围启动全宽聚合，不设半宽高度软上限；不从普通邻栏正文猜续文 |
 
 ### E. 清理与展示（2）
 
 | # | 规则 | 说明 |
 |---|---|---|
 | **E1** | 孤儿 panel | 落在更大联图内（覆盖≥0.55）的无主标题 panel 丢弃；已有主图题的窄图不当孤儿。左右裁切仅用于纵向重叠且图题水平分离的半宽图，上下独立图不裁切 |
-| **E2** | 侧栏 NMS | 默认 `minScore=0.3`、`minArea=0.002`、同组 IoU≥0.45 抑低分、小框被盖≥0.85 丢小 |
+| **E2** | 侧栏 NMS | 默认 `minScore=0.3`、`minArea=0.002`、同组 IoU≥0.45 或包含率≥0.85 时通常保留高分框。图的两个候选均未关联图注 / 标题、面积比 1.4–4、完整图分数≥局部框的 75% 且包含率达阈值时优先保留完整图；不覆盖已配图注的对象 |
 
 ### F. 公式编号框聚合 — **同行-only，不解析编号文本**
 
@@ -321,6 +350,7 @@ type LayoutSidecar = {
 | `layoutThreshold` | 0.3 | 插件层检测 |
 | 侧栏 `minScore` | 0.3（固定，无滑条） | 展示过滤 |
 | `LAYOUT_MERGE.fullWidthTitle` | 0.55 | 全宽联图 |
+| `LAYOUT_MERGE.captionFamilyMinScoreMargin` | 0.2 | 无文字通用图注改判表 / 算法宿主族所需的贴题分数领先量 |
 | `LAYOUT_MERGE.maxHeightAboveTitle` | 0.55 | **仅半宽**图题无 ceiling 时的竖向软上限 |
 | `LAYOUT_MERGE.panelBottomSlack` | 0.04 | 半宽：panel 底可越过 title 顶的量 |
 | `LAYOUT_MERGE.fullWidthPanelBottomSlack` | 0.14 | 全宽：底行 chart 允许压进 caption |

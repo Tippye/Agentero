@@ -38,6 +38,12 @@ export function isTranslateTransportError(
  * return anything else unchanged.
  */
 export function displayTranslateError(error: string): string {
+	if (error.includes("CAPABILITY_DISABLED"))
+		return i18n.t("settings:translate.errors.noBuiltinKey");
+	if (error.includes("CAPABILITY_SIGN_IN_REQUIRED"))
+		return i18n.t("account:capabilities.signInRequired");
+	if (error.includes("CAPABILITY_OPERATION_PENDING"))
+		return i18n.t("account:capabilities.pending");
 	if (error.includes(ERR_TRANSLATE_TERMINOLOGY))
 		return i18n.t("settings:translate.errors.terminology");
 	if (error.includes(ERR_TRANSLATE_EXTRA_INVALID))

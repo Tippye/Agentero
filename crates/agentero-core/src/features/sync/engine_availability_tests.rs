@@ -66,7 +66,7 @@ async fn availability_two_vault_deferred_assets_survive_idle_and_remote_updates(
     assert_eq!(inventory.len(), 1);
     assert_eq!(inventory[0].assets.len(), 3);
     assert!(inventory[0].assets.iter().all(|asset| !asset.materialized));
-    let base = local::read_base(b.path());
+    let base = local::read_base(b.path()).unwrap();
     assert_eq!(
         base.files.len(),
         8,
@@ -110,8 +110,8 @@ async fn availability_two_vault_deferred_assets_survive_idle_and_remote_updates(
         );
     }
     assert_eq!(
-        local::read_base(a.path()).files[ASSET_PDF].hash,
-        local::read_base(b.path()).files[ASSET_PDF].hash
+        local::read_base(a.path()).unwrap().files[ASSET_PDF].hash,
+        local::read_base(b.path()).unwrap().files[ASSET_PDF].hash
     );
     write_mark(
         b.path(),
@@ -183,7 +183,7 @@ async fn availability_fetch_pin_full_mode_and_eviction_share_verified_engine_pat
         .await
         .unwrap();
     assert_asset_files(a.path(), true);
-    assert!(local::read_base(b.path()).files.contains_key(ASSET_PDF));
+    assert!(local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
 
     availability::set_policy(
         b.path(),
@@ -258,7 +258,7 @@ async fn availability_whole_paper_deletion_uses_positive_metadata_history_for_de
         .unwrap();
     assert_asset_files(a.path(), false);
     assert!(!a.path().join(ANNOTATION_PATH).exists());
-    assert!(!local::read_base(a.path())
+    assert!(!local::read_base(a.path()).unwrap()
         .files
         .keys()
         .any(|path| path.starts_with("papers/x/")));
@@ -359,7 +359,7 @@ async fn availability_layout_stays_synced_when_source_category_is_disabled() {
         br#"{"pages":[1]}"#
     );
     assert!(b.path().join(ANNOTATION_PATH).exists());
-    assert!(local::read_base(b.path()).files.contains_key(ALWAYS_LAYOUT));
+    assert!(local::read_base(b.path()).unwrap().files.contains_key(ALWAYS_LAYOUT));
 }
 
 #[tokio::test]
@@ -400,14 +400,14 @@ async fn availability_cas_retry_revalidates_physical_files_without_requiring_def
         for path in ["notes/a.md", "notes/b.md", "notes/c.md"] {
             assert!(vault.join(path).exists());
         }
-        assert!(local::read_base(vault).files.contains_key(ASSET_PDF));
+        assert!(local::read_base(vault).unwrap().files.contains_key(ASSET_PDF));
     }
 }
 
 #[tokio::test]
 async fn availability_fetch_verifies_blob_and_refuses_late_local_creation() {
     let (store, cfg, _a, b) = asset_vault_pair().await;
-    let hash = local::read_base(b.path()).files[ASSET_PDF].hash.clone();
+    let hash = local::read_base(b.path()).unwrap().files[ASSET_PDF].hash.clone();
     let key = blob_key(&hash);
     let original = store.objects.lock().unwrap().get(&key).cloned().unwrap();
     store.objects.lock().unwrap().insert(
@@ -449,7 +449,7 @@ async fn availability_corrupt_ledger_stops_before_remote_io() {
         assert!(run_sync(b.path(), &cfg, &store, noop_progress()).await.is_err(), "{invalid:?}");
         assert_eq!(store.counts(), before, "partial JSON must not reach the remote store");
         assert!(a.path().join(ASSET_PDF).exists());
-        assert!(local::read_base(b.path()).files.contains_key(ASSET_PDF));
+        assert!(local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
     }
     // Losing an already managed ledger must not silently become legacy Full.
     fs::remove_file(&ledger).unwrap();
@@ -474,8 +474,8 @@ async fn availability_legacy_full_vault_without_ledger_preserves_intentional_fil
     run_sync(b.path(), &cfg, &store, noop_progress())
         .await
         .unwrap();
-    assert!(!local::read_base(a.path()).files.contains_key(ASSET_PDF));
-    assert!(!local::read_base(b.path()).files.contains_key(ASSET_PDF));
+    assert!(!local::read_base(a.path()).unwrap().files.contains_key(ASSET_PDF));
+    assert!(!local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
 }
 
 #[tokio::test]
@@ -507,7 +507,7 @@ async fn availability_remote_edit_winning_paper_deletion_does_not_inherit_old_lo
     run_sync(b.path(), &cfg, &store, noop_progress())
         .await
         .unwrap();
-    assert!(local::read_base(b.path()).files.contains_key(ASSET_PDF));
+    assert!(local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
     assert!(!b.path().join(ASSET_PDF).exists());
     assert!(!availability::read_state(b.path())
         .unwrap()
@@ -574,7 +574,7 @@ async fn availability_scoped_old_history_does_not_delete_reintroduced_deferred_p
         .await
         .unwrap();
     assert!(!b.path().join(ASSET_PDF).exists());
-    let adopted = local::read_base(b.path()).version;
+    let adopted = local::read_base(b.path()).unwrap().version;
     let idle = run_sync(b.path(), &cfg, &store, noop_progress())
         .await
         .unwrap();
@@ -591,5 +591,5 @@ async fn availability_scoped_old_history_does_not_delete_reintroduced_deferred_p
         .await
         .unwrap();
     assert!(a.path().join(ASSET_PDF).exists());
-    assert!(local::read_base(b.path()).files.contains_key(ASSET_PDF));
+    assert!(local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
 }

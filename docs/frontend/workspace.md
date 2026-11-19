@@ -4,30 +4,34 @@
 
 命令式操作契约统一定义在 `lib/workspace/dock-registry.ts` 的 `DockHandle`；组件导出的 `DockWorkspaceHandle` 是其类型别名。
 
-`components/workspace/dock-layout.ts` 集中维护落点映射、面板放置、栏宽调整及布局恢复后的面板对账；`dock-workspace.tsx` 保留 Dockview 注册副作用、React 挂载和事件接线。
+`components/workspace/dock-layout.ts` 集中维护落点映射、面板放置、栏宽调整及布局恢复后的面板对账；`dock-workspace.tsx` 保留 Dockview 注册副作用、React 挂载和事件接线。面板成员由打开和关闭动作直接改 Dockview：`openPanel` 加面板，`removePanel` 拆面板。`reconcilePanelMembership` / `reconcileAfterLayoutRestore` 只在 `onReady` 恢复布局时运行。
 
 ## 行为
 
 | 场景 | 行为 |
 |---|---|
 | 打开文档 | 文件树 / Library / 命令面板 → `openTab` → `workspaceRef.openPanel` |
+| 打开写作源码 | 文件树 / 大纲 / PDF ← SyncTeX / 问题列表 / Agent 引用 → `openWritingFile`（`navigateTexSource` / `tryOpenWritingSource`）→ 按 `writingRoot` 找项目面板 → flush 未保存编辑后 `updateTab({ path, textEpoch, writingRoot })` 原位换源码，不新增 tab；目标已在别处打开只聚焦 |
 | CLI 工作区操作 | `agentero ui open/close/window`、`agentero paper open` / `agentero://ui?action=…` → Host `ui:request` → 需要时先切换 Vault → 调用与 UI 相同的 `openPaper` / `openVaultRel` / `closeTabsUnderPath` / 原生窗口打开 |
-| Library 常驻 | 打开 Vault 期间 Library tab 始终在标签条（打开、恢复、清空后由 `ensureLibraryTabPresent` 补齐）：不可关闭——无关闭按钮、中键与右键关闭项禁用、「关闭其他/全部」跳过、⌘W 对其 no-op；仅剩 Library 时 ⌘W 关闭窗口。其它 tab 的固定（pin）能力已移除 |
+| Library 常驻 | 打开 Vault 期间 Library tab 始终在标签条（打开、恢复、清空后由 `ensureLibraryTabPresent` 补齐，并 `openPanel` 放进格子；已有活动文档时带 `inactive`，不抢焦点）：不可关闭——无关闭按钮、中键与右键关闭项禁用、「关闭其他/全部」跳过、⌘W 对其 no-op；仅剩 Library 时 ⌘W 关闭窗口。其它 tab 的固定（pin）能力已移除 |
 | 首篇 paper | PDF/HTML 默认组 + `NOTES.md` 右分屏（阅读默认；通用设置 `autoOpenPaperNotes` 关闭时只开 body，NOTES 仍可 `⌘\` / 右键「打开笔记」手动开） |
-| 再开 paper | 已是「论文 \| 笔记」左右两栏时，body 固定进左栏、NOTES 固定进右栏（与当前焦点在哪一栏无关，#785）；其它布局 body 走自由 dock 放置（当前组 / 默认，可再拖分屏），NOTES 优先叠进已有笔记列；body↔NOTES **焦点仍同步** |
-| 同步关闭 | 关 paper body 时一并关 NOTES；关 NOTES 保留 body |
+| 再开 paper | 标准阅读对由 `readingColumnAnchors` 判定。已是「论文 \| 笔记」左右两栏时，body 固定进左栏、NOTES 固定进右栏（与当前焦点在哪一栏无关，#785）；左栏必须确有论文正文、右栏必须确有 `NOTES.md`，才算阅读双列——TeX 源码 \| PDF 等其它双列不会被误判。其它布局 body 走自由 dock 放置（当前组 / 默认，可再拖分屏），NOTES 优先叠进已有笔记列；body↔NOTES **焦点仍同步** |
+| 同步关闭 | 关闭规范正文时 `readingPairCloseIds` 带上规范 NOTES；关 NOTES 只留正文 |
 | 文件树拖入 | left/right/above/below/within 分屏落点 |
-| 关 panel | dockview X → `closeTab`；焦点 `onDidActivePanelChange` |
+| 关 panel | 关闭按钮、中键和右键走 `closeTab`。标签条上的 Delete / Backspace 在工作区根用捕获阶段拦住，再走同一个 `closeTab`（只有已注册的 Markdown 源码模式 flush 失败能留下标签）。store 更新后对每个被关掉的 id 调用 `removePanel`。拖拽中的删除仍由 Dockview 吞掉；`onDidRemovePanel` 在非 syncing 时补一次 `closeTab`。焦点由 `onDidActivePanelChange` 写入 |
+| 焦点 | 活动标签由 Dockview 的激活事件写入 store，同步结束时再补发一次。论文正文与 NOTES 跨组联动时只切换对侧组内的标签，不转移当前焦点；两者同组则不联动。Dock 尚未挂载时，打开动作先记下目标 id |
 | 循环 | `⌥⌘←/→` 按 `api.panels` **视觉序** |
-| 移至新窗口 | 文档 tab **右键** → **移动至新窗口** → 独立 `doc-*` Webview；源 panel 关闭（Library / Trash / Zen 除外）；弹出窗自带 Vault watcher，Markdown / PDF 外部改盘就地重载；URL `mode` 参数与主窗口一致参与 PDF 模式保护（探测失败不降级 Markdown） |
+| 移至新窗口 | 文档 tab **右键** → **移动至新窗口** → 独立 `doc-*` Webview。目标窗接受内容后才删掉被点的那一个视图，论文 NOTES 留在源窗口；失败、拒绝、超时都留下源视图（Library / Trash / Zen 不移出）。弹出窗自带 Vault watcher，Markdown / PDF 外部改盘就地重载；URL `mode` 参数与主窗口一致参与 PDF 模式保护（探测失败不降级 Markdown） |
 | 复制路径 | 文档 tab **右键** → **复制路径**。剪贴板用 `displayPath`（Windows 去掉 `\\?\` 前缀）。Library / Trash / 广场 / Zen 和 `agentero:` 虚拟路径不显示该项 |
-| Split pane | `⌘\` / `Ctrl+\` 向右新增 pane；当前论文未开 NOTES 时默认打开 NOTES，否则复制当前 pane；横向 pane 重新等宽 |
+| Split pane | `⌘\` / `Ctrl+\` 向右新增 pane。在论文正文上：NOTES 未开时打开 NOTES，已开时收回（关闭）NOTES 分屏，即 ⌘\ 切换论文/笔记分栏；在 NOTES 上按则回到论文正文，从不复制可编辑的笔记缓冲。其它文档（Markdown / 文本等）复制当前 pane。只切分参考分组，不改动其它列的宽度 |
 | NOTES 开关 | Layout 菜单；优先叠右列。重复打开保持比例；重建标准 PDF / Notes 双列时恢复共用比例，没有记录时使用 Dockview 默认分配 |
-| 打开笔记 | 论文 tab 右键 /文件树论文行右键 → NOTES 进右侧阅读列（已开则聚焦；菜单显示 `⌘\` / `Ctrl+\`） |
+| 打开笔记 | 论文 tab 右键 /文件树论文行右键 → NOTES 进右侧阅读列（已开则聚焦；菜单显示 `⌘\` / `Ctrl+\`）。`⌘\` 在论文正文上切换 NOTES 分屏（打开 / 收回） |
 | 切换笔记 | 已有 Notes 列时，从文件树或链接打开另一篇论文笔记（`papers/**` 下的 Markdown）默认**原位替换**当前 Notes 面板：保留分栏位置与宽度、不新增 tab；目标笔记已在别处打开时只聚焦它（#738） |
 | 关光文档 | 回到常驻的全库 Library panel |
 
-标题栏 Layout 菜单中的窗口布局预设改变当前论文的 Notes 分屏与外层 Agent panel，与左侧 Vault sidebar 解耦：Agent 模式与笔记模式均不强制或更改左侧栏展开/收起状态（开启布局时左侧栏保持原状，开关左侧栏也不退出该布局）。Agent 模式配置 PDF / Agent 栏宽并关闭笔记分屏，笔记模式折叠右侧栏并开启 PDF / Notes 分屏。阅读模式折叠左右栏并最大化**当前 Dockview 活动分组**（`maximizeGroup`），多栏 / 多标签下都只显示当前正文；其它分栏与标签不关闭，退出阅读模式时恢复进入前的布局与侧栏状态（#764）。
+写作项目（`thesis/` 下）是**一个 dock panel**，由项目主文件（`tab.writingRoot`）标识；TeX 源码（`tab.path`，可原位替换）与编译 PDF 是**面板内部**的左右分栏（`TexProjectView`，PDF 为按项目主文件缓存的 `ProjectPdf`），不是 Dockview 分栏。同一项目换源文件只把面板的 `path` 换掉：不新增 tab，`ProjectPdf` 的页码/缩放/滚动与内部比例不变，也不重新编译或重载；源文件已在别处打开的标签只聚焦。不同项目各自一个面板。`⌘\` /「打开 PDF」不会为它新增 dock panel，只聚焦该项目面板；它也不参与下方「论文 | 笔记」双列判断，拖拽移动的是整个面板，不改变其它 panel 的并列关系。
+
+标题栏 Layout 菜单中的窗口布局预设改变当前论文的 Notes 分屏与外层 Agent panel，与左侧 Vault sidebar 解耦：Agent 模式与笔记模式均不强制或更改左侧栏展开/收起状态（开启布局时左侧栏保持原状，开关左侧栏也不退出该布局）。Agent 模式配置 PDF / Agent 栏宽并关闭笔记分屏，笔记模式折叠右侧栏并开启 PDF / Notes 分屏。阅读模式折叠左右栏并最大化**当前 Dockview 活动分组**（`maximizeGroup`），多栏 / 多标签下都只显示当前正文；其它分栏与标签不关闭，退出阅读模式时恢复进入前的布局与侧栏状态（#764）。预设和进入、退出阅读都走 `use-shell-layout.ts` 的 `applyLayoutMode`。
 
 标签组 chip 的颜色菜单会将展开/收起 icon 染为对应颜色，并同步用于组内 tab 的强调线；清除颜色后恢复默认颜色。
 
@@ -35,15 +39,17 @@ Dockview 保持 7.0.4，以保留当前免费模块提供的 `Ctrl+M` 键盘停�
 
 Library 始终位于所在标签条的第一位：禁止拖动 Library 及包含它的整组，其他标签不能拖到它前面。恢复旧布局、打开文档及布局变化时也会校正顺序，校正不会切换当前活动文档。
 
-布局只存 dockview `toJSON()`；path/mode/title 在 panel params。同一路径可存在多个 split pane，panel id 保留 pane 实例后缀用于恢复布局。Tab 条上的论文标题经 `MathText` 渲染内联公式（`$\\pi$` 等）；`panel.api.setTitle` 仍存原始字符串。
+布局只存 dockview `toJSON()`；path/mode/title 在 panel params；写作项目另存 `writingRoot`，恢复时打开该项目并回到上次的源文件（换源只改 `path` 与 `textEpoch`，panel id 不变）。每个主窗口按窗口标签和当前 Vault 分键保存（`agentero-open-tabs::{label}::{vault}`），所以 ⌘N 新窗口不会带上另一扇窗口的标签。文档窗和功能窗不读写这份布局。旧的全局键 `agentero-open-tabs` 只由主窗口采纳一次，挂到当时打开的 Vault；采纳后的原文仍留在原键。损坏或抽不出标签的布局不会被启动写回删掉；第一次覆盖前把原文留在 `agentero-open-tabs.rollback`。新视图 id 是 `view-` 加随机串，路径在 `params.path`；重命名不改视图 id。旧布局的路径形 id（含 `::pane-N` / `::translation`）仍按原 id 恢复。Tab 条上的论文标题经 `MathText` 渲染内联公式（`$\\pi$` 等）；`panel.api.setTitle` 仍存原始字符串。
 
-活动 panel 为 `papers/` 下的论文 PDF 时，其顶部（Dockview 标签条之下、正文之上）显示面包屑路径条 `papers / 论文标题`：论文目录的 catalog id 段替换为 `paperMeta.title`（缺失时回退 tab title），标题经 `MathText`，超宽逐级 `min-w-0 truncate`。文件夹段 **悬停** 弹出其子项候选（论文目录显示 catalog 标题，超过 50 项截断），点击候选经 `selectFileNode` 跳转（论文开 PDF、普通文件夹进 scoped Library、文件直接打开）；**点击文件夹段本身** 进入该文件夹对应的 scoped Library，`papers` 段进入主 Library（`selectLibrary`）。仅在活动 panel 渲染；非 PDF 论文、HTML 版与虚拟标签（Library / 回收站 / 广场）不显示。实现：`src/components/workspace/paper-path-bar.tsx`。
+活动 panel 为 `papers/` 下的论文 PDF 时，其顶部（Dockview 标签条之下、正文之上）显示面包屑路径条 `papers / 论文标题`：论文目录的 catalog id 段替换为 `paperMeta.title`（缺失时回退 tab title），标题经 `MathText`，超宽逐级 `min-w-0 truncate`。文件夹段 **悬停** 弹出其子项候选（论文目录显示 catalog 标题，超过 50 项截断），点击候选经 `selectFileNode` 跳转（论文开 PDF、普通文件夹进 scoped Library、文件直接打开）；**点击文件夹段本身** 进入该文件夹对应的 scoped Library，`papers` 段进入主 Library（`selectLibrary`）。每个论文 PDF panel 各自渲染自己的路径条，与焦点无关（⌘\ 分屏或 NOTES 获得焦点时，PDF 侧仍保留路径条）；非 PDF 论文、HTML 版与虚拟标签（Library / 回收站 / 广场）不显示。实现：`src/components/workspace/paper-path-bar.tsx`。
 
-启动恢复只 hydrate 每个 Dockview group 当前可见的 panel；隐藏标签在首次切换到前台时再读取资源。 `papers/` 下的占位标签统一等待文件树加载完成后再 hydrate，不按扩展名猜测文件或目录，避免带点的论文 ID（如 `2606.04046`）被误归属到父级分类目录并触发错误的引用解析；其它笔记与虚拟标签可继续加载。恢复出的占位 tab 直接用 params 里的 title 显示（论文名），无需等资源加载；未携带 title 的旧布局回退为文件夹名，激活后由资源加载刷新。PDFium 保留当前可见与最近使用的至多两个 PDF viewer，本地 PDF `ArrayBuffer` 离开保留集合后释放，避免多标签工作区重启时并发加载全部 PDF 并长期占用 WebContent 内存；重新 hydrate 既有 PDF tab 时只刷新资源，不因一次 PDF 探测失败降级成 Markdown 空编辑器；同一保护（`patchFromTabResources`）覆盖 ⇧⌘T 重开与文档弹出窗。资源侧论文正文只产出 pdf / html（`paperBodyMode`）：探测全空且 catalog bundle / 元数据也落空时先延迟重试一次（启动时 Host catalog 或 fs scope 未就绪的竞态），仍无资源则停在 PDF「暂无论文」空态，绝不渲染空 Markdown 编辑器；paper 文件夹内的子目录按 scoped library 打开，同样不进编辑器。Markdown 编辑器（含 NOTES）与纯文本编辑器同样保活：至多两个最近使用的编辑器保持挂载，切换标签不再重建 Plate / CodeMirror；离开保留集合的编辑器卸载为占位，切回时重新反序列化，卸载时未落盘的编辑会照常 flush。
+恢复布局只 hydrate 可见 Dockview 分组当前选中的面板；最大化时被隐藏的分组不计入可见集合，首次显示后再读取尚未加载的资源。
+
+`papers/` 下的占位标签统一等待文件树加载完成后再 hydrate，不按扩展名猜测文件或目录，避免带点的论文 ID（如 `2606.04046`）被误归属到父级分类目录并触发错误的引用解析；其它笔记与虚拟标签可继续加载。恢复出的占位 tab 直接用 params 里的 title 显示（论文名），无需等资源加载；未携带 title 的旧布局回退为文件夹名，激活后由资源加载刷新。PDF 保活 LRU 是 2，当前可见的 PDF 面板另计，本地 PDF `ArrayBuffer` 离开保留集合后释放，避免多标签工作区重启时并发加载全部 PDF 并长期占用 WebContent 内存；重新 hydrate 既有 PDF tab 时只刷新资源，不因一次 PDF 探测失败降级成 Markdown 空编辑器；同一保护（`patchFromTabResources`）覆盖 ⇧⌘T 重开与文档弹出窗。资源侧论文正文只产出 pdf / html（`paperBodyMode`）：探测全空且 catalog bundle / 元数据也落空时先延迟重试一次（启动时 Host catalog 或 fs scope 未就绪的竞态），仍无资源则停在 PDF「暂无论文」空态，绝不渲染空 Markdown 编辑器；paper 文件夹内的子目录按 scoped library 打开，同样不进编辑器。论文目录里的非 PDF 不再预读主 PDF：正文先看 bundle 的 `pdfPath` 或 HTML 是否存在，只有最终资源是 PDF 时才读字节。同一个 `blob:` URL 在最后一个视图关闭时才 revoke。Markdown 编辑器（含 NOTES）与纯文本编辑器同样保活：LRU 是 4，当前可见的编辑器另计，最近使用的编辑器保持挂载，切换标签不再重建 Plate / CodeMirror；离开保留集合的编辑器卸载为占位，切回时重新反序列化，卸载时未落盘的编辑会照常 flush。
 
 ## 纯文本编辑器（CodeMirror 兜底）
 
-`papers/` 之外的文本文件在专用查看器（PDF / HTML / 图片 / Excalidraw / Markdown）都不命中时，落入 CodeMirror 6 纯文本编辑器（`text` 模式），承担「未知格式兜底查看器」的角色；`papers/` 内部保持原 Markdown 行为不变（paper 域文件不降级为原始文本缓冲）。
+`papers/` 之外的文本文件在专用查看器（PDF / HTML / 图片 / Markdown）都不命中时，落入 CodeMirror 6 纯文本编辑器（`text` 模式），承担「未知格式兜底查看器」的角色；`papers/` 内部保持原 Markdown 行为不变（paper 域文件不降级为原始文本缓冲）。
 
 | 项 | 方案 |
 |---|---|
@@ -56,7 +62,7 @@ Library 始终位于所在标签条的第一位：禁止拖动 Library 及包含
 | 文件路径补全 | TeX 路径参数命令（`\input` / `\include` / `\includeonly` / `\includegraphics` / `\includepdf` / `\includesvg` / `\bibliography` / `\addbibresource`，含 `*` 变体与 `[可选参数]`）的 `{}` 内按需列目录：路径相对当前文件目录解析（latexmk 以 .tex 父目录为 cwd），目录项带尾 `/` 置顶、按命令过滤扩展名（`\bibliography` 去掉 `.bib` 后缀），经 Host 树命令 / SFTP 逐级列出（同文件树忽略规则），带 10s 目录缓存；`validFor` 检测目录前缀变化后重新查询 |
 | 换行 | `EditorView.lineWrapping` 全局启用 |
 | 主题 | 底色、行号、当前行、选区、补全弹层走界面 CSS 变量（`--background` / `--foreground` / `--muted` / `--border` / `--popover`），盖过 CodeMirror 自带的 `&light` / `&dark` 实色。语法色从当前主题的 `--primary` 色相用 `oklch(from …)` 推出，浅色/深色各一套明度，注释用 `--muted-foreground`，非法片段用 `--destructive`。`\cite` 等引用命令在语法里是 quote 而不是 keyword，`\includegraphics` / `\footnote` 等被单独切开且没有高亮标签的命令用 `cm-tex-cmd` 补上同一命令色；`\ref` / `\label` 仍用名字色。明暗只切换 `color-scheme`。实现 `text-editor-theme.ts` |
-| 生命周期 | 与 ExcalidrawViewer 同契约：props 播种 + `reloadKey` 信号，内容 / dirty / 800ms 防抖自动保存由编辑器持有，`persistTextFile` 带磁盘冲突守卫与按路径写队列；外部改盘 `reloadKey` bump 后**原地换 doc**（视图、滚动、撤销历史保留，不重挂载） |
+| 生命周期 | 与文档注册表统一契约：props 播种 + `reloadKey` 信号，内容 / dirty / 800ms 防抖自动保存由编辑器持有，`persistTextFile` 带磁盘冲突守卫与按路径写队列；外部改盘 `reloadKey` bump 后**原地换 doc**（视图、滚动、撤销历史保留，不重挂载） |
 | 手动保存 | ⌘S / Ctrl+S：立即 flush 防抖自动保存（跳过等待），成功后触发 `onManualSave`；内容干净时按 ⌘S 仍触发（显式重建），保存被冲突守卫拒绝则不触发。编辑器挂载时经 `registerTextEditorFlusher`（`lib/workspace/text-editor-flush.ts`，lib 层注册表，避免 actions 反向依赖 lazy chunk）注册 flush，卸载自动注销 |
 | 划词工具栏 | 非空选区弹出与 PDF 同款的 `SelectionMenu`（portal 到 body 的 fixed 工具栏），只带 **加入对话（⇧⌘L）**（文字按钮）与 **快速对话（⌘K）**（下拉）：文本文件没有 marks/ 侧车（无高亮/翻译按钮），也**不做选区自动复制**——代码缓冲里选区常是粘贴替换的前奏，静默改写剪贴板会破坏待粘贴内容。拖选在 mouseup 后弹出（同 PDF），键盘选区（⇧ 方向键 / 双击 / ⌘A）即时弹出，滚动时锚点跟随（`coordsAtPos` 客户端坐标）。选区经 `publishSelection`（origin `markdown`，带 1 起始的 `lineFrom` / `lineTo` 行跨度——选区终点恰在行首时不含该行）镜像为 Agent composer 的临时 chip，chip 标签显示 `文件名 7行` / `文件名 12-15行`（行号后缀走 i18n，`composer.selectionChipWithLine(s)`；PDF chip 的 `· p.N` 对应形态），提交 prompt 为 `Selected text from {path} (lines A-B):`；加入对话 = 发布 + `pinActiveSelection` + 打开 Agent 侧栏并折叠选区；快速对话复用 `useSelectionAsk` + `AskPopover`（prompt 走 `buildPlazaAskPrompt` 的 `surface: "text"` 变体）。仅活动面板弹出（keep-alive 的隐藏 pane 不弹）；切走标签即收起工具栏，Ask 线程继续流式。划词工具栏与 Ask 卡都是 portal 到 body 的 fixed 浮层，选到面板顶部一两行时会贴着 dockview tab 条；两者挂载期间经 `src/lib/workspace/selection-overlay.ts` 把工作区 `disableDnd` 置真，暂停 tab / group 拖拽，避免在浮层上起手拖拽误触分栏（#608）。实现：`src/components/viewer/use-text-editor-selection.ts`。**Plate Markdown 笔记**同样写入 `lineFrom` / `lineTo`（`use-selection-context-publish` + 划词工具栏 / ⇧⌘L）：按顶层块 `serializeBlocksAsMarkdown` 前缀行数 + 块内换行偏移，再加 YAML frontmatter 行偏移，使行号与磁盘文件一致；块多选与行内选区均覆盖（#709）。实现：`src/lib/markdown/selection-source-lines.ts` |
 | TeX | 项目主文件识别与显式选择；latexmk 增量 / 强制 / 清理重建、命名配方、输出目录与文件名；按保存或依赖变化自动编译；编译期间保留旧 PDF，成功后恢复阅读位置并刷新所有同路径分屏；源码与 PDF 双向 SyncTeX；整项目补全、大纲和论文库引用插入。问题统一在编辑器底部原有计数 / 悬停列表，日志从 LaTeX 侧栏按钮打开 modal。详见 [latex.md](latex.md) |
@@ -78,12 +84,12 @@ Zen 是虚拟的 Agent 工作面（`agentero:zen`），不走 viewer 模式注�
 | `mode` | `CenterViewMode` 联合；持久化白名单 `isCenterViewMode`（`tabs/persist.ts` 不再自带 `VALID_MODES`） |
 | `matchesPath` | `preferredModeForPath` 的匹配优先级（表序即顺序）；`papers/` 域回退 Markdown、其余回退 `text` 仍在函数内显式表达 |
 | `renderer` | dockview panel renderer（`dock-workspace.tsx`）：`always` 保持未激活 panel 的 React 壳挂载，配合保活 LRU |
-| `keepAlive` | 保活 LRU 池归属（`workspace-host.tsx`）：`pdf` = PDF viewer LRU=2，`editor` = Markdown / 文本编辑器 LRU=4，null = 不保活 |
+| `keepAlive` | 保活 LRU 池归属（`workspace-host.tsx`）：`pdf` = PDF viewer LRU=2，`editor` = Markdown / 文本编辑器 LRU=4，可见面板另计，null = 不保活 |
 | `props` | DocView 的域 props 比较器（`doc-view.tsx`）：按 mode 查表取域，替代原「镜像路由顺序」的手写比较列表 |
-| `resource` | `loadTabResources` 的资源解析策略（`tabs/resources.ts`）：按 mode 取 PDF 字节 / 图片 blob / Markdown / Excalidraw / 文本种子，取代重复的路径谓词判断；pdf 与 translation 共享 `pdf`（translation 由 `createTranslationSplitPane` 克隆源 pane 字节，磁盘刷新 `refreshPdfTab` / `applyDiskChange` 同判据） |
+| `resource` | `loadTabResources` 的资源解析策略（`tabs/resources.ts`）：按 mode 取 PDF 字节 / 图片 blob / Markdown / 文本种子，取代重复的路径谓词判断；pdf 与 translation 共享 `pdf`（translation 由 `createTranslationSplitPane` 克隆源 pane 字节，磁盘刷新 `refreshPdfTab` / `applyDiskChange` 同判据） |
 | `restore` | 持久化会话恢复覆盖（`store.ts`）：translation 面板恢复为「已加载」的 paper 标签且不走磁盘 hydrate，其余为默认占位 |
 
-新增一种文档类型 = 注册表加一条目 + `doc-view.tsx` 加一个渲染分支；复用既有 `resource` 策略时，加载器 / 持久化 / renderer / LRU / props 比较器 / 恢复都不用改。PDF / Plate / CodeMirror / Excalidraw 引擎、选区与持久化模型是本质差异，仍各自独立——注册表只收敛类型层与分发层。表完整性与各字段取值由 `test/workspace-viewer-modes.test.ts` 反漂移钉住（renderer / keepAlive / resource / props 逐项与旧行为等价）。
+新增一种文档类型 = 注册表加一条目 + `doc-view.tsx` 加一个渲染分支；复用既有 `resource` 策略时，加载器 / 持久化 / renderer / LRU / props 比较器 / 恢复都不用改。PDF / Plate / CodeMirror 引擎、选区与持久化模型是本质差异，仍各自独立——注册表只收敛类型层与分发层。表完整性与各字段取值由 `test/workspace-viewer-modes.test.ts` 反漂移钉住（renderer / keepAlive / resource / props 逐项与旧行为等价）。
 
 ## 代码
 
@@ -91,7 +97,7 @@ Zen 是虚拟的 Agent 工作面（`agentero:zen`），不走 viewer 模式注�
 |---|---|
 | `src/components/workspace/dock-workspace.tsx` | Dockview 宿主（tab 右键 → 移至新窗口） |
 | `src/components/workspace/paper-path-bar.tsx` | 活动论文 PDF 的 `papers / 标题` 面包屑路径条 |
-| `src/lib/shell/leaf.ts` | leaf 打开 / `moveDocToWindow` |
+| `src/lib/shell/leaf.ts` | leaf 打开 / `moveDocToWindow`（目标接住内容后才移除被点的视图，不关 NOTES） |
 | `src/lib/shell/doc-window.ts` | `doc_window_open` 前端封装 |
 | `src/components/shell/doc-window-root.tsx` | 文档弹出窗根 |
 | `src/components/viewer/text-editor.tsx` | CodeMirror 纯文本编辑器（`text` 兜底模式） |
