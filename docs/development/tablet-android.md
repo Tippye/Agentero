@@ -2,7 +2,7 @@
 
 > 状态：**开发中，尚未完成真机验收**。现状分析与行号基于 `66ecc126`（v0.15.5，Tauri 2.12.5 / tao 0.37.2）。
 > 两端共用的部分在 `mobile` 分支维护，见 [tablet-shared.md](tablet-shared.md)。`android` 基于 `mobile`，这里只写 Android 特有工作；文中 S0–S9 指共享篇工作项。
-> 已落地的平台配置：Tauri 与 Gradle 最低 API 同步为 33；Activity 显式允许自由调整窗口，并接收密度、字体和布局方向变化。A1 已选择性更新 Kotlin 2.2.10 与编译 DSL；A5 本轮加入默认关闭的原生权限/状态适配器和两类前台服务，已通过 SDK 36 Kotlin 编译与 10 项 JVM 策略测试。后台实际保活、原生导入与多窗口仍需设备验收，不能以编译结果代替。
+> 已落地的平台配置：Tauri 与 Gradle 最低 API 同步为 31（Android 12；掌触取消等 13+ 能力按版本降级，见第 22 节）；Activity 显式允许自由调整窗口，并接收密度、字体和布局方向变化。A1 已选择性更新 Kotlin 2.2.10 与编译 DSL；A5 本轮加入默认关闭的原生权限/状态适配器和两类前台服务，已通过 SDK 36 Kotlin 编译与 10 项 JVM 策略测试。后台实际保活、原生导入与多窗口仍需设备验收，不能以编译结果代替。
 
 DSH 账户安全存储接入共享 Rust 凭据接口；平台固定 Android native keyring 1.0.0 的局部补丁：新命名空间显式生成 AES-256/GCM 密钥，磁盘提交失败返回错误，失败后的缓存读取隔离，缺失记录的删除重试仍确认落盘，损坏编码不当作空账号。原始许可证、来源及补丁边界见 [后端补丁说明](../../vendor/android-native-keyring-store/AGENTERO_PATCHES.md)。云备份和设备迁移排除此密文 preferences 文件与过渡期 Bridge 凭据目录。两项后端主机测试和 Android ARM64 编译已通过；设备硬件密钥、掉电和后台生命周期仍未验收。Bridge 身份、配对与同步凭据的系统存储迁移、显式重置和失败保留已在共享层接入；真实设备密钥、升级与恢复仍需验收。
 
@@ -21,7 +21,7 @@ DSH 账户安全存储接入共享 Rust 凭据接口；平台固定 Android nati
 | 项 | 现状 | 位置 |
 |---|---|---|
 | 工程 | 生成的 Android 工程在仓库里（与 iOS 不同），清单和 Gradle 直接改这里 | `src-tauri/gen/android/` |
-| 版本 | minSdk 33，targetSdk / compileSdk 36；AGP 8.11.0、Kotlin 2.2.10、Gradle 8.14.3（本轮仅选择性合并 Kotlin/Java 编译 DSL） | `src-tauri/gen/android/app/build.gradle.kts:31`、`src-tauri/gen/android/build.gradle.kts` |
+| 版本 | minSdk 31，targetSdk / compileSdk 36；AGP 8.11.0、Kotlin 2.2.10、Gradle 8.14.3（本轮仅选择性合并 Kotlin/Java 编译 DSL） | `src-tauri/gen/android/app/build.gradle.kts:31`、`src-tauri/gen/android/build.gradle.kts` |
 | 清单 | 保留联网、可选相机、`singleTask` 主 Activity、窗口配置变化与 `agentero://`；本轮由插件合入 5 项后台权限、2 个非导出服务与 Stop 接收者 | [应用清单](../../src-tauri/gen/android/app/src/main/AndroidManifest.xml)、[插件清单](../../src-tauri/plugins/agentero-mobile/android/src/main/AndroidManifest.xml) |
 | Activity | 只开启了全面屏 | `src-tauri/gen/android/app/src/main/java/com/poco_ai/agentero/MainActivity.kt` |
 | 命令 | 走 `not(ios)` 分支，注册的是 Bridge Host 命令；前端调用的客户端命令未注册 | `src-tauri/src/app/handlers.rs:173`、`:196`、`:333` |
@@ -40,7 +40,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 - **命令与状态**：按共享篇 S0 收敛。Android 当前比 iOS 多一层问题——除了命令注册错，`app/mod.rs:170` 还初始化了文件监听、连接器、Word、MCP、SSH 远程这些桌面状态。
 - **按固定版本选择性合并工程模板**。本轮核对安装的 CLI 2.12.4 与 Rust Tauri 2.12.5：实际使用的 `tauri-android` 库是 SDK 36，并使用 `kotlin.compilerOptions` DSL；应用从 Kotlin 1.9.25 更新至 2.2.10，显式统一 Java/Kotlin 字节码目标为 1.8。GitHub 上 [CLI 2.12.4 的模板](https://github.com/tauri-apps/tauri/tree/tauri-cli-v2.12.4/crates/tauri-cli/templates/mobile/android)已采用 SDK 37 / AGP 9.3.1，故不直接运行初始化覆盖现有工程。保留本轮目标 SDK 36、AGP 8.11、Gradle 8.14.3，以及原 applicationId、签名、相机、MainActivity、私有目录和备份规则；不为后台适配器引入 Compose 或额外引擎。
-- **最低版本定为 Android 13（API 33）**，以体验与功能优先，不承担旧系统适配。Android 13 的 `MotionEvent.FLAG_CANCELED` 可识别掌触取消，配合已有多窗口能力形成手写与布局基线。这个选择是产品支持范围，不能说 Ink 库强制要求 Android 13：已核对 Ink authoring 1.0.0 的 minSdk 为 23、graphics-core 1.0.4 为 21。实施时同步更新 Gradle minSdk、Tauri Android 配置、CI 的 NDK 编译 API（当前 `.github/workflows/ci.yml:109` 是 24）和发布检查；target/compileSdk 与最低版本分开管理。
+- **最低版本定为 Android 12（API 31）**，以覆盖客户存量设备（小米平板 5 Pro 停留在 Android 12）；Android 13 仍是完整体验基线。Android 13 的 `MotionEvent.FLAG_CANCELED` 可识别掌触取消，12 上系统不投递掌触取消，手写模式手掌搁屏可能留墨，属已知降级而非崩溃。这个选择是产品支持范围，不能说 Ink 库强制要求 Android 13：已核对 Ink authoring 1.0.0 的 minSdk 为 23、graphics-core 1.0.4 为 21。通知权限门控按 `SDK_INT >= 33` 分支：低于 13 时 POST_NOTIFICATIONS 不存在，不再发起运行时请求，由应用通知开关与渠道重要性把关。实施时同步更新 Gradle minSdk、Tauri Android 配置和发布检查；CI 的 android cargo check 仍用 API 24 工具链（`.github/workflows/ci.yml:112`），release 由 tauri CLI 跟随 minSdk；target/compileSdk 与最低版本分开管理。
 - Android 14 的用户发起传输、`specialUse` 服务类型以及 Android 15+ 的超时规则按版本分支处理；Android 13 用其适用的前台服务声明和启动方式。系统版本达标也必须检查 WebView、手写笔及设备性能。
 - **清单改动汇总**：
 
@@ -221,7 +221,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 设备与系统：
 
 - 一台原生系统平板（Android 16）、一台三星平板（S Pen、DeX）、一台小米或其他国内厂商平板（后台限制严格，可能没有 Google 服务）、一台折叠屏、一台手机（回归）。
-- 覆盖 Android 13（最低版本）、14（服务类型与数据传输）、15（超时限制）、16（大屏窗口规则），发布时再覆盖当时最新稳定系统；低于 API 33 的设备不进入支持矩阵。
+- 覆盖 Android 12（最低版本，掌触取消降级）、13（掌触取消基线）、14（服务类型与数据传输）、15（超时限制）、16（大屏窗口规则），发布时再覆盖当时最新稳定系统；低于 API 31 的设备不进入支持矩阵。
 
 清单：
 
@@ -241,7 +241,7 @@ CI 的编译检查发现不了命令注册错配，因为前端是按字符串�
 
 | # | 事项 | 建议 |
 |---|---|---|
-| D-And-1（已定） | 体验与功能优先的最低版本 | Android 13 / API 33，实施时同步构建配置和 CI |
+| D-And-1（已更新） | 最低支持版本 | Android 12 / API 31（客户小米平板 5 Pro 为 Android 12）；掌触取消等 13+ 能力按版本降级，Android 13 仍是完整体验基线 |
 | D-And-2 | Vault 是否通过文档提供器对系统文件应用可见 | 可见，放在 M5 |
 | D-And-3 | 是否上架 Google Play | 暂不上架。上架会让 `specialUse` 前台服务和电池优化豁免请求进入审核范围 |
 | D-And-4 | 划掉应用后是否继续保活 | 不继续。行为可预期，远端任务不受影响 |
@@ -471,7 +471,27 @@ Android 分支合入 OPPO/OnePlus 笔身快捷动作与笔悬停保护（`c28d52
 - 新 APK：[Agentero-0.15.5-vendor-stylus-arm64-test.apk](../../../artifacts/android/Agentero-0.15.5-vendor-stylus-arm64-test.apk)，56,761,105 字节，SHA-256 `678cdfcc0adf477bc2256dcbaf84dc234a108175fa07e7f0882abdcd5769a305`；包内 library SHA-256 `b3898aa8fc8afdc0512daa27b43e98812c2e8d0fadf922967884f65334ebffe6`。
 - 真机验收：在上述品牌设备上打开 PDF 并进入手写模式，按笔身主键应切橡皮、次键切上一工具/调色盘（具体取决于固件投递的键码）；无反应时记录 `adb logcat` 中 KeyEvent 的 keyCode 再补映射。
 
-## 22. 参考
+## 22. Android 12 兼容与通知权限门控修复（2026-11-19）
+
+背景：客户小米平板 5 Pro 停留在 Android 12，装不上 minSdk 33 的包；更早的本地 release 包因未签名在 MIUI 上报「解析软件包时出现问题 (33) packageInfo is null」（CI 注释与 Tauri 社区案例均印证未签名包不可安装）。本轮把支持基线下探到 Android 12，并保留 Android 13 基线包。
+
+代码与配置改动：
+
+- **通知权限门控按版本分支**：`AndroidBackgroundNotifications.granted()` 原先无条件 `checkSelfPermission(POST_NOTIFICATIONS)`；该权限 Android 13 才存在，12 上恒返回拒绝，导致后台运行开关永远无法开启、状态查询恒报 denied。现 `SDK_INT >= 33` 才走运行时权限检查，低于 13 返回 true，由 `enabled()` 的应用通知开关与渠道重要性继续把关。`requestNotifications` 与 `state()` 都先经 `granted()`，12 上不再发起无效运行时权限请求。
+- **minSdk 33 → 31**：应用 Gradle、`agentero-mobile` 插件库 Gradle（清单合并会校验库 minSdk，漏改会在 `processUniversalReleaseMainManifest` 失败）、`tauri.android.conf.json` 三处同步。target/compileSdk 36 不变；CI 的 android cargo check 仍用 API 24 工具链，release 由 tauri CLI 跟随 minSdk（NDK 目标随之变为 android31）。
+- 决策 D-And-1 更新为 Android 12 / API 31；Android 13 仍是完整体验基线。
+
+Android 12 上的已知降级（不崩溃）：掌触取消（`MotionEvent.FLAG_CANCELED`，13+）不可用，手写模式手掌搁屏可能留墨；标准笔身按键（14+）与类型化前台服务（14+）本就不在 12/13 提供，12 走普通 `startForeground`（与 13 相同）。前端要求 WebView Chromium ≥ 111，Android 12 需独立更新 System WebView，否则显示原生升级提示页。清单已满足 Android 12 的 targetSdk 31+ 强制项（组件显式 exported、PendingIntent `FLAG_IMMUTABLE`）；12 不识别的权限/FGS 类型被忽略，不影响安装。
+
+产物（本地测试签名，apksigner 按 SDK 21–36 验证 v1+v2+v3 全通过，zipalign -P 16 通过，仅 arm64-v8a，前端与词典入包）：
+
+- Android 13 基线包（minSdk 33，通知门控修复前构建，13+ 行为与修复后一致）：[Agentero-0.16.1-arm64-android13.apk](../../../artifacts/android/Agentero-0.16.1-arm64-android13.apk)，76,909,817 字节，SHA-256 `3d9d206946c880fc18b81215bfae8c2f74d290deb7047e2e9695dd5385f72f84`。
+- Android 12 兼容包（minSdk 31）：[Agentero-0.16.1-arm64-android12.apk](../../../artifacts/android/Agentero-0.16.1-arm64-android12.apk)，76,909,817 字节，SHA-256 `8c2497e7a02862ef55822e8f38bf16139978ff0f57a4793b972296eb66856a44`。
+- 客户安装说明：[安装说明.md](../../../artifacts/android/安装说明.md)。
+
+验证边界：Rust 按 android31 目标完整编译、Kotlin/清单合并/R8/签名通过；通知门控改动为纯 SDK 分支，JVM 策略测试不涉及 `granted()`（需 Android Context）。**真机验收待客户**：12 上后台运行开关与通知渠道、掌触降级表现、WebView 升级提示、息屏保活；13+ 回归确认门控分支无行为变化。
+
+## 23. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>

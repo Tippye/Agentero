@@ -4,7 +4,7 @@
 		"beforeBuildCommand": "pnpm dictionary:stage && pnpm build"
 	},
 	"bundle": {
-		"android": { "minSdkVersion": 33 },
+		"android": { "minSdkVersion": 31 },
 		"externalBin": [],
 		"resources": ["dictionary/*"]
 	}
