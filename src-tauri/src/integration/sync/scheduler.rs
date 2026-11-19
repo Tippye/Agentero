@@ -412,7 +412,7 @@ fn relevant_to_vault(vault: &Path, path: &Path) -> bool {
     relevant_canonical_paths(&vault, &path)
 }
 
-#[cfg(mobile)]
+#[cfg(any(mobile, test))]
 fn canonical_changed_path(path: &Path) -> Option<PathBuf> {
     let mut cursor = path;
     let mut missing = Vec::new();
