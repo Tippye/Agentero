@@ -178,7 +178,7 @@ function hover(page: HTMLElement, x = 50, y = 60) {
 	);
 }
 it("keeps touch selection deliberate and the pen hover guard long", () => {
-	expect(INK_LONG_PRESS_MS).toBe(1000);
+	expect(INK_LONG_PRESS_MS).toBe(1200);
 	expect(INK_NOTE_LONG_PRESS_MS).toBe(3000);
 	expect(INK_PEN_HOVER_GUARD_MS).toBe(1500);
 });

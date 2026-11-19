@@ -1,5 +1,5 @@
 /**
- * A click on a layout region crops that region, so a gesture that merely
+ * A click on a layout element opens its action view, so a gesture that merely
  * *started* inside the region — a text-selection drag, a pan, a slip of the
  * hand — must not activate it. Browsers fire `click` whenever pointerdown and
  * pointerup land on the same element, no matter how far the pointer travelled
@@ -7,7 +7,7 @@
  */
 
 /** Maximum pointer travel (px) that still counts as a click, not a drag. */
-export const LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX = 6;
+export const LAYOUT_REGION_CLICK_MOVE_TOLERANCE_PX = 4;
 
 export type PointerOrigin = { x: number; y: number };
 

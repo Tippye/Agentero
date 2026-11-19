@@ -1,6 +1,6 @@
 import { ChevronRight, CloudUpload, LoaderCircle, Unplug } from "lucide-react";
 import type { ComponentProps, ComponentType } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FaAws } from "react-icons/fa6";
 import {
@@ -197,13 +197,6 @@ export function SyncPane({
 	/** Refresh the caller's local catalog after a successful manual sync. */
 	onSynced?: () => void | Promise<void>;
 }) {
-	const { t } = useTranslation("settings");
-	const { t: tm } = useTranslation("mobile");
-	const newConfig = useCallback(() => {
-		const config = emptySyncConfig(mobile ? "s3" : "agentero");
-		if (mobile) config.scope.source = false;
-		return config;
-	}, [mobile]);
 	const [vaults, setVaults] = useState(() =>
 		localVaultChoices(vaultPath, mobile),
 	);
@@ -232,6 +225,40 @@ export function SyncPane({
 		isTauri() && candidateVault && !isRemoteVaultHandle(candidateVault)
 			? candidateVault
 			: null;
+	return (
+		<VaultSyncForm
+			key={localVault}
+			localVault={localVault}
+			vaults={vaults}
+			setSelectedVault={setSelectedVault}
+			mobile={mobile}
+			onSynced={onSynced}
+		/>
+	);
+}
+
+function VaultSyncForm({
+	localVault,
+	vaults,
+	setSelectedVault,
+	mobile = false,
+	onSynced,
+}: {
+	localVault: string | null;
+	vaults: string[];
+	setSelectedVault: (vault: string | null) => void;
+	mobile?: boolean;
+	onSynced?: () => void | Promise<void>;
+}) {
+	const { t } = useTranslation("settings");
+	const { t: tm } = useTranslation("mobile");
+	const newConfig = useCallback(() => {
+		const config = emptySyncConfig(mobile ? "s3" : "agentero");
+		if (mobile) config.scope.source = false;
+		return config;
+	}, [mobile]);
+	const formVersion = useRef(0);
+	const requestId = useRef(0);
 
 	const [status, setStatus] = useState<SyncStatus | null>(null);
 	const [form, setForm] = useState<SyncBackendConfig>(newConfig);
@@ -249,9 +276,15 @@ export function SyncPane({
 
 	const refresh = useCallback(async () => {
 		if (!localVault) return;
+		const id = ++requestId.current;
 		const next = await syncGetStatus(localVault);
+		if (id !== requestId.current) return;
 		setStatus(next);
 		setSyncing(next.running);
+		// Preserve an in-progress draft across background status updates; only
+		// the first load seeds the form (upstream draft-preservation guard).
+		if (formVersion.current !== 0) return;
+		formVersion.current++;
 		if (
 			next.config &&
 			(!mobile ||
@@ -292,9 +325,6 @@ export function SyncPane({
 		}
 	}, [refresh]);
 
-	// `refresh` is recreated when the selected Vault changes. Reset first so a
-	// different Vault never inherits the previous one's form values: otherwise
-	// "connect" on an unconfigured Vault would save the old remote.
 	useEffect(() => {
 		setStatus(null);
 		setForm(newConfig());
@@ -302,7 +332,11 @@ export function SyncPane({
 		setProgress(null);
 		setScopeSizes(null);
 		setAdvancedOpen(false);
+		formVersion.current = 0;
 		void loadStatus();
+		return () => {
+			requestId.current++;
+		};
 	}, [loadStatus, newConfig]);
 
 	useEffect(() => {
@@ -372,8 +406,10 @@ export function SyncPane({
 		);
 	}
 
-	const patch = (partial: Partial<SyncBackendConfig>) =>
+	const patch = (partial: Partial<SyncBackendConfig>) => {
+		formVersion.current++;
 		setForm((prev) => ({ ...prev, ...partial }));
+	};
 
 	const scope = form.scope;
 	const patchScope = (key: keyof SyncBackendConfig["scope"], value: boolean) =>
@@ -442,11 +478,16 @@ export function SyncPane({
 
 	const save = async () => {
 		if (credentialBlocked || (credentialNeedsInput && !secretEntered)) return;
+		const version = formVersion.current;
 		setSaving(true);
 		try {
 			const next = await syncConfigure(localVault, form);
+			requestId.current++;
 			setStatus(next);
-			if (next.config) setForm(next.config);
+			if (next.config && formVersion.current === version) {
+				formVersion.current++;
+				setForm(next.config);
+			}
 			setSyncError(null);
 			notifySuccess(t("sync.saved"));
 		} catch (error) {
@@ -486,6 +527,8 @@ export function SyncPane({
 	const disconnect = async () => {
 		try {
 			await syncDisconnect(localVault);
+			requestId.current++;
+			formVersion.current++;
 			setStatus(null);
 			setForm(newConfig());
 			setSyncError(null);

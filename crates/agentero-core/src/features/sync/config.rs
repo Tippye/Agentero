@@ -99,9 +99,7 @@ pub struct SyncBackendConfig {
     pub auto_sync: bool,
     #[serde(default = "default_interval_minutes")]
     pub interval_minutes: u32,
-    /// Connection-test probe result: `false` for backends whose PUT rejects
-    /// or ignores conditional headers (e.g. Aliyun OSS 400 NotImplemented,
-    /// most WebDAV servers). Sync then degrades to plain PUTs.
+    /// Last conditional-write probe result. Unsafe stores cannot publish.
     #[serde(default = "default_true")]
     pub conditional_writes: bool,
     /// Which bulky paper assets (PDF / LaTeX source / attachments) take part
@@ -249,11 +247,6 @@ impl SyncBackendConfig {
         }
         self.agentero_org_id = self.agentero_org_id.trim().to_string();
         self.agentero_token = self.agentero_token.trim().to_string();
-        if self.backend == SyncBackendKind::Git {
-            // Git is a full-vault mirror; the partial scope filter has no
-            // meaning there (and is hidden in the settings UI).
-            self.scope = SyncScope::all();
-        }
         if !INTERVAL_CHOICES.contains(&self.interval_minutes) {
             self.interval_minutes = default_interval_minutes();
         }
@@ -572,10 +565,25 @@ fn write_all_at(path: &Path, vaults: HashMap<String, SyncBackendConfig>) -> Resu
     Ok(())
 }
 
+/// Cross-process guard (desktop Host + CLI on the same machine) around the
+/// in-process mutation lane used by `update_at`.
+fn config_lock() -> Result<fs::File, AppError> {
+    let dir = paths::agentero_config_dir();
+    fs::create_dir_all(&dir)?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("sync.lock"))?;
+    fs2::FileExt::lock_exclusive(&file)?;
+    Ok(file)
+}
+
 fn update_at(
     path: &Path,
     update: impl FnOnce(&mut HashMap<String, SyncBackendConfig>) -> bool,
 ) -> Result<(), AppError> {
+    let _lock = config_lock()?;
     crate::fs::with_file_mutation(|| {
         let mut all = read_all_at(path)?;
         if update(&mut all) {
@@ -598,6 +606,11 @@ pub fn set(vault_path: &str, config: SyncBackendConfig) -> Result<(), AppError> 
 
 pub fn remove(vault_path: &str) -> Result<(), AppError> {
     update_at(&config_path(), |all| all.remove(vault_path).is_some())
+}
+
+pub fn disconnect(vault_key: &str, lock: &super::lock::SyncLock) -> Result<(), AppError> {
+    remove(vault_key)?;
+    super::local::clear(lock)
 }
 
 #[cfg(test)]
@@ -1012,15 +1025,16 @@ mod tests {
     }
 
     #[test]
-    fn git_config_forces_full_scope() {
+    fn git_config_preserves_partial_scope() {
         let mut cfg = git_config("https://example.com/r.git", "main");
         cfg.scope = SyncScope {
             pdf: false,
-            source: false,
+            source: true,
             attachments: false,
             ink: false,
             translated: false,
         };
-        assert!(cfg.normalized().scope.is_all());
+        let scope = cfg.scope;
+        assert_eq!(cfg.normalized().scope, scope);
     }
 }

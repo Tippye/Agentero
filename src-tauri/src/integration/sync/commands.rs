@@ -9,6 +9,7 @@ use super::snapshot;
 use super::SyncService;
 use crate::core::error::{map_err, ApiResult, AppError};
 use agentero_core::features::sync::availability::{self, DownloadPolicy, PaperAvailability};
+use agentero_core::features::sync::lock::SyncLock;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -146,7 +147,7 @@ pub async fn sync_get_status(
     let inner = async {
         let dir = vault_dir(&app, &args.vault_path)?;
         let status = super::credentials::status(&app, args.vault_path.trim()).await?;
-        let meta = local::read_meta(&dir);
+        let meta = local::read_meta(&dir)?;
         Ok::<_, AppError>(SyncStatus {
             configured: status.config.is_some(),
             config: status.config,
@@ -177,12 +178,12 @@ pub async fn sync_configure(
         let _lease = service
             .try_begin(&key)
             .ok_or_else(|| AppError::message("sync already running"))?;
-        let _lock = agentero_core::features::sync::lock::SyncLock::try_acquire(&dir)?
+        let _lock = SyncLock::try_acquire(&dir)?
             .ok_or_else(|| AppError::message("another vault sync is running"))?;
         let mut candidate = args.config.normalized();
         attach_agentero_session(&app, &mut candidate).await;
         let configured = super::credentials::configure(&app, &key, &dir, candidate).await?;
-        let meta = local::read_meta(&dir);
+        let meta = local::read_meta(&dir)?;
         Ok::<_, AppError>(SyncStatus {
             configured: true,
             config: Some(configured.config.masked()),
@@ -223,10 +224,10 @@ pub async fn sync_disconnect(
         let _lease = service
             .try_begin(&key)
             .ok_or_else(|| AppError::message("sync already running"))?;
-        let _lock = agentero_core::features::sync::lock::SyncLock::try_acquire(&dir)?
+        let _lock = SyncLock::try_acquire(&dir)?
             .ok_or_else(|| AppError::message("another vault sync is running"))?;
         super::credentials::clear(&app, &key).await?;
-        local::clear(&dir);
+        local::clear(&_lock)?;
         Ok::<_, AppError>(())
     };
     Ok(match inner.await {
@@ -350,59 +351,20 @@ pub async fn sync_notify_change(
 }
 
 /// Local disk usage per bulky-asset category (bytes), for the sync-scope UI.
-#[derive(Debug, Default, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncScopeSizes {
-    pub pdf: u64,
-    pub source: u64,
-    pub attachments: u64,
-    pub ink: u64,
-    pub translated: u64,
-}
-
+/// The shared snapshot classifier covers all five categories (including the
+/// mobile ink / translated-PDF buckets); the app-aware vault guard keeps the
+/// tablet private-Vault boundary.
 #[tauri::command]
 #[specta::specta]
 pub async fn sync_scope_sizes(
     app: AppHandle,
     args: SyncVaultArgs,
-) -> Result<ApiResult<SyncScopeSizes>, String> {
+) -> Result<ApiResult<snapshot::SyncScopeSizes>, String> {
     let inner = async {
         let dir = vault_dir(&app, &args.vault_path)?;
-        tokio::task::spawn_blocking(move || {
-            let mut sizes = SyncScopeSizes::default();
-            let walker = walkdir::WalkDir::new(&dir)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| {
-                    e.depth() == 0 || !snapshot::is_ignored_name(&e.file_name().to_string_lossy())
-                });
-            for entry in walker.flatten() {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                let Some(rel) = entry
-                    .path()
-                    .strip_prefix(&dir)
-                    .ok()
-                    .and_then(|p| p.to_str())
-                    .map(|s| s.replace('\\', "/"))
-                else {
-                    continue;
-                };
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                match snapshot::scope_category(&rel) {
-                    Some("pdf") => sizes.pdf += size,
-                    Some("source") => sizes.source += size,
-                    Some("attachments") => sizes.attachments += size,
-                    Some("ink") => sizes.ink += size,
-                    Some("translated") => sizes.translated += size,
-                    _ => {}
-                }
-            }
-            sizes
-        })
-        .await
-        .map_err(|e| AppError::message(format!("scope sizes: {e}")))
+        tokio::task::spawn_blocking(move || snapshot::scope_sizes(&dir))
+            .await
+            .map_err(|e| AppError::message(format!("scope sizes: {e}")))?
     };
     Ok(match inner.await {
         Ok(sizes) => ApiResult::ok(sizes),
@@ -411,7 +373,7 @@ pub async fn sync_scope_sizes(
 }
 
 /// One full sync pass shared by the `sync_now` command and the auto-sync
-/// scheduler (scan → merge → apply → publish).
+/// scheduler (scan → merge → publish → apply).
 pub async fn perform_sync(
     app: &AppHandle,
     service: &SyncService,
@@ -455,9 +417,11 @@ async fn perform_sync_task(
     };
     let result = crate::features::mobile_background::with_work(app, reason, async {
         if let Some(paper) = requested {
+            // fetch_paper acquires its own vault lock for the one-pass override.
             availability::fetch_paper(&dir, &cfg, paper, &progress).await
         } else {
-            engine::sync_vault_locked(&dir, &cfg, &progress).await
+            let lock = SyncLock::acquire(&dir)?;
+            engine::sync_vault_locked(&lock, &cfg, &progress).await
         }
     })
     .await;

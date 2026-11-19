@@ -22,7 +22,13 @@ import { PagePointerProvider } from "@embedpdf/plugin-interaction-manager/react"
 import { LayoutAnalysisLayer } from "@embedpdf/plugin-layout-analysis/react";
 import { SearchLayer } from "@embedpdf/plugin-search/react";
 import { TilingLayer } from "@embedpdf/plugin-tiling/react";
-import { Bookmark, Loader2 } from "lucide-react";
+import {
+	Bookmark,
+	CircleAlert,
+	EyeOff,
+	Languages,
+	Loader2,
+} from "lucide-react";
 import {
 	memo,
 	type MouseEvent as ReactMouseEvent,
@@ -37,6 +43,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { PDF_CHROME_CHIP } from "@/components/viewer/pdf/chrome/pdf-chrome-surface";
 import {
 	EMPTY_CITATION_LINKS,
 	EMPTY_COMMENTS,
@@ -59,6 +66,8 @@ import {
 } from "@/components/viewer/pdf/layers/citation-links";
 import { CommentCardsLayer } from "@/components/viewer/pdf/layers/comment-cards-layer";
 import { HighlightAnnotationMenu } from "@/components/viewer/pdf/layers/highlight-annotation-menu";
+import { LayoutElementSelectionLayer } from "@/components/viewer/pdf/layers/layout-element-selection-layer";
+import { PdfRegionSelectLayer } from "@/components/viewer/pdf/layers/region-select-layer";
 import { LayoutTranslateOverlay } from "@/components/viewer/pdf/layers/layout-translate-overlay";
 import { PASSIVE_LINK_RENDERER } from "@/components/viewer/pdf/layers/link-annotation";
 import { PdfInkLayer } from "@/components/viewer/pdf/layers/pdf-ink-layer";
@@ -68,9 +77,9 @@ import {
 	PASSIVE_UNDERLINE_RENDERER,
 	READING_ANNOTATION_RENDERERS,
 } from "@/components/viewer/pdf/layers/reading-annotation-renderers";
-import { PdfRegionSelectLayer } from "@/components/viewer/pdf/layers/region-select-layer";
 import { SelectionGutter } from "@/components/viewer/pdf/layers/selection-gutter";
 import { PDF_VISUAL_REGION_FRAME_CLASS } from "@/components/viewer/pdf/layers/visual-region-frame";
+import { PdfSentenceHighlight } from "@/components/viewer/pdf/layout-sentence-pairing";
 import {
 	askHighlightRects,
 	commentForVisibleTranslation,
@@ -81,6 +90,7 @@ import type {
 	ScreenPoint,
 	SelectionCommentDraft,
 } from "@/components/viewer/pdf/types";
+import { useSettings, useUiStore } from "@/hooks/use-app-stores";
 import { cn } from "@/lib/core/utils";
 import type { PdfVisualSessionTrace } from "@/lib/pdf/agent-trace";
 import type { PdfAskNormalizedRect } from "@/lib/pdf/ask/types";
@@ -105,18 +115,18 @@ import type {
 } from "@/lib/pdf/highlight/types";
 import type { InkEditor } from "@/lib/pdf/ink/editor";
 import {
-	isLayoutRegionActivation,
 	isLayoutTranslateItemPainted,
-	LAYOUT_HINT_MIN_REGION_H_PX,
-	LAYOUT_HINT_MIN_REGION_W_PX,
 	type LayoutTranslateItem,
 	layoutKindBorder,
 	layoutKindFill,
 	layoutKindHex,
 	layoutKindI18nKey,
 	type PdfLayoutRegion,
-	type PointerOrigin,
 } from "@/lib/pdf/layout";
+import {
+	type LayoutTranslatePageState,
+	layoutTranslatePageStage,
+} from "@/lib/pdf/layout/layout-translate-progress";
 import { translatedTextLinkKey } from "@/lib/pdf/layout/link-ink";
 import { translatedLinkHoverAction } from "@/lib/pdf/layout/translated-link-hover";
 import type {
@@ -239,11 +249,12 @@ function TranslatedHighlightLayer({
 }
 
 /**
- * Text-selection highlight tint: a light translucent blue (Zotero-style) so the
- * underlying glyphs stay legible under the selection. Module-level so every
+ * Text-selection highlight tint follows the paper tone (`--pdf-paper-ink` in
+ * index.css), not the UI theme: a dark UI theme turns `--primary` near-white,
+ * so the band vanished on white / sepia / green paper. Module-level so every
  * page shares one stable value.
  */
-const PDF_TEXT_SELECTION_BACKGROUND = "rgba(96, 165, 250, 0.28)";
+const PDF_TEXT_SELECTION_BACKGROUND = "var(--pdf-paper-ink)";
 const EMPTY_SELECTION_BANDS: readonly PdfAskNormalizedRect[] = [];
 
 /**
@@ -269,10 +280,12 @@ function TranslationLiveSelection({
 		<div
 			aria-hidden="true"
 			className="pointer-events-none absolute inset-0 z-[5]"
+			style={{ opacity: 0.28, isolation: "isolate" }}
 		>
 			{rects.map((rect) => (
 				<div
 					key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}`}
+					className="pdf-live-selection-band"
 					style={{
 						position: "absolute",
 						left: `${rect.x * 100}%`,
@@ -305,11 +318,12 @@ function TranslationSelectionVeil({
 		<div
 			aria-hidden="true"
 			className="pointer-events-none absolute inset-0 z-[5]"
-			style={{ isolation: "isolate", mixBlendMode: "multiply" }}
+			style={{ isolation: "isolate", opacity: 0.28 }}
 		>
 			{rects.map((rect) => (
 				<div
 					key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}`}
+					className="pdf-live-selection-band"
 					style={{
 						position: "absolute",
 						left: `${rect.x * 100}%`,
@@ -325,8 +339,6 @@ function TranslationSelectionVeil({
 }
 
 /** A mark region pinned to a page (visual draft frame / formula legend frame). */
-type PageRegion = { page: number; region: PdfAskNormalizedRect } | null;
-
 /**
  * Anchor geometry of an open ask / translate card. Anchor-only: it keeps its
  * identity while the card body streams, so the page layers skip re-rendering
@@ -346,10 +358,9 @@ export type PdfPageMarksSlice = {
 	activeAskAnchor: PdfActiveCardAnchor | null;
 	activeTranslateAnchor: PdfActiveCardAnchor | null;
 	activeVisualTrace: PdfVisualSessionTrace | null;
-	visualDraftRegion: PageRegion;
-	/** Region whose crop is in flight; gets a spinner frame. */
-	visualCropRegion: PageRegion;
 	focusedLayoutRegion: PdfLayoutRegion | null;
+	/** Mobile lasso: region whose crop is in flight (spinner frame); null when idle. */
+	visualCropRegion?: { page: number; region: PdfAskNormalizedRect } | null;
 	/** Embed-owned citation highlight; never cleared by global focus or its timer. */
 	persistentRegion?: PdfNavigationRegion;
 	/** Citation jump: yellow flash that auto-clears (vs persistent figures selection). */
@@ -410,22 +421,20 @@ export type PdfPageMarksSlice = {
 	>;
 };
 
-/** Layout-analysis derived overlays (hover targets, debug boxes, translations). */
+/** Layout-analysis derived overlays (element selection, debug boxes, translations). */
 export type PdfPageLayoutSlice = {
 	selectionStartPageIndex?: number | null;
 	selectionInsertionRegions?: readonly PdfLayoutRegion[];
 	selectionTextExclusionsByPage?: ReadonlyMap<number, readonly Rect[]>;
-	hoverableRegionsByPage: ReadonlyMap<number, PdfLayoutRegion[]>;
+	/** Post-merge elements, every kind, largest first. Empty when analysis is absent. */
+	selectableRegionsByPage: ReadonlyMap<number, PdfLayoutRegion[]>;
 	rawRegionsByPage: ReadonlyMap<number, PdfLayoutRegion[]>;
 	layoutOverlayVisible: boolean;
 	layoutTranslateItemsByPage: ReadonlyMap<
 		number,
 		readonly LayoutTranslateItem[]
 	>;
-	layoutTranslatePageStateByPage: ReadonlyMap<
-		number,
-		{ active: boolean; running: boolean }
-	>;
+	layoutTranslatePageStateByPage: ReadonlyMap<number, LayoutTranslatePageState>;
 	/**
 	 * English glyph boxes for each sentence in a translated block, keyed by
 	 * item id. Absent until that page's text layer has been read.
@@ -458,15 +467,18 @@ export type PdfPageModeSlice = {
 	regionSelecting: boolean;
 	visualCropPending: boolean;
 	visualDraftOpen: boolean;
+	elementSelecting?: boolean;
 	/**
-	 * Dual-pane translation companion: keep raster + translate overlay only.
-	 * Selection / annotation / search / citation chrome stay unmounted.
+	 * Dual-pane translation companion: native translated selection and saved
+	 * translated highlights, without the original PDF text/annotation layers.
 	 */
 	translationOnly?: boolean;
 	/** PDFs outside papers/: annotation / translate / layout layers stay off. */
 	plainViewer?: boolean;
 	/** Narrow embeds show active comment cards inside the page. */
 	insetCommentCards?: boolean;
+	/** Dual-pane translation page paints the shared sentence wash. */
+	sentencePairing?: boolean;
 };
 
 export type PdfPageHandlers = {
@@ -485,12 +497,11 @@ export type PdfPageHandlers = {
 		clientPoint?: ScreenPoint | null,
 	) => void;
 	onRegionSelect: (page: number, region: PdfAskNormalizedRect) => void;
-	/** Click a figure hit target → open the full-screen crop. */
-	onLayoutRegionClick: (region: PdfLayoutRegion) => void;
-	/** Pointer hover preview of the exact crop (and its screen box). */
-	onLayoutRegionHover?: (region: PdfLayoutRegion, rect: DOMRect) => void;
-	onLayoutRegionLeave?: () => void;
-	onTogglePageLayoutTranslate?: (pageIndex: number) => void;
+	/** Mobile lasso: click a figure / table / algorithm / formula hit target → crop + draft card. */
+	onLayoutRegionClick?: (region: PdfLayoutRegion) => void;
+	onTogglePageLayoutTranslate: (pageIndex: number) => void;
+	/** Paragraph warning: retry a failed page's blocks without hiding it. */
+	onRetryPageLayoutTranslate: (pageIndex: number) => void;
 	/** Delete a highlight annotation directly from its on-page selection menu. */
 	onDeleteHighlightAnnotation: (pageIndex: number, id: string) => void;
 	/** Open the note editor for a highlight from its on-page selection menu. */
@@ -530,7 +541,7 @@ export type PdfPageHandlers = {
 /**
  * EmbedPDF annotation capability. Passed in by the caller rather than read
  * with `useAnnotationCapability()` here: the slim dual-pane translation
- * viewer renders `PdfPageLayers` without registering the annotation plugin,
+ * viewer can render `PdfPageLayers` without registering the annotation plugin,
  * and that hook throws ("Plugin annotation not found") when the plugin is
  * absent — hooks run before the `mode.translationOnly` early return.
  */
@@ -540,8 +551,6 @@ type AnnotationCapabilityProvides = ReturnType<
 
 export type PdfPageLayersProps = {
 	inkEditor?: InkEditor | null;
-	/** Paint/edit ink over a translated reflow page too (companion pane). */
-	inkOverReflow?: boolean;
 	onBookmarkPage?: (pageIndex: number) => void;
 	pageBookmarked?: boolean;
 	bookmarkSaving?: boolean;
@@ -579,9 +588,104 @@ export type PdfPageLayersProps = {
 	handlers: PdfPageHandlers;
 };
 
+type PageTranslateTabProps = {
+	pageIndex: number;
+	active: boolean;
+	running: boolean;
+	status?: LayoutTranslatePageState["status"];
+	/** Text translated, translated page still being generated (typeset). */
+	previewPending?: boolean;
+	onToggle: (pageIndex: number) => void;
+};
+
+/**
+ * In-page translate / hide tab: a vertical label column in the page's left
+ * margin, under the floating left toolbar (the toolbar owns the top-left
+ * corner). It is pinned to the page, not the viewport: the tab scrolls with
+ * its page and disappears with it instead of being clamped to the visible
+ * edge. It stays a labelled button, not a status badge: `翻译本页` translates
+ * this page, `隐藏本页` hides a page that already shows a translation. While a
+ * page works the tab keeps the loading ring and reports the stage (`翻译中` /
+ * `排版中`), so the page also knows what it waits for.
+ */
+const PageTranslateTab = memo(function PageTranslateTab({
+	pageIndex,
+	active,
+	running,
+	status,
+	previewPending = false,
+	onToggle,
+}: PageTranslateTabProps) {
+	const { t } = useTranslation("viewer");
+	const stage = layoutTranslatePageStage({ running, previewPending });
+	const stageLabel = stage ? t(`pdf.layoutTranslate.pageStage.${stage}`) : null;
+	const failed = status === "error";
+	const text =
+		stageLabel ??
+		(failed
+			? t("pdf.layoutTranslate.retryPageShort")
+			: active
+				? t("pdf.layoutTranslate.hidePageShort")
+				: t("pdf.layoutTranslate.translatePageShort"));
+	const label = running
+		? t("pdf.layoutTranslate.pageRunning")
+		: active
+			? t("pdf.layoutTranslate.hidePage")
+			: t("pdf.layoutTranslate.translatePage");
+	const statusLabel = status
+		? t(`pdf.layoutTranslate.pageStatus.${status}`)
+		: null;
+	const ariaLabel =
+		stageLabel ?? (statusLabel ? `${statusLabel}. ${label}` : label);
+	const Icon = stage
+		? Loader2
+		: failed
+			? CircleAlert
+			: active
+				? EyeOff
+				: Languages;
+	return (
+		<button
+			type="button"
+			data-pdf-chrome
+			data-pdf-translate-tab
+			className={cn(
+				// Vertical column, one unit under the top-left toolbar: the
+				// horizontal pill used to sit in the toolbar's corner and collide
+				// with it. The column keeps the label readable below the toolbar.
+				"pointer-events-auto absolute top-11 left-2 z-[8] flex w-7 min-h-16 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-foreground transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+				// The running stage reports state on the plain theme surface and
+				// does not recolour on hover. Translate / hide / retry keep the old
+				// hover fill; a page with a visible translation keeps the theme
+				// primary tint, exactly as before.
+				!stage && "hover:bg-muted/80 active:bg-muted",
+				PDF_CHROME_CHIP,
+				!stage && active && "border-primary/30 bg-primary/10 text-primary",
+			)}
+			aria-label={ariaLabel}
+			title={ariaLabel}
+			aria-busy={running}
+			aria-pressed={active}
+			onClick={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggle(pageIndex);
+			}}
+			onPointerDown={(event) => event.stopPropagation()}
+		>
+			<Icon
+				className={cn("size-3.5 shrink-0", stage && "animate-spin")}
+				aria-hidden="true"
+			/>
+			<span className="[writing-mode:vertical-rl] font-medium text-caption leading-none">
+				{text}
+			</span>
+		</button>
+	);
+});
+
 export const PdfPageLayers = memo(function PdfPageLayers({
 	inkEditor,
-	inkOverReflow = false,
 	onBookmarkPage,
 	pageBookmarked = false,
 	bookmarkSaving = false,
@@ -624,6 +728,8 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				: height;
 	const pdfDark = tone === "dark";
 	const paperTint = PDF_PAPER_TINT[tone];
+	const translateTabMode = useSettings((s) => s.pdfTranslateTab);
+	const immersiveReading = useUiStore((s) => s.immersiveReading);
 	const pageShellRef = useRef<HTMLDivElement | null>(null);
 	/**
 	 * Lazily arm text selection once the pointer reaches the page. Registering
@@ -674,12 +780,11 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 			observer.disconnect();
 		};
 	}, [selectionArmed]);
-	/**
-	 * Pointer position at the last pointerdown on a layout hit target. A click
-	 * that travelled beyond the tolerance was a drag, not an activation.
-	 */
-	const pointerOriginRef = useRef<PointerOrigin | null>(null);
 	const pageNumber = pageIndex + 1;
+	const selectableOnPage =
+		mode.elementSelecting && !mode.plainViewer
+			? layout.selectableRegionsByPage.get(pageIndex)
+			: undefined;
 	const activeAskOnPage =
 		marks.activeAskAnchor?.page === pageNumber ? marks.activeAskAnchor : null;
 	const activeTranslateOnPage =
@@ -690,14 +795,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 		marks.activeVisualTrace?.page === pageNumber
 			? marks.activeVisualTrace
 			: null;
-	const visualDraftRegionOnPage =
-		marks.visualDraftRegion?.page === pageNumber
-			? marks.visualDraftRegion.region
-			: null;
-	const visualCropRegionOnPage =
-		marks.visualCropRegion?.page === pageNumber
-			? marks.visualCropRegion.region
-			: null;
+
 	const focusedLayoutOnPage =
 		marks.focusedLayoutRegion?.pageIndex === pageIndex
 			? marks.focusedLayoutRegion
@@ -717,6 +815,10 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 		marks.selectionCommentDraft?.page === pageNumber
 			? marks.selectionCommentDraft
 			: null;
+	const draftVisualRegion = selectionDraftOnPage?.visualRegion;
+	const activeVisualRects = draftVisualRegion
+		? [draftVisualRegion]
+		: activeVisualOnPage?.rects;
 	const translateHighlightsOnPage =
 		marks.translateHighlightsByPage.get(pageNumber) ?? [];
 	const layoutTranslateOnPage =
@@ -754,7 +856,12 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 	}, [activeAskOnPage, pins, translationVisible]);
 	const pageTranslateState = layout.layoutTranslatePageStateByPage.get(
 		pageIndex,
-	) ?? { active: false, running: false };
+	) ?? {
+		active: false,
+		running: false,
+		status: undefined,
+		previewPending: false,
+	};
 	const emphasizedCommentId = hoveredCommentId ?? marks.editingCommentId;
 	const emphasizedComment = emphasizedCommentId
 		? (shownComments.find((c) => c.id === emphasizedCommentId) ?? null)
@@ -1140,7 +1247,10 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 		[citationById, handlers],
 	);
 	const translateOverlay =
-		translationVisible && layoutTranslateOnPage ? (
+		layoutTranslateOnPage &&
+		(translationVisible ||
+			pageTranslateState.status === "error" ||
+			layoutTranslateOnPage.some((item) => item.status === "running")) ? (
 			<LayoutTranslateOverlay
 				items={layoutTranslateOnPage}
 				pageIndex={pageIndex}
@@ -1159,14 +1269,34 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				sentenceRectsByItemId={layout.sentenceRectsByItemId}
 				links={translateLinkBoxes}
 				glyphRuns={layout.glyphRunsByPage?.get(pageIndex)}
+				awaitingPreview={pageTranslateState.previewPending}
+				onRetryTranslation={handlers.onRetryPageLayoutTranslate}
 				onOpenLink={openTranslatedLink}
 				onHoverLink={hoverTranslatedLink}
 			/>
 		) : null;
 
-	// Dual-pane companion: raster + translated text only. Skipping the full
-	// interaction stack halves per-page React work while the second EmbedPDF
-	// instance is still warming up.
+	// A running page (translating or typesetting) and a failed page keep their
+	// tab without hover; every other state follows the user's tab setting.
+	const pageTranslateTabSticky =
+		pageTranslateState.running || pageTranslateState.status === "error";
+	const pageTranslateTab =
+		!mode.plainViewer &&
+		!immersiveReading &&
+		translateTabMode !== "hidden" &&
+		(translateTabMode === "always" || pageHovered || pageTranslateTabSticky) ? (
+			<PageTranslateTab
+				pageIndex={pageIndex}
+				active={pageTranslateState.active}
+				running={pageTranslateState.running}
+				status={pageTranslateState.status}
+				previewPending={pageTranslateState.previewPending}
+				onToggle={handlers.onTogglePageLayoutTranslate}
+			/>
+		) : null;
+
+	// Dual-pane companion keeps native translated selection and markup, while
+	// skipping the original PDF interaction layers.
 	// Keep both shells free of blurred shadows: they can cause long scroll
 	// frames in WebKitGTK. The ring still provides a crisp paper edge.
 	if (mode.translationOnly) {
@@ -1176,7 +1306,10 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					"relative overflow-visible rounded-sm ring-1",
 					PDF_PAPER_SHELL_CLASS[tone],
 				)}
+				data-paper={tone}
 				style={{ width, height }}
+				onPointerEnter={() => setPageHovered(true)}
+				onPointerLeave={() => setPageHovered(false)}
 				{...{ [EMBED_PAGE_ATTR]: pageIndex }}
 			>
 				{paperRaster}
@@ -1186,7 +1319,43 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						className="pointer-events-none absolute inset-0 z-[2] bg-background/45"
 					/>
 				) : null}
+				{mode.sentencePairing ? (
+					<PdfSentenceHighlight docId={docId} pageIndex={pageIndex} />
+				) : null}
 				{translateOverlay}
+				<TranslationLiveSelection documentId={docId} pageIndex={pageIndex} />
+				<TranslatedHighlightLayer paints={translatedPaints} />
+				<TranslationSelectionVeil
+					pages={marks.selectionCommentDraft?.visiblePages}
+					pageIndex={pageIndex}
+				/>
+				{selectionDraftOnPage ? (
+					<CommentCardsLayer
+						items={EMPTY_COMMENTS}
+						inset
+						pageWidthPx={width}
+						pageHeightPx={height}
+						editingId={null}
+						wikiTarget={marks.commentWikiTarget}
+						hoveredId={hoveredCommentId}
+						selectionDraft={selectionDraftOnPage}
+						onCommitSelectionComment={handlers.onCommitSelectionComment}
+						onSelectionCommentActiveChange={
+							handlers.onSelectionCommentActiveChange
+						}
+						onDismissSelectionComment={handlers.onDismissSelectionComment}
+						onOpen={handlers.onOpenComment}
+						onSave={handlers.onSaveComment}
+						onCancel={handlers.onCancelComment}
+						onDelete={handlers.onDeleteComment}
+						onCopyLink={handlers.onCopyCommentLink}
+						onCopyEmbed={handlers.onCopyCommentEmbed}
+						onAddToChat={handlers.onAddCommentToChat}
+						onHover={handlers.onHoverComment}
+						onLeave={handlers.onLeaveComment}
+					/>
+				) : null}
+				{pageTranslateTab}
 				<SearchLayer
 					documentId={activeSearchDocumentId}
 					pageIndex={pageIndex}
@@ -1198,13 +1367,15 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 	}
 
 	// Page shell: matches the finished paper so loading gaps do not flash a
-	// different colour.
+	// different colour. `data-paper` also scopes the paper ink used by
+	// selection / hover tints (`--pdf-paper-ink`).
 	return (
 		<div
 			ref={pageShellRef}
 			data-annotation-pdf={docId}
 			data-annotation-source={annotationSource}
 			data-annotation-page={pageIndex + 1}
+			data-paper={tone}
 			className={cn(
 				"relative overflow-visible rounded-sm ring-1",
 				PDF_PAPER_SHELL_CLASS[tone],
@@ -1234,7 +1405,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 			 * annotation / pin overlays keep their intended colors. Agent crops
 			 * use engine.renderPageRect and are unaffected.
 			 */}
-			{onBookmarkPage && (
+			{onBookmarkPage && !immersiveReading && (
 				<button
 					type="button"
 					data-pdf-chrome
@@ -1288,23 +1459,28 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					className="pointer-events-none absolute inset-0 z-[2] bg-background/45"
 				/>
 			) : null}
-			{inkEditor &&
-				(!reflowDocumentId || inkOverReflow) &&
-				!mode.plainViewer && (
-					<UnrotatedPageFrame
-						rotation={pageRotation}
-						widthPx={frameWidth}
-						heightPx={frameHeight}
-						className="z-[9]"
-					>
-						<PdfInkLayer
-							editor={inkEditor}
-							page={pageIndex + 1}
-							width={pageSize?.width ?? frameWidth / pageScale}
-							height={pageSize?.height ?? frameHeight / pageScale}
-						/>
-					</UnrotatedPageFrame>
-				)}
+			{inkEditor && !reflowDocumentId && !mode.plainViewer && (
+				<UnrotatedPageFrame
+					rotation={pageRotation}
+					widthPx={frameWidth}
+					heightPx={frameHeight}
+					className="z-[9]"
+				>
+					<PdfInkLayer
+						editor={inkEditor}
+						page={pageIndex + 1}
+						width={pageSize?.width ?? frameWidth / pageScale}
+						height={pageSize?.height ?? frameHeight / pageScale}
+					/>
+				</UnrotatedPageFrame>
+			)}
+			{mode.sentencePairing ? (
+				<PdfSentenceHighlight
+					docId={docId}
+					pageIndex={pageIndex}
+					source={!translationVisible}
+				/>
+			) : null}
 			{!searchAboveTranslation ? (
 				<SearchLayer
 					documentId={docId}
@@ -1333,7 +1509,8 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					className="z-[5]"
 				>
 					{/* Keep one SDK geometry/selection registration for pen/finger holds.
-					    The viewport's native input boundary consumes ink gestures. */}
+					    The viewport's native input boundary consumes ink gestures.
+					    The mobile marquee disarms text selection while armed. */}
 					{mode.regionSelecting ? null : (
 						<PdfTextSelectionLayer
 							documentId={docId}
@@ -1390,6 +1567,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						</div>
 					) : null}
 				</UnrotatedPageFrame>
+				{pageTranslateTab}
 				<CitationLinkLayer
 					links={marks.citationLinks.get(pageIndex) ?? EMPTY_CITATION_LINKS}
 					textLinks={marks.textLinks.get(pageIndex) ?? []}
@@ -1401,13 +1579,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					onHover={handlers.onCitationHover}
 					onUrlHover={handlers.onLinkUrlHover}
 				/>
-				<PdfRegionSelectLayer
-					active={mode.regionSelecting && !mode.visualCropPending}
-					label={t("pdfExplain.regionSelectionLabel", {
-						page: pageNumber,
-					})}
-					onSelect={(region) => handlers.onRegionSelect(pageNumber, region)}
-				/>
+
 				{/*
 				 * Debug Eye overlay: pre-merge detections (all kinds, no NMS),
 				 * score ≥ LAYOUT_SIDEBAR_MIN_SCORE (30%). Label = kind + conf.
@@ -1492,104 +1664,59 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 							)),
 				)}
 				{/*
-				 * Hit targets for post-merge figure/table/algorithm/formula.
-				 * Largest first so smaller boxes stack on top and win pointer hits.
-				 * Hidden when framing or a visual draft is open (not during crop:
-				 * unmount leave must not cancel an in-flight crop).
-				 * All kinds crop on click; hover and keyboard focus preview the
-				 * exact bbox that would be cropped.
+				 * Mobile lasso marquee (frontend/mobile-paper-context.md). Armed
+				 * only by the mobile reading chain; mutually exclusive with element
+				 * selection below. Restored after upstream 357cf8466.
 				 */}
-				{!mode.regionSelecting && !mode.visualDraftOpen && !mode.plainViewer
-					? layout.hoverableRegionsByPage.get(pageIndex)?.map((region) => {
-							// Fixed-size chip in a zoom-scaled box: only draw it where
-							// it actually fits inside the region.
-							const showHint =
-								region.bbox.w * width >= LAYOUT_HINT_MIN_REGION_W_PX &&
-								region.bbox.h * height >= LAYOUT_HINT_MIN_REGION_H_PX;
-							return (
-								<button
-									key={`layout-hit-${region.id}`}
-									type="button"
-									data-layout-hit={region.id}
-									aria-label={t("figures.viewImageAria", {
-										kind: t(layoutKindI18nKey(region.kind)),
-									})}
-									className={cn(
-										"group absolute z-[2] cursor-zoom-in rounded-none border-0 bg-transparent p-0",
-									)}
-									onPointerEnter={(event) =>
-										handlers.onLayoutRegionHover?.(
-											region,
-											event.currentTarget.getBoundingClientRect(),
-										)
-									}
-									onPointerUp={(event) => {
-										if (event.pointerType === "touch")
-											handlers.onLayoutRegionLeave?.();
-									}}
-									onPointerCancel={() => handlers.onLayoutRegionLeave?.()}
-									onPointerLeave={() => handlers.onLayoutRegionLeave?.()}
-									style={{
-										left: `${region.bbox.x * 100}%`,
-										top: `${region.bbox.y * 100}%`,
-										width: `${region.bbox.w * 100}%`,
-										height: `${region.bbox.h * 100}%`,
-									}}
-									onPointerDown={(event) => {
-										pointerOriginRef.current = {
-											x: event.clientX,
-											y: event.clientY,
-										};
-										// Touch has no hover: show the enlarged crop while the finger
-										// rests on the region; the click then opens it.
-										if (event.pointerType === "touch")
-											handlers.onLayoutRegionHover?.(
-												region,
-												event.currentTarget.getBoundingClientRect(),
-											);
-									}}
-									onClick={(event) => {
-										const origin = pointerOriginRef.current;
-										pointerOriginRef.current = null;
-										// A drag that merely started here is not a click.
-										if (
-											!isLayoutRegionActivation({
-												detail: event.detail,
-												origin,
-												end: { x: event.clientX, y: event.clientY },
-											})
-										) {
-											return;
-										}
-										event.preventDefault();
-										event.stopPropagation();
-										handlers.onLayoutRegionClick(region);
-									}}
-								>
-									{/*
-									 * Frame the exact crop bounds before the click commits, and
-									 * give keyboard focus a visible landmark over unpredictable
-									 * page content.
-									 */}
-									<span
-										className={cn(
-											PDF_VISUAL_REGION_FRAME_CLASS,
-											"inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
-										)}
-										aria-hidden="true"
-									/>
-									{showHint ? (
-										<span
-											className="pointer-events-none absolute top-1 right-1 max-w-[calc(100%-0.5rem)] truncate rounded border border-border/60 bg-background/90 px-1.5 py-0.5 font-medium text-caption text-foreground/90 opacity-0 shadow-raised backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-											aria-hidden="true"
-										>
-											{t("figures.viewImageHint")}
-										</span>
-									) : null}
-								</button>
-							);
-						})
-					: null}
+				{mode.regionSelecting && !mode.plainViewer ? (
+					<PdfRegionSelectLayer
+						active={!mode.visualCropPending}
+						label={t("pdfExplain.regionSelectionLabel", {
+							page: pageIndex + 1,
+						})}
+						onSelect={(region) => handlers.onRegionSelect(pageIndex + 1, region)}
+					/>
+				) : null}
+				{marks.visualCropRegion?.page === pageIndex + 1 ? (
+					<div
+						className={cn(
+							PDF_VISUAL_REGION_FRAME_CLASS,
+							"z-[3] flex items-center justify-center",
+						)}
+						style={{
+							left: `${marks.visualCropRegion.region.x * 100}%`,
+							top: `${marks.visualCropRegion.region.y * 100}%`,
+							width: `${marks.visualCropRegion.region.w * 100}%`,
+							height: `${marks.visualCropRegion.region.h * 100}%`,
+						}}
+						role="status"
+						aria-label={t("pdfExplain.cropping")}
+					>
+						<Loader2
+							className="size-4 animate-spin text-default-primary"
+							aria-hidden="true"
+						/>
+					</div>
+				) : null}
+				{/*
+				 * Element selection. Frames are pointer-events: none; the layer
+				 * hit-tests the page shell. Hidden while ⌘. marquee is active and
+				 * on PDFs outside papers/. Absent analysis yields no regions.
+				 */}
+				{!immersiveReading &&
+				!mode.regionSelecting &&
+				selectableOnPage &&
+				selectableOnPage.length > 0 ? (
+					<LayoutElementSelectionLayer
+						docId={docId}
+						pageIndex={pageIndex}
+						regions={selectableOnPage}
+						width={width}
+						height={height}
+						paperDark={pdfDark}
+						sentencePairing={mode.sentencePairing}
+					/>
+				) : null}
 				{/*
 				 * Quick-chat selections stay painted after the card closes, in the
 				 * same yellow as saved annotations. The open card still bridges
@@ -1622,44 +1749,6 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 							/>
 						))
 					: null}
-				{/* Open visual draft / mark: show the framed source region on-page. */}
-				{visualDraftRegionOnPage ? (
-					<div
-						className={cn(PDF_VISUAL_REGION_FRAME_CLASS, "z-[2]")}
-						style={{
-							left: `${visualDraftRegionOnPage.x * 100}%`,
-							top: `${visualDraftRegionOnPage.y * 100}%`,
-							width: `${visualDraftRegionOnPage.w * 100}%`,
-							height: `${visualDraftRegionOnPage.h * 100}%`,
-						}}
-						aria-hidden="true"
-					/>
-				) : null}
-				{/*
-				 * Crop in flight: PDFium renders the region asynchronously, so frame
-				 * it and spin — otherwise a click looks like nothing happened.
-				 */}
-				{visualCropRegionOnPage ? (
-					<div
-						className={cn(
-							PDF_VISUAL_REGION_FRAME_CLASS,
-							"z-[3] flex items-center justify-center",
-						)}
-						style={{
-							left: `${visualCropRegionOnPage.x * 100}%`,
-							top: `${visualCropRegionOnPage.y * 100}%`,
-							width: `${visualCropRegionOnPage.w * 100}%`,
-							height: `${visualCropRegionOnPage.h * 100}%`,
-						}}
-						role="status"
-						aria-label={t("pdfExplain.cropping")}
-					>
-						<Loader2
-							className="size-4 animate-spin text-default-primary"
-							aria-hidden="true"
-						/>
-					</div>
-				) : null}
 				{/* Figures selection outline, or citation yellow flash block. */}
 				{persistentRegion ? (
 					<div
@@ -1705,10 +1794,10 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					/>
 				) : null}
 				{/* Active visual mark: default-theme outline of the crop region. */}
-				{activeVisualOnPage
-					? activeVisualOnPage.rects.map((rect) => (
+				{activeVisualRects
+					? activeVisualRects.map((rect) => (
 							<div
-								key={`${activeVisualOnPage.id}-region-${rect.x}-${rect.y}-${rect.w}-${rect.h}`}
+								key={`visual-region-${rect.x}-${rect.y}-${rect.w}-${rect.h}`}
 								className={cn(PDF_VISUAL_REGION_FRAME_CLASS, "z-[2]")}
 								style={{
 									left: `${rect.x * 100}%`,
@@ -1799,13 +1888,14 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				{/*
 				 * Bidirectional hover for rail comments: hovering the page region
 				 * (text highlight or visual crop) emphasizes the card and draws the
-				 * connector. Visual regions keep the existing click-to-edit path (#396);
+				 * connector. Visual regions are clickable in reading mode (#396);
+				 * element selection owns clicks when there are selectable regions.
 				 * text highlights with a note do the same, while plain highlights
 				 * (not in `comments`) still use EmbedPDF's annotation menu.
 				 */}
 				{shownComments.map((comment) =>
 					comment.rects.map((rect) =>
-						comment.kind === "visual" ? (
+						comment.kind === "visual" && !selectableOnPage?.length ? (
 							<button
 								key={`comment-hover-hit-${comment.id}-${rect.x}-${rect.y}-${rect.w}-${rect.h}`}
 								type="button"
@@ -1827,7 +1917,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						) : null,
 					),
 				)}
-				{!mode.plainViewer ? (
+				{!mode.plainViewer && !immersiveReading ? (
 					<CommentCardsLayer
 						items={shownComments}
 						inset={mode.insetCommentCards}

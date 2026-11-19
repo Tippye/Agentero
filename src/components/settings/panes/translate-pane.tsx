@@ -1,4 +1,11 @@
-import { Check, ExternalLink, Info, RotateCcw, Trash2 } from "lucide-react";
+import {
+	Check,
+	ChevronRight,
+	ExternalLink,
+	Info,
+	RotateCcw,
+	Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -19,6 +26,11 @@ import {
 	SettingsSectionLabel,
 } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -34,11 +46,13 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { accountSurfaceEnabled } from "@/features/account/visibility";
 import { BUILTIN_PROVIDER_ID } from "@/lib/core/builtin";
 import { errorMessage, notifyError } from "@/lib/core/notify";
 import { openExternalUrl } from "@/lib/core/open-external";
 import { hasSecret, isSecretMask, maskSecret } from "@/lib/core/secret-mask";
 import { isTauri } from "@/lib/core/tauri";
+import { cn } from "@/lib/core/utils";
 import type {
 	AppSettings,
 	CommercialTranslateProviderId,
@@ -68,6 +82,7 @@ import {
 import {
 	DEFAULT_TRANSLATE_SETTINGS,
 	EMPTY_TRANSLATE_PROVIDER_CONFIG,
+	TRANSLATE_CONCURRENCY_CHOICES,
 } from "@/lib/translate/defaults";
 import { clearDictionaryCache } from "@/lib/translate/dictionary-cache";
 import { extraRequestBodyIssue } from "@/lib/translate/request-options";
@@ -87,6 +102,15 @@ const PROBE_LABEL_KEYS = {
 	probing: "translate.provider.probeProbing",
 	idle: "translate.provider.probeIdle",
 } as const satisfies Record<ProbeStatus, string>;
+
+/**
+ * API service cards lead with the generic OpenAI-compatible endpoint; the
+ * vendor-specific engines keep their canonical order.
+ */
+const API_SERVICE_PROVIDER_IDS: CommercialTranslateProviderId[] = [
+	"openaiCompatible",
+	...COMMERCIAL_MT_PROVIDER_IDS.filter((id) => id !== "openaiCompatible"),
+];
 
 function ProviderStatusDot({
 	kind,
@@ -160,12 +184,16 @@ export function TranslatePane({
 			patch({ translate: { ...tr, ...partial } }),
 		[patch, tr],
 	);
-	// The built-in channel stays implemented, but it is no longer offered here.
-	// A stored selection is moved to the free default so the picker is not blank.
 	useEffect(() => {
-		if (apiOnly || tr.provider !== BUILTIN_PROVIDER_ID) return;
-		patchTranslate({ provider: DEFAULT_TRANSLATE_SETTINGS.provider });
-	}, [apiOnly, tr.provider, patchTranslate]);
+		// Builtin hosted translation needs the account surface; mobile API-only
+		// processing never offers it. Reset a stale builtin selection to default.
+		if (
+			(apiOnly || !accountSurfaceEnabled) &&
+			tr.provider === BUILTIN_PROVIDER_ID
+		) {
+			patchTranslate({ provider: DEFAULT_TRANSLATE_SETTINGS.provider });
+		}
+	}, [apiOnly, patchTranslate, tr.provider]);
 	const showAgent = !apiOnly && tr.provider === "agent";
 	const getProviderConfig = useCallback(
 		(id: CommercialTranslateProviderId): TranslateProviderConfig =>
@@ -173,14 +201,18 @@ export function TranslatePane({
 		[tr.providerConfigs],
 	);
 	/**
-	 * Free MT + Agent always; commercial only when configured (or currently
-	 * selected). The built-in channel is omitted from this picker.
+	 * Free MT and Agent always; hosted Agentero only in account-enabled builds;
+	 * commercial only when configured (or currently selected).
 	 */
 	const providers = useMemo(
 		() =>
 			listSelectableProviders().filter((s) => {
-				if (s.id === BUILTIN_PROVIDER_ID || (apiOnly && s.id === "agent"))
+				if (
+					s.id === BUILTIN_PROVIDER_ID &&
+					(apiOnly || !accountSurfaceEnabled)
+				)
 					return false;
+				if (apiOnly && s.id === "agent") return false;
 				if (!isCommercialTranslateProvider(s.id)) return true;
 				if (apiOnly || tr.provider === s.id) return true;
 				return isCommercialProviderConfigured(s.id, getProviderConfig(s.id));
@@ -214,6 +246,8 @@ export function TranslatePane({
 		},
 		[],
 	);
+	/** OpenAI-compatible advanced fields (concurrency / extra JSON) start collapsed. */
+	const [advancedOpen, setAdvancedOpen] = useState(false);
 
 	const agentModelValue = useMemo(
 		() => ({ agentId: tr.agentId, modelId: tr.modelId }),
@@ -327,6 +361,8 @@ export function TranslatePane({
 			if (providerId === "openaiCompatible") {
 				const issue = extraRequestBodyIssue(toSave.extraRequestBody);
 				if (issue) {
+					// The field is collapsed by default; reveal it before the toast.
+					setAdvancedOpen(true);
 					notifyError(t(`translate.providerConfig.extraRequestBody.${issue}`));
 					return;
 				}
@@ -477,9 +513,11 @@ export function TranslatePane({
 				</SettingsRow>
 				<SettingsRow
 					label={t("translate.dictionaryMode.label")}
-					description={t(
-						`translate.dictionaryMode.${tr.dictionary.mode}Description`,
-					)}
+					description={
+						tr.dictionary.mode === "auto"
+							? undefined
+							: t(`translate.dictionaryMode.${tr.dictionary.mode}Description`)
+					}
 				>
 					<Select
 						value={tr.dictionary.mode}
@@ -506,33 +544,19 @@ export function TranslatePane({
 						</SelectContent>
 					</Select>
 				</SettingsRow>
-				<SettingsRow label={t("translate.displayMode.label")}>
-					<Select
-						value={tr.displayMode}
-						onValueChange={(v) =>
-							patchTranslate({
-								displayMode: v === "dualPane" ? "dualPane" : "overlay",
-							})
+				<SettingsRow
+					label={t("translate.alwaysShowCard.label")}
+					htmlFor="translate-always-show-card"
+				>
+					<Switch
+						id="translate-always-show-card"
+						checked={tr.alwaysShowTranslateCard}
+						onCheckedChange={(v) =>
+							patchTranslate({ alwaysShowTranslateCard: v })
 						}
-					>
-						<SelectTrigger size="sm" className="min-w-[160px] max-w-[220px]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="overlay">
-								{t("translate.displayMode.overlay")}
-							</SelectItem>
-							<SelectItem value="dualPane">
-								{t("translate.displayMode.dualPane")}
-							</SelectItem>
-						</SelectContent>
-					</Select>
+					/>
 				</SettingsRow>
 			</SettingsGroup>
-
-			<p className="mt-4 text-caption text-muted-foreground">
-				{t("translate.dictionaryIncluded")}
-			</p>
 
 			<SettingsSectionLabel className="mt-4">
 				{t("translate.autoTranslation.section")}
@@ -552,7 +576,6 @@ export function TranslatePane({
 				</SettingsRow>
 				<SettingsRow
 					label={t("translate.autoImport.label")}
-					description={t("translate.autoImport.description")}
 					htmlFor="translate-auto-import"
 				>
 					<Switch
@@ -630,10 +653,7 @@ export function TranslatePane({
 					</Button>
 				</div>
 				<SettingsGroup>
-					<SettingsRow
-						label={t("translate.cache.dictionary.label")}
-						description={t("translate.cache.dictionary.description")}
-					>
+					<SettingsRow label={t("translate.cache.dictionary.label")}>
 						<Button
 							size="sm"
 							variant="outline"
@@ -654,7 +674,6 @@ export function TranslatePane({
 					</SettingsRow>
 					<SettingsRow
 						label={t("translate.cache.ir.label")}
-						description={t("translate.cache.ir.description")}
 						htmlFor="translate-cache-ir"
 					>
 						<Switch
@@ -665,7 +684,6 @@ export function TranslatePane({
 					</SettingsRow>
 					<SettingsRow
 						label={t("translate.cache.final.label")}
-						description={t("translate.cache.final.description")}
 						htmlFor="translate-cache-final"
 					>
 						<Switch
@@ -682,7 +700,7 @@ export function TranslatePane({
 					{t("translate.providerConfig.section")}
 				</SettingsSectionLabel>
 				<div className="grid gap-2">
-					{COMMERCIAL_MT_PROVIDER_IDS.map((id) => {
+					{API_SERVICE_PROVIDER_IDS.map((id) => {
 						const cfg = getProviderConfig(id);
 						const draft = configDrafts[id];
 						const draftKey = draft?.apiKey;
@@ -864,31 +882,83 @@ export function TranslatePane({
 													autoComplete="off"
 												/>
 											</ProviderFieldRow>
-											<ProviderFieldRow
-												label={t(
-													"translate.providerConfig.extraRequestBody.label",
-												)}
-												htmlFor={`${inputPrefix}-extra-request-body`}
+											<Collapsible
+												open={advancedOpen}
+												onOpenChange={setAdvancedOpen}
 											>
-												<Textarea
-													id={`${inputPrefix}-extra-request-body`}
-													value={effectiveCfg.extraRequestBody ?? ""}
-													onChange={(e) =>
-														setDraftField(id, {
-															extraRequestBody: e.target.value,
-														})
-													}
-													placeholder={'{ "temperature": 0.2 }'}
-													className="min-h-24 min-w-0 flex-1 font-mono text-xs"
-													spellCheck={false}
-													autoComplete="off"
-													aria-invalid={
-														extraRequestBodyIssue(
-															effectiveCfg.extraRequestBody,
-														) !== null
-													}
-												/>
-											</ProviderFieldRow>
+												<CollapsibleTrigger asChild>
+													<button
+														type="button"
+														className="flex items-center gap-1 text-muted-foreground text-xs outline-none transition-colors hover:text-foreground"
+														aria-label={t("translate.providerConfig.advanced")}
+													>
+														<ChevronRight
+															className={cn(
+																"size-3.5 transition-transform",
+																advancedOpen && "rotate-90",
+															)}
+														/>
+														{t("translate.providerConfig.advanced")}
+													</button>
+												</CollapsibleTrigger>
+												<CollapsibleContent className="space-y-2 pt-1">
+													<ProviderFieldRow
+														label={t(
+															"translate.providerConfig.concurrency.label",
+														)}
+														htmlFor={`${inputPrefix}-concurrency`}
+													>
+														<Select
+															value={String(effectiveCfg.concurrency)}
+															onValueChange={(value) =>
+																setDraftField(id, {
+																	concurrency: Number(value),
+																})
+															}
+														>
+															<SelectTrigger
+																id={`${inputPrefix}-concurrency`}
+																size="sm"
+																className="h-8 w-24 text-xs"
+															>
+																<SelectValue />
+															</SelectTrigger>
+															<SelectContent>
+																{TRANSLATE_CONCURRENCY_CHOICES.map((value) => (
+																	<SelectItem key={value} value={String(value)}>
+																		{value}
+																	</SelectItem>
+																))}
+															</SelectContent>
+														</Select>
+													</ProviderFieldRow>
+													<ProviderFieldRow
+														label={t(
+															"translate.providerConfig.extraRequestBody.label",
+														)}
+														htmlFor={`${inputPrefix}-extra-request-body`}
+													>
+														<Textarea
+															id={`${inputPrefix}-extra-request-body`}
+															value={effectiveCfg.extraRequestBody ?? ""}
+															onChange={(e) =>
+																setDraftField(id, {
+																	extraRequestBody: e.target.value,
+																})
+															}
+															placeholder={'{ "temperature": 0.2 }'}
+															className="min-h-24 min-w-0 flex-1 font-mono text-xs"
+															spellCheck={false}
+															autoComplete="off"
+															aria-invalid={
+																extraRequestBodyIssue(
+																	effectiveCfg.extraRequestBody,
+																) !== null
+															}
+														/>
+													</ProviderFieldRow>
+												</CollapsibleContent>
+											</Collapsible>
 										</>
 									) : null}
 								</div>

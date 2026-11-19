@@ -1,5 +1,7 @@
 {
-	"navigator": { "hintTargets": "{{count}} keyboard targets" },
+	"navigator": {
+		"hintTargets": "{{count}} keyboard targets"
+	},
 	"labels": {
 		"agent": "Agent",
 		"notes": "Notes",
@@ -56,8 +58,7 @@
 		"tabPrevInGroup": "Previous Tab in Group",
 		"exportAnnotatedPdf": "Export Annotated PDF",
 		"wandOpen": "Magic Wand (Import by ID)",
-		"pluginsLoadDevelopment": "Load development plugin…",
-		"pluginsUnloadDevelopment": "Unload development plugins"
+		"immersiveReading": "Immersive reading"
 	},
 	"titlebar": {
 		"showLeftSidebar": "Show left sidebar",
@@ -79,7 +80,8 @@
 		"menuSettings": "Settings…",
 		"menuKeyboardShortcuts": "Keyboard Shortcuts",
 		"menuQuickOpen": "Quick Open…",
-		"menuCommandPalette": "Command Palette…"
+		"menuCommandPalette": "Command Palette…",
+		"layoutImmersive": "Immersive reading"
 	},
 	"editor": {
 		"markdownPlaceholder": "Type Markdown here...",
@@ -133,6 +135,8 @@
 		"docUnsupported": "Library and Trash cannot be opened in a new window.",
 		"featureDesktopOnly": "Feature windows require the desktop app.",
 		"docDesktopOnly": "Document windows require the desktop app.",
+		"moveUnsaved": "This document window has unsaved changes, so the tab stayed open.",
+		"moveFailed": "The document did not open in the new window, so the tab stayed open.",
 		"titleAgent": "Agent",
 		"titleAnnotations": "Annotations",
 		"titleDocument": "Document"
@@ -291,12 +295,5 @@
 			"description": "If access is restricted, configure a proxy in settings and try again.",
 			"openSettings": "Open network settings"
 		}
-	},
-	"plugins": {
-		"chooseDirectory": "Load plugin — allow reading the current vault",
-		"failed": "Plugin operation failed",
-		"loaded": "Development plugin loaded",
-		"commandTitle": "{{title}}",
-		"suspended": "{{name}} was stopped after repeated failures. Re-enable it in Settings."
 	}
 }

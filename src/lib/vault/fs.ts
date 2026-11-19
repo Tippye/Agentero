@@ -2,6 +2,7 @@ import { readFile, readTextFile } from "@tauri-apps/plugin-fs";
 import i18n from "@/i18n";
 import { commands } from "@/lib/core/bindings";
 import { callApiResult } from "@/lib/core/ipc";
+import { normalizeLocalPath } from "@/lib/core/path";
 import { isTauri } from "@/lib/core/tauri";
 import {
 	parseRemoteJoinedPath,
@@ -27,7 +28,7 @@ export async function readVaultFile(path: string): Promise<string> {
 		return remoteReadText(remoteRead.sessionId, remoteRead.rel);
 	}
 
-	return readTextFile(path);
+	return readTextFile(normalizeLocalPath(path));
 }
 
 /**
@@ -52,7 +53,7 @@ export async function readVaultBytes(path: string): Promise<Uint8Array> {
 		);
 		return readFile(localPath);
 	}
-	return readFile(path);
+	return readFile(normalizeLocalPath(path));
 }
 
 /** A working copy's exact loaded/last saved bytes; null means the file was missing. */
@@ -84,6 +85,9 @@ export async function writeVaultFile(
 		return;
 	}
 
+	// Mobile-safe host mutation lane with an exact-byte version guard: the
+	// tablet editing safety contract rejects stale writes and preserves the
+	// original draft instead of silently overwriting (plugin-fs cannot do this).
 	await callApiResult(() =>
 		commands.vaultWriteTextFile(
 			path,
@@ -111,6 +115,7 @@ export async function writeVaultBytes(
 	}
 
 	const { mkdir, writeFile } = await import("@tauri-apps/plugin-fs");
+	path = normalizeLocalPath(path);
 	const parent = path.replace(/[\\/][^\\/]+$/, "");
 	if (parent && parent !== path) {
 		try {
@@ -166,7 +171,7 @@ export async function vaultPathExists(path: string): Promise<boolean> {
 	}
 
 	const { exists } = await import("@tauri-apps/plugin-fs");
-	return exists(path);
+	return exists(normalizeLocalPath(path));
 }
 
 /** Create a directory (and parents) under the vault. */
@@ -183,7 +188,7 @@ export async function createVaultDirectory(path: string): Promise<void> {
 	}
 
 	const { mkdir } = await import("@tauri-apps/plugin-fs");
-	await mkdir(path, { recursive: true });
+	await mkdir(normalizeLocalPath(path), { recursive: true });
 }
 
 /** Remove one local file through the sync mutation lane (never recursive). */
@@ -221,5 +226,5 @@ export async function removeVaultPath(path: string): Promise<void> {
 		return;
 	}
 	const { remove } = await import("@tauri-apps/plugin-fs");
-	await remove(trimmed, { recursive: true });
+	await remove(normalizeLocalPath(trimmed), { recursive: true });
 }

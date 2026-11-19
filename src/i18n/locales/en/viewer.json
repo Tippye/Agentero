@@ -24,7 +24,6 @@
 	},
 	"pdf": {
 		"close": "Close",
-		"noteNeedsSelection": "Hold for 3 seconds on text or a figure to add a note.",
 		"apiOnly": {
 			"layoutProviderRequired": "Configure a remote layout API provider before analyzing this paper.",
 			"translateProviderRequired": "Choose an API translation provider before translating on this device."
@@ -53,6 +52,16 @@
 		"jumpBack": "Jump back",
 		"importToLibrary": "Import to library",
 		"smartHighlight": "Smart highlight",
+		"viewMode": {
+			"label": "Reading view",
+			"original": "Original",
+			"translated": "Translation",
+			"dual": "Compare",
+			"originalHint": "Original (hide translation and stop the task)",
+			"translatedHint": "Translation (in place on the page)",
+			"dualHint": "Compare (source and translation side by side)",
+			"paneUnavailable": "The paper has no local folder, so the translation pane cannot open."
+		},
 		"smartHighlightFailed": "Smart highlight failed",
 		"jevNoReadableText": "PDF text layer is empty or unreadable. Run Parse Body (Tools → Parse PDF body) to OCR the paper first.",
 		"findPlaceholder": "Find in document",
@@ -78,14 +87,25 @@
 			"hide": "Hide translations",
 			"show": "Show translations",
 			"translatePage": "Translate this page",
-			"translatePageShort": "Page",
+			"translatePageShort": "Translate",
 			"hidePage": "Hide this page translation",
 			"hidePageShort": "Hide",
+			"retryPageShort": "Retry",
+			"pageStatus": {
+				"pending": "Page awaiting translation",
+				"running": "Translating this page…",
+				"done": "Page translation complete",
+				"error": "Page translation incomplete"
+			},
+			"pageStage": {
+				"translating": "Translating",
+				"typesetting": "Typesetting"
+			},
 			"pageRunning": "Translating this page…",
 			"needLayout": "Run layout analysis first (Figures panel).",
 			"noText": "No extractable text regions to translate.",
 			"failed": "Full-text translate failed",
-			"pageFailed": "Page translation failed",
+			"retryPage": "Retry this page's translation",
 			"exportDualPdf": "Export bilingual PDF",
 			"exportPdf": "Export translated PDF",
 			"reflowFailed": "PDF typesetting failed",
@@ -119,7 +139,7 @@
 			"retranslateConfirmTitle": "Retranslate all?",
 			"retranslateConfirmDescription": "This requests every block again and replaces translations that succeed. Blocks that fail keep their previous translation.",
 			"retranslateConfirm": "Retranslate",
-			"pagesCount": "{{done}}/{{total}} pages"
+			"pagesCount": "Completed {{done}}/{{total}} pages"
 		},
 		"translation": {
 			"title": "Translation",
@@ -153,7 +173,8 @@
 			"saving": "Saving bookmarks…",
 			"retry": "Retry saving",
 			"discard": "Discard unsaved edits"
-		}
+		},
+		"exitImmersive": "Exit immersive reading"
 	},
 	"pdfAsk": {
 		"dialogLabel": "Ask about selection",
@@ -175,10 +196,8 @@
 		"openInPrompt": "Please explain the following quoted passage from this paper."
 	},
 	"pdfExplain": {
-		"selectRegion": "Add visual annotation",
-		"cancelRegion": "Cancel region selection",
-		"regionSelectionLabel": "Select a visual region on page {{page}}",
 		"cropFailed": "Could not capture the selected PDF region.",
+		"regionSelectionLabel": "Drag to select a region on page {{page}}",
 		"cropping": "Capturing region…",
 		"annotationPreviewAlt": "Cropped region from page {{page}}",
 		"visualAnnotation": "Visual annotation",
@@ -225,6 +244,10 @@
 		"importFailed": "Failed to import reference",
 		"openLink": "Open link",
 		"previewLabel": "Reference preview",
+		"previewImport": "Import",
+		"expandPreview": "Expand full reference details",
+		"citationCount_one": "{{count}} citation",
+		"citationCount_other": "{{count}} citations",
 		"importToFolder": "Import to folder",
 		"newFolder": "New folder",
 		"newFolderHint": "papers/subfolder",
@@ -240,6 +263,9 @@
 		"kindReference": "Reference"
 	},
 	"figures": {
+		"selectElements": "Select layout elements",
+		"exitElementSelection": "Exit element selection (Esc)",
+		"selectionNeedsLayout": "Run layout analysis to select elements",
 		"title": "Analysis",
 		"panelAria": "Figures, tables, algorithms, and formulas of this paper",
 		"noPaper": "Open a paper PDF to list figures, tables, algorithms, and formulas.",
@@ -259,12 +285,9 @@
 		"queued": "Waiting to analyze layout…",
 		"progressPages": "{{page}} / {{total}} pages",
 		"progressPct": "{{pct}}%",
-		"clickAnnotateAria": "Annotate this {{kind}}",
-		"clickAnnotateHint": "Click to annotate",
-		"viewImageAria": "View this {{kind}} full screen",
-		"viewImageHint": "Click to view",
-		"lightboxTitle": "{{kind}} · Page {{page}}",
-		"imageUnavailable": "The image preview could not be rendered.",
+		"selectElementAria": "Select {{kind}}",
+		"selectElementAriaPreview": "Select {{kind}}: {{preview}}",
+		"captionOnPage": "Caption on page {{page}}",
 		"sectionFigures": "Figures",
 		"sectionTables": "Tables",
 		"sectionAlgorithms": "Algorithms",

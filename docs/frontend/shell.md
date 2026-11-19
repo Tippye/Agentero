@@ -1,14 +1,19 @@
 # 工作台壳
 
+PDF 可从布局菜单、命令面板或 Shift+F11 进入全屏阅读：保存当前侧栏开合与宽度、面板最大化和窗口全屏状态，隐藏标题栏、工作区标签与路径、PDF 工具栏和非必要悬浮入口。页码、缩放、退出控件在指针移动或键盘聚焦时出现，空闲后淡出；聚焦或悬停在控件上时不隐藏。Esc、退出按钮或再次按 Shift+F11 恢复进入前的窗口和布局；系统退出全屏时也结束沉浸状态。临时布局不写入用户偏好。
+
+布局 → 阅读仍是窗口内的侧栏收起和面板最大化。F11 仍只切换 Windows 窗口全屏；沉浸中按 F11 先退出沉浸并恢复进入前的窗口状态，避免维护另一套阅读全屏标记。
+
 ## 布局
 
-- **左栏**：文件树 + Paper Info（选中论文时显示，或在 Library 中悬停某行时预览该论文；切换到非论文文档时自动隐藏；无卡片容器、常驻 collapsible，点标题行即可折叠，高度 200ms 过渡；上边缘可拖拽调整高度，`preserve-pixel-size`；内容区可滚动但不显示滚动条；文件树多选时复用固定高度标题栏显示批量操作，不压缩或遮挡树；arXiv 论文在资源按钮区显示两行外链：首行 arXiv PDF、alphaXiv、魔搭论文解读与知乎提问入口，次行 GitHub（填写 `code_repo` 时）、Hugging Face 论文页（由 arXiv 标识派生）与 OpenReview；窄宽度下资源按钮退化为仅图标；元信息修改入口位于 Info 底部）。当前文件属于一个 LaTeX 项目时，这一块换成 项目结构大纲（编译、诊断和日志位于项目内嵌预览顶部的工具栏）。项目根与编译相同：`% !TEX root`、自身的 `\documentclass` / `\begin{document}`、或反向 `\input` / `\include` 找到的根文件；范围是该根文件所在目录，章节子目录、图片和 PDF 都算在内。没找到新根时沿用上一份 TeX，所以查看 PDF 不会收起面板。旁边的笔记不会因为库里另有一份 `thesis/` 而出现面板。编译引擎在标题右侧的设置里（根文件的 `% !TEX program` 优先，否则记住这个项目上次的选择，再否则 XeLaTeX），平时不出现在命令区。实时预览是开关，不改编译引擎。Library 悬停不再覆盖它；离开该项目后 Paper Info 按原规则恢复。Cool Papers / Kimi 解析入口在论文 `NOTES.md` 的 Markdown 工具栏，不在 Paper Info。左右栏共用 `bg-sidebar` 材质，与中间内容区分层。
+- **左栏**：文件树 + Paper Info（选中论文时显示，或在 Library 中悬停某行时预览该论文；切换到非论文文档时自动隐藏；无卡片容器、常驻 collapsible，点标题行即可折叠，高度 200ms 过渡；上边缘可拖拽调整高度，`preserve-pixel-size`；内容区可滚动但不显示滚动条；文件树多选时复用固定高度标题栏显示批量操作，不压缩或遮挡树；arXiv 论文在资源按钮区显示两行外链：首行 arXiv PDF、alphaXiv、魔搭论文解读与知乎提问入口（仅 DOI 标识的论文把 arXiv 卡片换成 `doi.org` DOI 卡片），次行 GitHub（填写 `code_repo` 时）、Hugging Face 论文页（由 arXiv 标识派生）与 OpenReview；标题行右侧显示可复制的 arXiv ID 或 DOI；窄宽度下资源按钮退化为仅图标；元信息修改入口位于 Info 底部）。当前文件属于一个 LaTeX 项目时，这一块换成 项目结构大纲（编译、诊断和日志位于项目内嵌预览顶部的工具栏）。项目根与编译相同：`% !TEX root`、自身的 `\documentclass` / `\begin{document}`、或反向 `\input` / `\include` 找到的根文件；范围是该根文件所在目录，章节子目录、图片和 PDF 都算在内。没找到新根时沿用上一份 TeX，所以查看 PDF 不会收起面板。旁边的笔记不会因为库里另有一份 `thesis/` 而出现面板。编译引擎在标题右侧的设置里（根文件的 `% !TEX program` 优先，否则记住这个项目上次的选择，再否则 XeLaTeX），平时不出现在命令区。实时预览是开关，不改编译引擎。Library 悬停不再覆盖它；离开该项目后 Paper Info 按原规则恢复。Cool Papers / Kimi 解析入口在论文 `NOTES.md` 的 Markdown 工具栏，不在 Paper Info。左右栏共用 `bg-sidebar` 材质，与中间内容区分层。
 - **中间**：无 Vault 欢迎页；有 Vault 时为全局 Dockview（见 [workspace.md](workspace.md)）。Dock 页签条略软于实色 muted，活动页签用 `background` 抬起；页签按下有轻 opacity 反馈。
 - **右栏**（可选）：Agent / 批注（`bg-sidebar`，与左栏同色）。
   - 参考文献与版面解析已移入 PDF 阅读器左侧浮层面板（见 [pdf.md](pdf.md)），不再占用右栏。
   - **移至新窗口**：标题栏右栏功能图标 **右键** →「移动至新窗口」→ 单例 `feature-{view}` Webview；主窗右栏收起。工具视图默认 **跟随主窗当前激活文档**（`workspace:active-changed`）。
 - 左右栏折叠：`⌥⌘S` / `⌘L`（不重叠）。折叠/展开直接切换 panel 布局，不做宽度过渡：栏宽逐帧变化会让 Dockview 与 PDF fit-width 在动画结束后二次重排，观感像来回缩放（#757）。
-- **标题栏**：`bg-background/75` + `backdrop-blur-xl` + `backdrop-saturate-150`（`supports-backdrop-blur` 回退更实色；`prefers-reduced-transparency` 下实色无 blur）。macOS 左侧留出避让原生三色按钮的拖拽条（`TrafficLightSpacer`，主窗 / 功能窗 / 文档弹出窗 / 设置窗共用），进入原生全屏（绿灯按钮）后三色按钮隐藏，该条收窄为常规 8px，避免首个控件被顶到 ~92px；进出全屏由 tao 的 resize 事件重新查询 `isFullscreen()`。右侧：更新指示器、窗口布局菜单、Agent 切换；有新版本可更新时显示更新指示器按钮（见 [settings.md](settings.md) 「应用更新」）。布局菜单提供 **Agent**（PDF / Agent `2:1`）、**笔记**（折叠左右侧栏，中间 PDF / Notes）和 **阅读**（沉浸阅读）三种预设。**阅读**不再依赖当前是不是标准双列：它折叠左右栏后调用 Dockview `maximizeGroup` 把当前活动分组铺满工作区，其它分栏和标签保持挂载但隐藏；再次点击 **阅读** 或切换到其它预设时，按进入前的预设 / 自定义栏位和宽度原样恢复（#764）。Agent / 笔记预设只调整 panel 宽度并开关当前论文的 Notes / Agent，不关闭其它 PDF tab。菜单项用 `onSelect` 触发，因此 `custom` 状态下重复点击同一预设、或再次点击已选中的 **阅读** 也会生效。
+- **分隔条常驻**：左右栏的分隔条（`ResizableHandle`）不随收起状态卸载，收起时改为 `w-0 opacity-0 pointer-events-none` + `disabled` 隐藏。收起可以由「把分隔条拖到 0」触发；如果这时同步卸载正在拖的 Separator，`react-resizable-panels` 4.12.2 会保留陈旧布局，之后 `expand()` / `resize()` 静默失败，展开后分隔条无法再拖动（#1163）。详见 [bug_fix/rail-separator-unmount.md](../bug_fix/rail-separator-unmount.md)。
+- **标题栏**：`bg-background/75` + `backdrop-blur-xl` + `backdrop-saturate-150`（`supports-backdrop-blur` 回退更实色；`prefers-reduced-transparency` 下实色无 blur）。macOS 左侧留出避让原生三色按钮的拖拽条（`TrafficLightSpacer`，主窗 / 功能窗 / 文档弹出窗 / 设置窗共用），进入原生全屏（绿灯按钮）后三色按钮隐藏，该条收窄为常规 8px，避免首个控件被顶到 ~92px；进出全屏由 tao 的 resize 事件重新查询 `isFullscreen()`。右侧：更新指示器、窗口布局菜单、Agent 切换；有新版本可更新时显示更新指示器按钮（见 [settings.md](settings.md) 「应用更新」）。布局菜单提供 **Agent**（PDF / Agent `2:1`）、**笔记**（左栏不动，收起右栏，中间 PDF / Notes）和 **阅读**（沉浸阅读）三种预设。预设和进入、退出阅读都走 `use-shell-layout.ts` 的 `applyLayoutMode`。**阅读**不再依赖当前是不是标准双列：它折叠左右栏后调用 Dockview `maximizeGroup` 把当前活动分组铺满工作区，其它分栏和标签保持挂载但隐藏；再次点击 **阅读** 或切换到其它预设时，按进入前的预设 / 自定义栏位和宽度原样恢复（#764）。Agent / 笔记预设只调整 panel 宽度并开关当前论文的 Notes / Agent，不关闭其它 PDF tab。菜单项用 `onSelect` 触发，因此 `custom` 状态下重复点击同一预设、或再次点击已选中的 **阅读** 也会生效。
 - **布局宽度记忆**：手动拖拽调整过的左栏宽度按布局模式各记一份，AI 右栏宽度全局只记一份；都以窗口宽度比例持久化在 localStorage `agentero.shellLayout.v1`（`layout-persist.ts` 的 `widths[slot].left` / `aiWidth`）。重进该布局、切换预设或重启应用，AI 栏都沿用最后一次拖出的宽度，不再回落到 320px 默认值；恢复时按面板 min/max 收窄 clamp，双击分隔条重置也会被记住。提交走 `ResizableGroup.onLayoutChanged` 且只认 `isUserInteraction`（拖拽释放 / 键盘调整），程序化预设应用、挂载回声与窗口重排不写入；拖到折叠（< 80px）不污染记忆宽度。布局模式本身与折叠态一并持久化，启动时在 `boot()` 经 `initShellLayoutFromPrefs()` 预置，首帧即上次布局。旧数据里按布局保存的右栏宽度会在读取时迁移为全局 `aiWidth`（优先当前布局，其次 custom）。
   - 手动修改后模式变为 `custom`，但左栏宽度仍归属最近选择的预设；`lastPreset` 一并保存，重启后恢复相同的左栏宽度槽位，后续拖动继续更新该预设。AI 栏宽度与布局无关，不再需要 `lastPreset` 归属。进入 `custom` 时同时快照左右栏折叠态。所有会改变折叠态的入口（`⌥⌘S` / `⌘L`、布局菜单外展开右栏、PDF pin 打开 Agent、聚焦侧栏展开左栏）都同样切到 `custom` 并持久化；功能窗口承接时不影响主窗布局。
   - 宽度比例统一以窗口宽度为基准（保存用面板实测 px ÷ 窗口宽，恢复按窗口宽 × 比例再 clamp），保存与恢复共用同一基准，双击重置直接提交已知的重置目标。主窗口的尺寸、位置和最大化状态由 `tauri-plugin-window-state` 持久化（仅跟踪 `main`），重启时先恢复窗口状态，再按窗口宽度换算栏宽比例。macOS 的恢复 / 最大化动画可能晚于前端首帧：启动后 2 秒内窗口尺寸若继续变化，会在 resize 稳定后按比例重排一次左右栏；之后窗口缩放仍按 `preserve-pixel-size` 保持像素宽度。
@@ -26,9 +31,11 @@
 ## 欢迎页与多窗口
 
 - 无 Vault：最近路径 MRU、打开 / 创建 / 从 Zotero 迁移。
-- `⌘N` → Host `window_new`（`?fresh=1`）；Vault 与 dock 布局按窗口 session 隔离。
+- `⌘N` → Host `window_new`（`?fresh=1`）。Vault 仍按窗口 session 隔离。dock 布局按窗口标签和当前 Vault 分键保存，新窗口不继承上一扇窗口的标签。
 - **功能单例窗**：`feature_window_open` → `?window=feature&view=…`（`FeatureWindowRoot`）。
-- **文档弹出窗**：文档 tab 右键「移动至新窗口」→ `doc_window_open` → `?window=doc&path=…`（`DocWindowRoot`）；同 path 再开则聚焦。弹出窗自启 per-window Vault watcher，Agent / 外部改盘后按主窗同一套规则就地重载 Markdown / PDF（Markdown 有未存改动则 toast 确认，PDF 重新读入最新字节）；本窗 autosave 会同步本地 seed，避免自写回声误触发重载。
+- **文档弹出窗**：文档 tab 右键「移动至新窗口」传入被点的视图 id（分屏副本不会改去关规范正文）。`moveDocToWindow` 先 `doc_window_open`（失败则源视图留下；同 path 已有窗口只聚焦，不改 mode），再用该路径的 `doc-` + SHA-256 标签 `emitTo` 询问目标窗。`DocWindowRoot` 要等内容载入才 accept；已有未保存草稿或加载失败则 refuse。源窗口在 accept 之后才从 tab store 删掉这一个视图并 `removePanel`，不走 `closeTab`，论文 NOTES 留在源窗口。Markdown 源码模式 flush 失败、拒绝、约 8 秒超时，以及超时之后才到的 accept，都不关源视图；等待期间源窗口保持可操作。弹出窗自启 per-window Vault watcher，Agent / 外部改盘后按主窗同一套规则就地重载 Markdown / PDF（Markdown 有未存改动则 toast 确认，PDF 重新读入最新字节）；本窗 autosave 会同步本地 seed，避免自写回声误触发重载。
+- 文档窗与功能窗成功打开 Vault 后各自 `vault_hold`（不走主窗的 `vault:opened`），卸载或离开该 Vault 时 `vault_release`。功能窗跟随主窗换库时先释放旧库再持有新库。只有最后一个持有者离开，Host 才释放该 Vault 的全局资源。
+- Windows 的唤起顺序（`unminimize` → `show` → `set_focus`）和多窗口仍按现有补丁保留。这次没有在 Windows 上复验。
 - 当前窗口 Vault：`sessionStorage`；MRU / 上次路径：`localStorage`。
 - Vault 切换菜单与欢迎页的最近路径使用 `displayPath` 展示普通 Windows 盘符 / UNC 路径；兼容历史记录中的 `\\?\` 前缀，不改写持久化路径或 Vault 身份。
 - 桌面窗口在 Webview 页面加载完成后显示；React 首次提交前由 `index.html` 的零依赖启动壳占位，避免冷启动和 dev 模块加载期间出现空白窗口。
@@ -65,13 +72,13 @@
 | 快捷键 | 行为 |
 |---|---|
 | `⌘,` | 开/关设置窗口 |
-| `⌘.` | PDF 视觉批注框选（当前论文：焦点在 PDF 或 NOTES 均可，handle 落在 body 标签） |
+| `⌘.` | PDF 版面元素选择开关（当前论文：焦点在 PDF 或 NOTES 均可，handle 落在 body 标签） |
 | `⌘N` | 新窗口 |
 | `⌘W` / `Esc` | 关弹层 → 关 panel → 关窗 |
 | `⇧⌘T` | 重新打开最近关闭的 panel（内存历史，最多 10 条；关论文正文记正文，恢复时连带 NOTES；切 Vault 清空） |
 | `⌥⌘←/→` | 按视觉顺序循环整个 Dockview 的 panel（会跨分组） |
 | `⌃Tab` / `⌃⇧Tab` | 只在当前 Dockview 分组的标签栏内切换下一个 / 上一个标签页（含命令面板「组内下一个标签页」） |
-| `⌘\` | 向右 Split pane：当前论文未打开 NOTES 时右侧打开 NOTES；否则复制当前 pane，并将横向 pane 等宽 |
+| `⌘\` | 向右 Split pane：论文正文上未开 NOTES 时右侧打开 NOTES，已开则收回（关闭）NOTES 分屏；在 NOTES 上按回到论文正文；其它文档复制当前 pane（不重置其它列宽） |
 | `⌘P` | 快速打开 |
 | `⇧⌘P` | 命令面板 |
 | `⌘/` | 切换当前 Markdown 编辑面板的源码与渲染视图（编辑器分组，可重绑） |
@@ -101,8 +108,6 @@ macOS 原生菜单在启动及设置保存后读取 `shortcutOverrides`，菜单
 
 前端快捷键绑定：`src/lib/shell/shortcuts.ts`；macOS 原生全屏由 `src-tauri/src/app/menu.rs` 的预定义菜单项处理。PDF、Markdown 编辑器及查找替换栏共用 `isFindShortcut`，macOS 仅 `⌘F`（不含 Ctrl / Shift / Alt）触发搜索，避免 `⌃⌘F` 误打开搜索或抢走搜索栏焦点；Windows/Linux 保留 `Ctrl+F`。Markdown 源码视图由 CodeMirror 处理查找与替换。文案 i18n 见 [settings.md](settings.md)。
 
-桌面设置里的「插件」入口、命令面板里的开发插件加载，以及打开 Vault 后的自动激活目前先隐藏。开关在 `src/lib/plugins/visibility.ts` 的 `pluginsSurfaceEnabled`；设置页、命令和宿主启动代码都还在，后端安装与执行路径未删。改回 `true` 后，「设置 → 插件」继续管理本地安装、按 Vault 授权及配置。插件通过命令 registry 和三个菜单贡献位接入；菜单点击传入对象上下文，切换 Vault 时撤销注册和在途调用。开发版另提供临时只读目录加载。详见 [本地插件系统](../backend/plugins.md)。
-
 命令与菜单共享的 `MenuContext` 定义在 `src/lib/shell/commands/types.ts`，菜单模块保留类型再导出供现有调用方使用。类型模块不引用菜单实现，避免与命令 registry 形成循环依赖；`pnpm deps:check` 会检查这类依赖环。
 
 ## 设计约定
@@ -117,3 +122,11 @@ macOS 原生菜单在启动及设置保存后读取 `shortcutOverrides`，菜单
 - **订阅 Host 事件一律用类型化事件绑定（`src/lib/core/bindings.ts` 的 `events.*`）：组件内 `useTauriEvent(events.x, cb)`，非 UI 模块 `listenEventSafe(events.x, cb)`（`src/lib/core/tauri-events.ts`）**；字符串事件名仅限前端窗口间广播（`workspace:*`、`agent:attach-context` 等）与 iOS bridge client 事件，非 Tauri wire 的 promise 式订阅（bridge、workspace-broadcast）用 `toSafeDisposer()`。手写 `let off; void (async () => { off = await listen(...) })(); return () => off?.()` 会在 `listen` resolve 前 dispose 时泄漏监听器 —— StrictMode 每次开发挂载都会命中。
 - **注册全局订阅的 `init*` / `start*` 必须返回 disposer**，并由调用方 effect 返回。
 - 每个 vault 的副作用挂在 `vault:opened` 作用域上，清理写在同一 handler 的 teardown 里，见 [../architecture.md](../architecture.md) 的「生命周期」。
+
+沉浸阅读退出时还会等待原窗口、侧栏与 Dockview 容器尺寸恢复，再恢复各个分栏的尺寸；避免原 PDF / NOTES.md 比例被全屏期间的布局计算覆盖。
+
+从分屏 NOTES.md 进入沉浸阅读时，显式最大化配对的 PDF，而非当前笔记面板；退出时恢复原先激活的面板。
+
+Dockview 的临时最大化事件在沉浸阅读期间不写入「布局 → 阅读」偏好，防止退出或重启后错误地最大化笔记并折叠侧栏。
+
+进入沉浸模式会释放原编辑器焦点，避免隐藏的笔记编辑器吞掉 Esc；笔记依然按原有规则自动保存。

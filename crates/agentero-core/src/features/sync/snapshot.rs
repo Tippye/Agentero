@@ -1,5 +1,6 @@
 //! Vault scanning → manifest (relative path → content hash + stat).
 
+use super::scope::{self, Category};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -44,7 +45,9 @@ pub struct FileEntry {
 /// path that happens to share one of these names (e.g. `notes/blobs/`)
 /// silently stops syncing — edits stay local, nothing propagates or deletes.
 pub fn is_ignored_name(name: &str) -> bool {
-    matches!(name, ".agentero" | ".git" | "node_modules" | ".DS_Store")
+    name.eq_ignore_ascii_case(".agentero")
+        || name.eq_ignore_ascii_case(".git")
+        || matches!(name, "node_modules" | ".DS_Store")
         || name.ends_with(".tmp")
         || crate::features::vault::tree::is_sync_store_artifact(name)
 }
@@ -153,20 +156,71 @@ pub fn is_scope_excluded(scope: &SyncScope, rel: &str) -> bool {
     }
 }
 
-/// Drop excluded paths from a manifest map. The same predicate blinds the
-/// local scan, the base, and the remote manifest, so a filtered file is
-/// neither uploaded nor downloaded — and never mistaken for a deletion.
-pub fn filter_files(
-    files: BTreeMap<String, FileEntry>,
-    scope: &SyncScope,
-) -> BTreeMap<String, FileEntry> {
-    if scope.is_all() {
-        return files;
+/// Local disk usage per bulky-asset category (bytes), for the sync-scope UI.
+#[derive(Debug, Default, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncScopeSizes {
+    pub pdf: u64,
+    pub source: u64,
+    pub attachments: u64,
+    /// Handwritten ink sidecars (mobile optional category).
+    pub ink: u64,
+    /// Finished translated PDFs (mobile optional category).
+    pub translated: u64,
+}
+
+pub fn scope_sizes(vault: &Path) -> Result<SyncScopeSizes, AppError> {
+    let papers = vault.join("papers");
+    if !papers.try_exists()? {
+        return Ok(SyncScopeSizes::default());
     }
-    files
+    let files = vault_files(&papers, "papers/")
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::message(e.to_string()))?;
+    let roots = scope::paper_roots(files.iter().map(|(rel, _)| rel.as_str()));
+    let mut sizes = SyncScopeSizes::default();
+    for (rel, file) in &files {
+        if let Some((category, _)) = scope::classify(rel, &roots) {
+            let size = file
+                .metadata()
+                .map_err(|e| AppError::message(e.to_string()))?
+                .len();
+            match category {
+                Category::Pdf => sizes.pdf += size,
+                Category::Source => sizes.source += size,
+                Category::Attachments => sizes.attachments += size,
+                Category::Ink => sizes.ink += size,
+                Category::Translated => sizes.translated += size,
+            }
+        }
+    }
+    Ok(sizes)
+}
+
+fn vault_files<'a>(
+    root: &'a Path,
+    prefix: &'a str,
+) -> impl Iterator<Item = Result<(String, walkdir::DirEntry), AppError>> + 'a {
+    walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .follow_root_links(false)
         .into_iter()
-        .filter(|(rel, _)| !is_scope_excluded(scope, rel))
-        .collect()
+        .filter_entry(|e| e.depth() == 0 || !is_ignored_name(&e.file_name().to_string_lossy()))
+        .filter_map(move |entry| match entry {
+            Ok(entry) if entry.depth() > 0 && entry.file_type().is_file() => {
+                let path = entry.path().strip_prefix(root).expect("vault descendant");
+                let rel = path
+                    .to_str()
+                    .filter(|rel| cfg!(windows) || !rel.contains('\\'))
+                    .ok_or_else(|| {
+                        AppError::message(format!("unsupported sync path: {}", path.display()))
+                    })
+                    .map(|rel| format!("{prefix}{}", rel.replace(std::path::MAIN_SEPARATOR, "/")));
+                Some(rel.map(|rel| (rel, entry)))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(AppError::message(error.to_string()))),
+        })
 }
 
 /// Scan the vault into manifest entries. Files whose `size + mtime` match the
@@ -177,25 +231,16 @@ pub fn scan_vault(
     scope: &SyncScope,
 ) -> Result<BTreeMap<String, FileEntry>, AppError> {
     let mut out = BTreeMap::new();
-    let walker = walkdir::WalkDir::new(vault)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| e.depth() == 0 || !is_ignored_name(&e.file_name().to_string_lossy()));
-    for entry in walker {
-        let entry = entry.map_err(|e| AppError::message(format!("scan vault: {e}")))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Some(rel) = entry
-            .path()
-            .strip_prefix(vault)
-            .ok()
-            .and_then(|p| p.to_str())
-            .map(|s| s.replace('\\', "/"))
-        else {
-            continue; // non-UTF-8 names cannot ride a JSON manifest
-        };
-        if is_scope_excluded(scope, &rel) {
+    let files = vault_files(vault, "")
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::message(format!("scan vault: {e}")))?;
+    let roots = if scope.is_all() {
+        Default::default()
+    } else {
+        scope::paper_roots(files.iter().map(|(rel, _)| rel.as_str()))
+    };
+    for (rel, entry) in files {
+        if scope::excluded(scope, &rel, &roots) {
             continue;
         }
         let meta = entry
@@ -397,6 +442,38 @@ mod tests {
         assert_eq!(scope_category("papers/x/translated.pdf"), Some("pdf"));
         assert_eq!(scope_category("loose.pdf"), None);
         assert_eq!(scope_category("notes/todo.md"), None);
+
+        // Nested paper roots (collections) use the same category model.
+        let roots = scope::paper_roots(["papers/collection/topic/x/metadata.json"]);
+        for (rel, expected) in [
+            ("papers/x/legacy.pdf", Some(Category::Pdf)),
+            ("papers/collection/topic/y/Y.PDF", Some(Category::Pdf)),
+            (
+                "papers/collection/topic/x/download.pdf",
+                Some(Category::Pdf),
+            ),
+            ("papers/collection/topic/x/source", Some(Category::Source)),
+            (
+                "papers/collection/topic/x/source/attachments/fig.pdf",
+                Some(Category::Source),
+            ),
+            (
+                "papers/collection/topic/x/attachments/source/fig.pdf",
+                Some(Category::Attachments),
+            ),
+            ("papers/collection/topic/x/NOTES.md", None),
+            ("papers/collection/topic/x/metadata.json", None),
+            ("papers/collection/topic/x/marks/a.json", None),
+            ("papers/collection/topic/x/assets/source/fig.pdf", None),
+            ("papers/collection/topic/handout.pdf", None),
+            ("loose.pdf", None),
+        ] {
+            assert_eq!(
+                scope::classify(rel, &roots).map(|(category, _)| category),
+                expected,
+                "{rel}"
+            );
+        }
     }
 
     #[test]

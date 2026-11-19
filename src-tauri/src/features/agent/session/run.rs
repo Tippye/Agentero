@@ -11,7 +11,7 @@ use crate::features::agent::acp::terminal::AcpTerminalManager;
 use crate::features::agent::acp::updates::{
     collaboration_from_config_options, effort_from_config_options, emit_rich_session_update,
     emit_session_config_options, fast_mode_value_to_set, is_fast_option, is_pi_startup_banner,
-    models_from_config_options, stream_from_update,
+    models_from_config_options, should_drop_codex_instruction_warning, stream_from_update,
 };
 use crate::features::agent::context_turn::{
     insert_context_block, insert_resume_transcript, prepare_context,
@@ -33,12 +33,12 @@ use crate::features::agent::session::handlers::{
 };
 use crate::features::agent::session::pool::{pool_key, AgentWarmPool, PooledSlot};
 use crate::features::agent::session::warm::discard_unprompted_session;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CancelNotification, ContentBlock, ImageContent, LoadSessionRequest, NewSessionRequest,
     PromptRequest, ResumeSessionRequest, SessionConfigId, SessionConfigOptionValue, SessionId,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent,
 };
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::{v1::ConnectionTo, Agent};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -82,7 +82,7 @@ pub struct RunOnceParams {
     /// resume `resume_session_id`, so the new session still sees the conversation.
     pub resume_transcript: Option<String>,
     /// Stdio MCP servers attached on a local session, besides research context.
-    pub delegate_mcp: Vec<agent_client_protocol::schema::v1::McpServer>,
+    pub delegate_mcp: Vec<agent_client_protocol::v1::schema::McpServer>,
     /// Remote-target hint inserted before the user request. Empty when none are connected.
     pub delegate_hint: Option<String>,
     /// Keep the answer in `progress` and do not emit chat transcript events.
@@ -107,7 +107,7 @@ struct RunTurnPrep {
     full_prompt: String,
     prompt_images: Vec<PromptImage>,
     cwd: PathBuf,
-    mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+    mcp_servers: Vec<agent_client_protocol::v1::schema::McpServer>,
     /// Provider session to continue after the context fingerprint check.
     resume_session_id: Option<String>,
     context_fingerprint: Option<String>,
@@ -123,7 +123,7 @@ struct RunTurnInput {
     cwd: PathBuf,
     /// Provider session id to continue (resume/load) instead of `session/new`.
     resume_session_id: Option<String>,
-    mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+    mcp_servers: Vec<agent_client_protocol::v1::schema::McpServer>,
     preferences: RunPreferences,
 }
 
@@ -131,7 +131,7 @@ struct RunTurnInput {
 #[derive(Clone)]
 struct ConnectedSession {
     acp_session_id: SessionId,
-    config_options: Vec<agent_client_protocol::schema::v1::SessionConfigOption>,
+    config_options: Vec<agent_client_protocol::v1::schema::SessionConfigOption>,
     /// Resolved provider resume id when continuing an earlier session
     /// (drives the history-replay buffer clear before the prompt).
     resume_id: Option<String>,
@@ -311,6 +311,9 @@ pub(crate) struct RunOnceContext {
     agent_id: String,
     /// pi-acp forwards a CLI startup banner that must be dropped from the stream.
     is_pi: bool,
+    /// codex-acp forwards instruction warnings as assistant text when the
+    /// client has not negotiated a typed notice.
+    is_codex: bool,
     content_buf: Arc<Mutex<String>>,
     thought_buf: Arc<Mutex<String>>,
     coalescer: StreamCoalescer,
@@ -331,6 +334,9 @@ pub(crate) struct RunOnceContext {
     pub(crate) permission_host: Option<String>,
     progress: Option<Arc<Mutex<String>>>,
     pub(crate) user_wait: Option<Arc<DelegateUserWait>>,
+    workflow: String,
+    vault_path: Option<String>,
+    target: Option<String>,
 }
 
 impl RunOnceContext {
@@ -361,6 +367,7 @@ impl RunOnceContext {
             message_id: params.message_id.clone(),
             agent_id: params.desc.id.clone(),
             is_pi: matches!(params.desc.template, AgentTemplate::Pi),
+            is_codex: matches!(params.desc.template, AgentTemplate::CodexAcp),
             content_buf: Arc::new(Mutex::new(String::new())),
             thought_buf: Arc::new(Mutex::new(String::new())),
             coalescer,
@@ -375,6 +382,13 @@ impl RunOnceContext {
             permission_host: params.permission_host.clone(),
             progress: params.progress.clone(),
             user_wait: params.user_wait.clone(),
+            workflow: params
+                .workflow
+                .clone()
+                .filter(|workflow| !workflow.trim().is_empty())
+                .unwrap_or_else(|| "free".to_string()),
+            vault_path: params.vault_path.clone(),
+            target: params.target.clone(),
         }
     }
 
@@ -410,6 +424,7 @@ impl RunOnceContext {
                     SessionUpdate::AvailableCommandsUpdate(_)
                     | SessionUpdate::ConfigOptionUpdate(_)
                     | SessionUpdate::UsageUpdate(_)
+                    | SessionUpdate::Notice(_)
                     | SessionUpdate::SessionInfoUpdate(_) => {
                         emit_rich_session_update(
                             &self.app,
@@ -424,14 +439,29 @@ impl RunOnceContext {
             return;
         }
         if let Some((chunk, kind)) = stream_from_update(&notification.update) {
+            let content_empty = self
+                .content_buf
+                .lock()
+                .is_ok_and(|buffer| buffer.is_empty());
             let drop_banner = self.is_pi
                 && matches!(kind, AgentStreamKind::Message)
                 && is_pi_startup_banner(&chunk)
-                && self
-                    .content_buf
-                    .lock()
-                    .is_ok_and(|buffer| buffer.is_empty());
-            if !drop_banner {
+                && content_empty;
+            let drop_codex_warning =
+                should_drop_codex_instruction_warning(self.is_codex, kind, &chunk, content_empty);
+            if drop_codex_warning {
+                log::info!(
+                    target: "agentero::agent",
+                    "codex instruction warning kept out of the transcript: {chunk}"
+                );
+                if !self.suppress_transcript {
+                    let _ = self.app.emit(
+                        "agent:status",
+                        AgentStatusEvent::codex_instruction_budget(self.session_id.as_str()),
+                    );
+                }
+            }
+            if !drop_banner && !drop_codex_warning {
                 match kind {
                     AgentStreamKind::Message => {
                         if let Ok(mut buf) = self.content_buf.lock() {
@@ -707,6 +737,16 @@ impl RunOnceContext {
         if let Ok(mut s) = self.stop_reason.lock() {
             *s = Some(format!("{:?}", prompt_response.stop_reason));
         }
+        if let Some(usage) = prompt_response.usage.as_ref() {
+            super::tokens::record_turn_tokens(
+                self.app.app_handle(),
+                &self.session_id,
+                self.vault_path.as_deref(),
+                self.target.as_deref(),
+                &self.workflow,
+                usage.total_tokens,
+            );
+        }
 
         Ok(self.finalize(&session_id))
     }
@@ -719,7 +759,7 @@ impl RunOnceContext {
         cancellation: &mut watch::Receiver<bool>,
         resume_session_id: Option<String>,
         cwd: &Path,
-        mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+        mcp_servers: Vec<agent_client_protocol::v1::schema::McpServer>,
     ) -> Result<TurnPhase<ConnectedSession>, agent_client_protocol::Error> {
         let init = tokio::select! {
             result = timed_acp_initialize(
@@ -807,7 +847,7 @@ impl RunOnceContext {
         rid: &str,
         cwd: &Path,
         can_resume: bool,
-        mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+        mcp_servers: Vec<agent_client_protocol::v1::schema::McpServer>,
     ) -> Result<TurnPhase<ConnectedSession>, agent_client_protocol::Error> {
         if can_resume {
             let resp = tokio::select! {
@@ -863,10 +903,10 @@ impl RunOnceContext {
         connection: &ConnectionTo<Agent>,
         cancellation: &mut watch::Receiver<bool>,
         acp_session_id: &SessionId,
-        mut config_options: Vec<agent_client_protocol::schema::v1::SessionConfigOption>,
+        mut config_options: Vec<agent_client_protocol::v1::schema::SessionConfigOption>,
         prefs: &RunPreferences,
     ) -> Result<
-        TurnPhase<Vec<agent_client_protocol::schema::v1::SessionConfigOption>>,
+        TurnPhase<Vec<agent_client_protocol::v1::schema::SessionConfigOption>>,
         agent_client_protocol::Error,
     > {
         macro_rules! return_cancelled {

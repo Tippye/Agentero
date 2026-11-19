@@ -9,14 +9,14 @@ export type InkViewport = {
 	getMetrics(): { scrollLeft: number; scrollTop: number };
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
-export const INK_LONG_PRESS_MS = 1000;
+export const INK_LONG_PRESS_MS = 1200;
 /** Hold this long anywhere on a page to create a note. */
 export const INK_NOTE_LONG_PRESS_MS = 3000;
 /** A pen in range keeps new finger gestures out of an active writing session. */
 export const INK_PEN_HOVER_GUARD_MS = 1500;
 /** Pausing this long at the end of a pen stroke snaps it to a clean shape. */
 export const INK_SHAPE_HOLD_MS = 500;
-const HOLD_SLOP_PX = 8;
+const HOLD_SLOP_PX = 6;
 /** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {
 	target: HTMLElement;
@@ -242,6 +242,12 @@ export function bindInkInput(options: {
 		!!event.target.closest(
 			"[data-pdf-chrome],button,input,textarea,[contenteditable='true'],[role='dialog']",
 		);
+	/** Transparent link/figure hit buttons are reading surface: a finger on
+	 * them must pan like the rest of the page instead of falling through to
+	 * EmbedPDF drag-selection. Their clicks keep the travel-tolerance guard. */
+	const pageHitTarget = (event: Event) =>
+		event.target instanceof Element &&
+		!!event.target.closest("[data-layout-hit],[data-pdf-link-hit]");
 	const armHold = (event: PointerEvent, page: InkInputPage) => {
 		clearHold();
 		const generation = ++epoch;
@@ -292,7 +298,7 @@ export function bindInkInput(options: {
 				}
 			}, INK_LONG_PRESS_MS),
 		};
-		// A longer hold turns into a note. It stays armed after the 1 s text
+		// A longer hold turns into a note. It stays armed after the 1.2 s text
 		// selection so the user can keep holding instead of hunting the menu.
 		clearNoteHold();
 		if (
@@ -344,7 +350,7 @@ export function bindInkInput(options: {
 			clearNoteHold();
 	};
 	const down = (event: PointerEvent) => {
-		if (excluded(event)) return;
+		if (excluded(event) && !pageHitTarget(event)) return;
 		notePenHover(event);
 		if (event.pointerType === "pen") {
 			options.onPenDetected?.();
@@ -635,6 +641,9 @@ export function bindInkInput(options: {
 		consume(event);
 	};
 	const mouse = (event: MouseEvent) => {
+		// Buttons stay excluded here: a tap on a link/figure hit target must
+		// survive the post-touch suppression window and be judged by its
+		// travel-tolerance click guard, not swallowed as a compatibility event.
 		if (excluded(event)) return;
 		if (
 			(editing() || Date.now() < suppressMouseUntil) &&

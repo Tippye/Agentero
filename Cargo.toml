@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "src-tauri/plugins/agentero-mobile", "cli", "crates/agentero-core", "crates/agentero-mcp", "crates/agentero-plugin-host"]
+members = ["src-tauri", "src-tauri/plugins/agentero-mobile", "cli", "crates/agentero-core", "crates/agentero-mcp"]
 exclude = ["patches/tesseract-rs", "vendor/android-native-keyring-store"]
 resolver = "2"
 

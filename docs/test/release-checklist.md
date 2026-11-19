@@ -61,7 +61,7 @@ cargo test -p agentero-core -p agentero-cli
 |---|---|---|---|---|
 | 0.2.1 | 终端 | 跑上列命令 | 全部通过 | ☐ |
 | 0.2.2 | GitHub Actions | Release job 的 updater secret 校验 | `TAURI_SIGNING_PRIVATE_KEY` 和密码缺失时在创建 Draft 前失败 | ☐ |
-| 0.2.3 | Draft Release | 检查 updater 资产 | 有 `latest.json`、各平台 updater 包与对应 `.sig`；`latest.json` 包含每个平台的 URL 和签名，且 URL 为 `github.com/.../releases/download/...`（不是 `api.github.com/.../releases/assets/...`，匿名下载会被 60 次/小时限流） | ☐ |
+| 0.2.3 | Draft Release | 检查 updater 资产 | 有 `latest.json`、各平台 updater 包与对应 `.sig`；`latest.json` 包含每个平台（含 `windows-x86_64` / `windows-aarch64`）的 URL 和签名，且 URL 为 `github.com/.../releases/download/...`（不是 `api.github.com/.../releases/assets/...`，匿名下载会被 60 次/小时限流） | ☐ |
 | 0.2.3a | GitHub Actions / AtomGit | 配置 `ATOMGIT_TOKEN`，发布 Release 后检查自动触发的同步 job（或按 tag 手动 Run workflow） | 「Publish the release tag on AtomGit」步骤不因 push 被拒而失败：镜像仓库会告警 `pull-mirror (image) repository` 后继续；同名 tag 提交一致；说明和全部上传附件同步；每个附件回读 SHA-256 一致；重跑不重复附件；最新稳定版发布后标记 `latest`；预发布与补传旧稳定版为 `pre` 且不抢占现有 `latest`；缺令牌或附件失败时 job 报错 | ☐ |
 | 0.2.3b | GitHub Actions / AtomGit | 检查同步 job 的「Pin AtomGit to its overseas edge」步骤日志 | 四个域名全部 `Pinned <host> -> <IP>`；`getent hosts` 显示该 IP；上传日志的 `via <host>` 为 `file.gitcode.com`（已在固定列表内，若变成别的 OBS 域名需补进列表）；120 MB 级 AppImage 在数十秒内 `Uploaded and verified`，无 `HTTP 502`、无 `Retry n/2` | ☐ |
 | 0.2.4 | GitHub Actions / 应用·设置 | 确认 `AGENTERO_BUILTIN_API_KEY` secret 已配且本次构建注入了它 | 缺 secret **不会**让构建失败（`option_env!` 当未设置处理），只会静默产出没有内置 provider 的包。信号：Host `builtin_provider_status.available` 为 `true`。新装正文引擎始终默认「本地」，设置页不再提供内置正文选项，不能用该下拉判断 key 是否注入。见 [release.md](release.md) §内置 Provider 构建期注入 | ☐ |
@@ -279,6 +279,8 @@ cargo test -p agentero-core -p agentero-cli
 | 7.1.4 | 中间栏·PDF | 打开大纲，点书签 | 跳到对应位置 | ☐ |
 | 7.1.5 | 中间栏·PDF | `⌘F` 输入文中词 | 命中高亮；可下一条 | ☐ |
 | 7.1.6 | 中间栏·论文 PDF | 点击原生 citation / 章节链接、URI 及纯文本 URL，悬停引用；开启 / 关闭全文译文后重试，并在译文上划选。若测试 PDF 包含无目标 Link，也点击检查 | 内链跳页、返回位置可用；外链只打开一次；引用预览正常；无八点选中框；译文划选和高亮编辑保留，未翻译区域的链接仍可点 | ☐ |
+| 7.1.7 | 中间栏·PDF + NOTES·TeX | 在 PDF 正文 `⌘`+点击（SyncTeX 反向搜索） | 跳到对应 TeX 源文件与行；已打开的 clone 面板按当前版本路由，不抢焦点 | ☐ |
+| 7.1.8 | 中间栏·PDF | 开启重排（reflow）视图，检查 overlay 工具条与导出入口 | overlay 正常显示/隐藏，缩放与翻页后可用；导出按门控出现 | ☐ |
 
 ### 7.2 划词与批注
 
@@ -293,16 +295,19 @@ cargo test -p agentero-core -p agentero-cli
 | 7.2.7 | 划词加入对话 | 划词 → 点 **加入对话** 或按 `⇧⌘L` → 在 Agent 输入问题发送 | Composer 输入框内有选区引用块且侧栏打开；发送后选区旁出现**对话卡片**页边针（`kind: ask`，非视觉批注）；悬停/点开可见本轮问答 | ☐ |
 
 | 7.2.8 | 设置·快捷键 | 重绑定加入对话 → 跨 PDF / 网页 / 笔记 / 代码 / 广场触发 → 清除 / 恢复 → 重启 | 当前组合与提示一致，旧组合失效；冲突保留原值；⌘L 有选区也只切换侧栏；录制不执行命令 | ☐ |
+| 7.2.9 | 中间栏·PDF | 从上一页末尾拖选到下一页开头（跨页划词），再点高亮 / 加入对话 | 跨页选区连续、不丢页；操作作用于完整跨页选区（原自动测试为假 DOM 时序，已转手工回归） | ☐ |
+| 7.2.10 | 中间栏·PDF | 在页面边缘 / 角落划词，观察操作菜单与翻译卡片位置；拖动翻译卡片后缩放页面 | 菜单锚定选区且不越出视口；翻译卡片定位跟随选区、拖拽后位置保留、不遮挡选区（原像素级自动断言已转手工回归） | ☐ |
 
 ### 7.3 视觉批注与版面分析
 
 | # | 界面 | 操作 | 预期 | 结果 |
 |---|---|---|---|---|
-| 7.3.1 | 中间栏·PDF | 按 `⌘.` 框选某插图/表/算法区域，输入备注保存 | `marks/<id>.json` 写入 `kind: visual` v2；页边针出现；可再次编辑备注 | ☐ |
-| 7.3.2 | 中间栏·PDF | 框选区域后按 `⌘Enter` 向 Agent 提问 | 视觉上下文进入 Agent 会话；回答后同一 mark 可续聊 | ☐ |
+| 7.3.1 | 中间栏·PDF | 按 `⌘.` 开启 / 关闭元素选择，再点击工具栏 ScanSearch 图标 | 快捷键与按钮切换同一状态；悬停出现元素类别与框；不进入框选批注，不写 marks | ☐ |
+| 7.3.2 | 中间栏·PDF | 选择图表 / 公式后点「加入对话」 | 裁剪图进入 Agent composer；不创建视觉批注，历史批注仍可读取 | ☐ |
 | 7.3.3 | 右栏·Figures | 打开带插图的 paper，点「分析」 | 列出 figure/table/algorithm/formula；点击跳转到对应位置 | ☐ |
-| 7.3.4 | 中间栏·PDF | 悬停有编号公式命中框并单击 | 与插图一致：出现「单击进行批注」提示，单击打开视觉批注编辑器 | ☐ |
-| 7.3.5 | 中间栏·PDF | 点工具栏 Languages 全文翻译 | 分批出译文；某页条目结束即显示重排预览，后续批次不清掉它；全文结束后校正，未变化页不重复渲染；终局完成后才可导出；停止/清空/重试不恢复旧预览；磁盘 `source/layout-translate.json` 有缓存 | ☐ |
+| 7.3.4 | 中间栏·PDF | 点工具栏「选择版面元素」，悬停有编号公式并单击 | 出现公式类别和框；单击可加入对话或翻译；不打开视觉批注编辑器，也不写入 visual mark | ☐ |
+| 7.3.5 | 中间栏·PDF | 开启元素选择后点击正文类别标签选择整段，再点击段内一句；双栏时悬停译文同一句；再次点击按钮 / Esc 退出 | 类别标签操作引用整段文字，段内操作引用当前句；正文框与句子浅底同时可见；双栏另一侧同一句一起浅亮，移开后两侧消失；退出模式后隐藏类别与元素框，普通句子悬停与双栏同句浅底继续生效；不写入 visual mark | ☐ |
+| 7.3.5 | 中间栏·PDF | 点工具栏「译文」 | 分批出译文；某页条目结束即显示重排预览，后续批次不清掉它；全文结束后校正，未变化页不重复渲染；终局完成后才可导出；停止/清空/重试不恢复旧预览；磁盘 `source/layout-translate.json` 有缓存 | ☐ |
 | 7.3.5a | 中间栏·PDF（翻译服务=Agentero 内置） | 对一篇含公式 / URL / 引用标记的论文跑全文翻译，逐段对照原文 | 内置路径的 `[[n]]` 批次由 Host 拆分逐段请求再重组：译文**不错位、不并段、不丢块**；`⟦n⟧` 占位符保护的公式 / URL / 引用在译文里原样还原，**没有**出现裸露的 `⟦0⟧` 或被吞掉后整段回落原文（这两点是尚未用真实 key 验证过的假设，见 [../backend/builtin-provider.md](../backend/builtin-provider.md) §限制与后续） | ☐ |
 
 ### 7.4 图片与 MD 插图
@@ -493,6 +498,8 @@ agentero --vault /tmp/agentero-cli-vault paper list --json
 | 远程 §12 | ☐ | ☐ | 12.9 拒绝 ☐ |
 | CLI §13 | ☐ | ☐ | ☐ |
 | 外壳右键集成 §0.3.5/0.3.6 | ☐ | N/A | ☐ |
+
+Windows ARM64 首次发版至少跑 §0.3 + §1：运行 `arm64-setup.exe`（x86 安装器由 Windows 11 ARM 模拟执行），确认任务管理器中 `agentero.exe` 为 ARM64，完成一次 PDF 解析；应用内“安装 CLI”应下载 `agentero-cli-<version>-aarch64-pc-windows-msvc.zip` 并成功执行 `agentero-cli --version`。
 
 ---
 
