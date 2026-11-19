@@ -6491,8 +6491,9 @@ export type TranslateSettings = {
 	/**  Persist extracted reflow character IR pages in the app cache (default on). */
 	cacheReflowIr?: boolean,
 	/**
-	 *  Persist the finished translated PDF in the app cache (default off;
-	 *  each final is roughly 25 MB).
+	 *  Persist the finished translated PDF in the paper's `translated/`
+	 *  directory (default on; each final is roughly 25 MB) so reopening a
+	 *  translated paper reuses the built PDF instead of typesetting again.
 	 */
 	cacheReflowFinal?: boolean,
 	/**

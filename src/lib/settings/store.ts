@@ -156,6 +156,11 @@ export async function ensureSettingsLoaded(): Promise<AppSettings> {
 				}
 				// Drop dual-source: file is authoritative after first load.
 				clearLegacyLocalStorage();
+				const migrated = migrateTranslateFinalCacheDefault(next);
+				if (migrated !== next) {
+					next = migrated;
+					await persistToHost(next);
+				}
 				setCache(next);
 			} else {
 				// Browser-only dev: no XDG file; keep in-memory defaults
@@ -289,6 +294,33 @@ function clearLegacyLocalStorage(): void {
 	} catch {
 		// ignore
 	}
+}
+
+/**
+ * One-shot flip of the legacy "translated PDF cache off" default. Older
+ * installs stored `cacheReflowFinal: false` (the previous default), which
+ * made every reopen re-typeset the whole translated PDF. Flip it once so the
+ * built PDF under `papers/<id>/translated/` is reused; the switch in Settings
+ * → Translate still turns it off afterwards.
+ */
+const TRANSLATE_FINAL_CACHE_MIGRATION_KEY =
+	"agentero:translate-final-cache-default-v1";
+
+function migrateTranslateFinalCacheDefault(settings: AppSettings): AppSettings {
+	try {
+		if (typeof localStorage === "undefined") return settings;
+		if (localStorage.getItem(TRANSLATE_FINAL_CACHE_MIGRATION_KEY)) {
+			return settings;
+		}
+		localStorage.setItem(TRANSLATE_FINAL_CACHE_MIGRATION_KEY, "1");
+	} catch {
+		return settings;
+	}
+	if (settings.translate.cacheReflowFinal) return settings;
+	return {
+		...settings,
+		translate: { ...settings.translate, cacheReflowFinal: true },
+	};
 }
 
 function normalizeSettings(raw: AppSettings): AppSettings {
