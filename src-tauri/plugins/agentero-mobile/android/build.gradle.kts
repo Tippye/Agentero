@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "app.agentero.mobile"
     compileSdk = 36
-    defaultConfig { minSdk = 31 }
+    defaultConfig { minSdk = 33 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
