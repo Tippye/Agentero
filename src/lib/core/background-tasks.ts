@@ -177,6 +177,28 @@ function uid(): string {
 /** Finished rows stay until the user clears them or a newer task pushes them out. */
 const MAX_HISTORY = 12;
 
+/**
+ * A retry or success for the same paper supersedes its earlier failure rows:
+ * the bottom-left indicator must not keep reporting "service unreachable"
+ * from an old attempt once a newer run of the same kind is under way or has
+ * completed. Rows without a paper scope are never auto-superseded.
+ */
+function dropSupersededFailures(
+	tasks: BackgroundTask[],
+	kind: BackgroundTaskKind,
+	paperPath: string | null | undefined,
+	exceptId: string,
+): BackgroundTask[] {
+	if (!paperPath) return tasks;
+	return tasks.filter(
+		(t) =>
+			t.id === exceptId ||
+			t.status !== "failed" ||
+			t.kind !== kind ||
+			t.paperPath !== paperPath,
+	);
+}
+
 export function startBackgroundTask(input: {
 	kind: BackgroundTaskKind;
 	title: string;
@@ -218,7 +240,10 @@ export function startBackgroundTask(input: {
 		updatedAt: now,
 	};
 	const without = store().tasks.filter((t) => t.id !== id);
-	const tasks = [...without, task].slice(-MAX_HISTORY - 8);
+	const tasks = [
+		...dropSupersededFailures(without, input.kind, input.paperPath, id),
+		task,
+	].slice(-MAX_HISTORY - 8);
 	setStore({ ...store(), tasks, expanded: store().expanded });
 	return id;
 }
@@ -261,11 +286,22 @@ export function updateBackgroundTask(
 }
 
 export function completeBackgroundTask(id: string, detail?: string): void {
+	const task = store().tasks.find((t) => t.id === id);
 	updateBackgroundTask(id, {
 		status: "completed",
 		progress: 100,
 		...(detail !== undefined ? { detail } : {}),
 	});
+	// A successful run retires the same paper's earlier failure rows.
+	if (task?.paperPath) {
+		const tasks = dropSupersededFailures(
+			store().tasks,
+			task.kind,
+			task.paperPath,
+			id,
+		);
+		if (tasks.length !== store().tasks.length) setStore({ ...store(), tasks });
+	}
 }
 
 export function failBackgroundTask(id: string, error: string): void {
@@ -310,6 +346,20 @@ export function clearFinishedBackgroundTasks(): void {
 	const tasks = store().tasks.filter(
 		(t) => t.status === "queued" || t.status === "running",
 	);
+	setStore({
+		...store(),
+		tasks,
+		expanded: tasks.length > 0 ? store().expanded : false,
+	});
+}
+
+/** Manually remove one finished row (swipe / dismiss button). Active rows stay. */
+export function dismissBackgroundTask(id: string): void {
+	const previous = store().tasks;
+	const tasks = previous.filter(
+		(t) => t.id !== id || t.status === "queued" || t.status === "running",
+	);
+	if (tasks.length === previous.length) return;
 	setStore({
 		...store(),
 		tasks,

@@ -171,7 +171,8 @@
 	"tasks": {
 		"show": "显示后台任务",
 		"hide": "收起后台任务",
-		"cancel": "取消任务"
+		"cancel": "取消任务",
+		"dismiss": "关闭通知"
 	},
 	"reader": {
 		"closeTranslation": "关闭对照译文",

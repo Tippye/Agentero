@@ -171,7 +171,8 @@
 	"tasks": {
 		"show": "Show background tasks",
 		"hide": "Hide background tasks",
-		"cancel": "Cancel task"
+		"cancel": "Cancel task",
+		"dismiss": "Dismiss notification"
 	},
 	"reader": {
 		"closeTranslation": "Close translation",

@@ -235,6 +235,7 @@
 	"tasks": {
 		"title": "Background Tasks",
 		"clearFinished": "Clear finished",
+		"dismiss": "Dismiss notification",
 		"cancel": "Cancel",
 		"cancelled": "Cancelled",
 		"failed": "Task failed",

@@ -1,11 +1,12 @@
 import { ChevronUp, LoaderCircle, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { useBackgroundTasks } from "@/hooks/use-background-tasks";
 import {
 	type BackgroundTask,
 	cancelBackgroundTask,
+	dismissBackgroundTask,
 } from "@/lib/core/background-tasks";
 import { cn } from "@/lib/core/utils";
 
@@ -34,12 +35,21 @@ function TaskProgress({ task }: { task: BackgroundTask }) {
 	);
 }
 
+/** Horizontal distance that commits a swipe-to-dismiss. */
+const SWIPE_DISMISS_PX = 72;
+/** Flight-out duration before the row is removed from the store. */
+const SWIPE_EXIT_MS = 180;
+
 /**
  * Floating readout for Host/renderer tasks (translation, layout, imports).
  *
  * The tasks survive the reader: execution belongs to the app-level task
  * runtime, so this pill is the visible "still running in the background"
  * surface after the document unmounts.
+ *
+ * Failure rows are dismissible: a newer run of the same kind for the same
+ * paper retires them automatically (see background-tasks), and the user can
+ * swipe the pill off screen or tap its close button at any time.
  */
 export function MobileTaskIndicator() {
 	const { tasks } = useBackgroundTasks();
@@ -48,14 +58,103 @@ export function MobileTaskIndicator() {
 	const active = tasks.filter(isActive);
 	const failed = tasks.filter((task) => task.status === "failed").slice(-1);
 	const visible = [...active, ...failed];
-	if (visible.length === 0) return null;
 	const primary = visible[0];
+	const primaryId = primary?.id;
+	const failedPrimary = primary != null && !isActive(primary);
+
+	// Swipe-to-dismiss state for a failed pill. Vertical gestures stay with
+	// the browser (touch-action: pan-y); horizontal drags move the pill.
+	const swipeRef = useRef<{
+		pointerId: number;
+		startX: number;
+		startY: number;
+		engaged: boolean;
+	} | null>(null);
+	const suppressClickRef = useRef(false);
+	const [swipeX, setSwipeX] = useState(0);
+	const [swiping, setSwiping] = useState(false);
+	const [leaving, setLeaving] = useState(false);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: primaryId is a reset signal when the shown task changes
+	useEffect(() => {
+		setSwipeX(0);
+		setSwiping(false);
+		setLeaving(false);
+		swipeRef.current = null;
+	}, [primaryId]);
+
+	if (visible.length === 0) return null;
 	const percent =
 		primary.progress == null ? null : Math.round(primary.progress);
 
+	const dismissFailed = (id: string) => {
+		setLeaving(true);
+		window.setTimeout(() => dismissBackgroundTask(id), SWIPE_EXIT_MS);
+	};
+	const onSwipeDown = (event: React.PointerEvent<HTMLDivElement>) => {
+		if (!failedPrimary || leaving) return;
+		swipeRef.current = {
+			pointerId: event.pointerId,
+			startX: event.clientX,
+			startY: event.clientY,
+			engaged: false,
+		};
+	};
+	const onSwipeMove = (event: React.PointerEvent<HTMLDivElement>) => {
+		const swipe = swipeRef.current;
+		if (!swipe || swipe.pointerId !== event.pointerId) return;
+		const dx = event.clientX - swipe.startX;
+		const dy = event.clientY - swipe.startY;
+		if (!swipe.engaged) {
+			if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy)) return;
+			swipe.engaged = true;
+			setSwiping(true);
+		}
+		setSwipeX(dx);
+	};
+	const onSwipeUp = (event: React.PointerEvent<HTMLDivElement>) => {
+		const swipe = swipeRef.current;
+		swipeRef.current = null;
+		if (!swipe || swipe.pointerId !== event.pointerId) return;
+		if (!swipe.engaged) {
+			setSwipeX(0);
+			setSwiping(false);
+			return;
+		}
+		const dx = event.clientX - swipe.startX;
+		suppressClickRef.current = Math.abs(dx) > 14;
+		setSwiping(false);
+		if (Math.abs(dx) > SWIPE_DISMISS_PX) {
+			setSwipeX(Math.sign(dx) * Math.max(window.innerWidth, 480));
+			dismissFailed(primary.id);
+		} else {
+			setSwipeX(0);
+		}
+	};
+
 	return (
 		<div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+4.75rem)] left-3 z-30 max-w-[min(22rem,calc(100vw-1.5rem))]">
-			<div className="overflow-hidden rounded-xl border bg-background/95 shadow-lg backdrop-blur">
+			<div
+				className={cn(
+					"overflow-hidden rounded-xl border bg-background/95 shadow-lg backdrop-blur",
+					!swiping && "transition-[transform,opacity] duration-200 ease-out",
+					leaving && "opacity-0",
+				)}
+				style={{
+					transform: swipeX ? `translateX(${swipeX}px)` : undefined,
+					touchAction: failedPrimary ? "pan-y" : undefined,
+				}}
+				onPointerDown={onSwipeDown}
+				onPointerMove={onSwipeMove}
+				onPointerUp={onSwipeUp}
+				onPointerCancel={onSwipeUp}
+				onClickCapture={(event) => {
+					if (suppressClickRef.current) {
+						suppressClickRef.current = false;
+						event.preventDefault();
+						event.stopPropagation();
+					}
+				}}
+			>
 				<div className="flex items-stretch">
 					<button
 						type="button"
@@ -113,7 +212,18 @@ export function MobileTaskIndicator() {
 						>
 							<X className="size-4" />
 						</Button>
-					) : null}
+					) : (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							className="size-11 shrink-0 rounded-none border-l touch-manipulation"
+							aria-label={t("tasks.dismiss")}
+							onClick={() => dismissBackgroundTask(primary.id)}
+						>
+							<X className="size-4" />
+						</Button>
+					)}
 				</div>
 				{open ? (
 					<div className="max-h-60 overflow-y-auto overscroll-contain border-t">
@@ -155,7 +265,18 @@ export function MobileTaskIndicator() {
 												<X className="size-4" />
 											</Button>
 										</>
-									) : null}
+									) : (
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											className="size-11 shrink-0 touch-manipulation"
+											aria-label={t("tasks.dismiss")}
+											onClick={() => dismissBackgroundTask(task.id)}
+										>
+											<X className="size-4" />
+										</Button>
+									)}
 								</div>
 							);
 						})}
