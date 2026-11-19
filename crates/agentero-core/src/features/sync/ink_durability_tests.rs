@@ -214,7 +214,7 @@ async fn ink_publication_failure_keeps_acknowledged_original_and_stops_before_up
     let (store, cfg, a, _b, _) = acknowledged_ink_pair(false).await;
     let target = a.path().join(INK_PATH);
     let original = fs::read(&target).unwrap();
-    let base = local::read_base(a.path()).files[INK_PATH].hash.clone();
+    let base = local::read_base(a.path()).unwrap().files[INK_PATH].hash.clone();
     let head = store.get(HEAD_KEY).await.unwrap().unwrap().0;
     let before = store.counts().1;
     let (_guard, trace) = trace_ink_io(
@@ -226,7 +226,7 @@ async fn ink_publication_failure_keeps_acknowledged_original_and_stops_before_up
         .unwrap_err();
     assert_eq!(error.code(), "io");
     assert_eq!(fs::read(&target).unwrap(), original);
-    assert_eq!(local::read_base(a.path()).files[INK_PATH].hash, base);
+    assert_eq!(local::read_base(a.path()).unwrap().files[INK_PATH].hash, base);
     assert_eq!(store.get(HEAD_KEY).await.unwrap().unwrap().0, head);
     assert_eq!(store.counts().1, before);
     let trace = trace.lock().unwrap();
@@ -248,7 +248,7 @@ async fn ink_postrename_failure_keeps_valid_acknowledged_merge_and_aborts_remote
     let (store, cfg, a, b, acknowledged) = acknowledged_ink_pair(false).await;
     let target = a.path().join(INK_PATH);
     let original = fs::read(&target).unwrap();
-    let base = local::read_base(a.path()).files[INK_PATH].hash.clone();
+    let base = local::read_base(a.path()).unwrap().files[INK_PATH].hash.clone();
     let head = store.get(HEAD_KEY).await.unwrap().unwrap().0;
     let before = store.counts().1;
     let (guard, trace) = trace_ink_io(a.path(), Some((target.clone(), InkIoFailure::AfterRename)));
@@ -262,7 +262,7 @@ async fn ink_postrename_failure_keeps_valid_acknowledged_merge_and_aborts_remote
     let page = read_page(a.path(), "papers/x", 1).unwrap().document;
     assert_eq!(page.strokes.len(), 2);
     assert_eq!(page.strokes[0], acknowledged.strokes[0]);
-    assert_eq!(local::read_base(a.path()).files[INK_PATH].hash, base);
+    assert_eq!(local::read_base(a.path()).unwrap().files[INK_PATH].hash, base);
     assert_eq!(store.get(HEAD_KEY).await.unwrap().unwrap().0, head);
     assert_eq!(
         store.counts().1,
@@ -301,7 +301,7 @@ async fn ink_raw_conflict_postrename_failure_retains_losing_bytes_without_upload
         INK_PATH,
         &snapshot::hash_bytes(&original),
     ));
-    let base = local::read_base(a.path()).files[INK_PATH].hash.clone();
+    let base = local::read_base(a.path()).unwrap().files[INK_PATH].hash.clone();
     let head = store.get(HEAD_KEY).await.unwrap().unwrap().0;
     let before = store.counts().1;
     let (guard, trace) = trace_ink_io(a.path(), Some((copy.clone(), InkIoFailure::AfterRename)));
@@ -315,7 +315,7 @@ async fn ink_raw_conflict_postrename_failure_retains_losing_bytes_without_upload
         original,
         "conflict sources publish before replacing the acknowledged canonical page"
     );
-    assert_eq!(local::read_base(a.path()).files[INK_PATH].hash, base);
+    assert_eq!(local::read_base(a.path()).unwrap().files[INK_PATH].hash, base);
     assert_eq!(store.get(HEAD_KEY).await.unwrap().unwrap().0, head);
     assert_eq!(store.counts().1, before);
     {

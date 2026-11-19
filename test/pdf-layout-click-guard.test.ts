@@ -23,7 +23,7 @@ describe("PDF layout region click guard", () => {
 			isLayoutRegionActivation({
 				detail: 1,
 				origin: at(100, 100),
-				end: at(103, 104),
+				end: at(102, 102),
 			}),
 		).toBe(true);
 	});

@@ -7,6 +7,7 @@
 	"nav": {
 		"account": "账号与团队",
 		"general": "通用",
+		"activity": "使用情况",
 		"appearance": "外观",
 		"reading": "阅读手感",
 		"agent": "Agent",
@@ -19,8 +20,54 @@
 		"about": "关于",
 		"quickSetup": "快速配置向导",
 		"featureTour": "功能导引",
-		"sync": "同步",
-		"plugins": "插件"
+		"sync": "同步"
+	},
+	"activity": {
+		"title": "使用情况",
+		"openFailed": "打不开这篇论文",
+		"thisWeek": "本周",
+		"workflows": "Agent",
+		"papers": "读得最久",
+		"metric": {
+			"reading": "阅读",
+			"tokens": "Token"
+		},
+		"week": {
+			"reading": "阅读",
+			"papers": "论文",
+			"agent": "Agent 运行",
+			"tokens": "Token",
+			"unreported": "未报告"
+		},
+		"heatmap": {
+			"reading": "近 6 个月",
+			"tokens": "Token",
+			"less": "少",
+			"more": "多",
+			"cell": "{{date}} · {{value}}"
+		},
+		"weekday": {
+			"mon": "一",
+			"tue": "二",
+			"wed": "三",
+			"thu": "四",
+			"fri": "五",
+			"sat": "六",
+			"sun": "日"
+		},
+		"duration": {
+			"minutes": "{{count}} 分钟",
+			"hours": "{{count}} 小时",
+			"hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟"
+		},
+		"workflow": {
+			"free": "自由对话",
+			"qa": "问答",
+			"summary": "总结",
+			"related_work": "相关工作",
+			"paper_reader": "精读",
+			"translate": "翻译"
+		}
 	},
 	"writing": {
 		"uploadMode": "何时上传",
@@ -82,7 +129,9 @@
 		},
 		"terminalApp": {
 			"label": "终端打开方式",
-			"unavailable": "{{name}}（未安装）"
+			"systemDefault": "系统默认",
+			"unavailable": "{{name}}（未安装）",
+			"noneDetected": "未检测到支持的终端，选择「系统默认」即可使用桌面默认终端。"
 		},
 		"finder": {
 			"label": "访达集成",
@@ -256,6 +305,13 @@
 				"action": "清除",
 				"done": "已清除使用记录"
 			}
+		},
+		"pdfTranslateTab": {
+			"label": "翻译入口",
+			"description": "按钮停在页面一角，尺寸不随 PDF 缩放。隐藏后仍可用顶部工具栏和翻译快捷键。",
+			"hover": "悬停显示",
+			"always": "始终显示",
+			"hidden": "隐藏"
 		}
 	},
 	"appearance": {
@@ -375,7 +431,10 @@
 				"ok": "可用",
 				"failed": "不可达",
 				"unconfigured": "未配置"
-			}
+			},
+			"agentero": "Agentero Embedding",
+			"agenteroHint": "使用 Agentero 账户的 API Key。免费额度及超额开关由账户控制；切换会清空旧服务的密钥。",
+			"useAgentero": "使用 Agentero"
 		},
 		"desktopOnly": "Agent 注册表需要桌面应用。",
 		"desktopHint": "运行 `pnpm tauri dev` 以扫描本机上的 Agent。",
@@ -532,7 +591,7 @@
 		"title": "翻译",
 		"provider": {
 			"label": "默认服务",
-			"agentero": "Agentero 内置",
+			"agentero": "Agentero 云端（个人账户）",
 			"cnki": "CNKI 翻译助手",
 			"huoshanweb": "火山翻译 Web",
 			"tencenttransmart": "腾讯交互翻译",
@@ -563,33 +622,27 @@
 		"autoSelection": {
 			"label": "PDF 划词后自动翻译"
 		},
+		"alwaysShowCard": {
+			"label": "翻译卡片常显示"
+		},
 		"autoImport": {
 			"label": "版面解析后自动翻译",
-			"description": "导入、下载或重新解析版面完成后，在后台翻译全文。已有译文按缓存复用，只补译变化的块，并使用当前翻译服务和缓存设置。",
 			"concurrency": {
 				"label": "自动翻译的论文并发数"
 			}
 		},
-		"displayMode": {
-			"label": "翻译显示模式",
-			"overlay": "在原 PDF 上覆盖",
-			"dualPane": "双栏对照"
-		},
 		"cache": {
 			"section": "缓存",
 			"ir": {
-				"label": "缓存重排 IR",
-				"description": "保存抽取出的字符几何，再次打开时无需重新抽取。"
+				"label": "缓存排版"
 			},
 			"final": {
-				"label": "缓存译文 PDF",
-				"description": "保存构建完成的译文 PDF，每篇约 25 MB。"
+				"label": "缓存译文 PDF"
 			},
 			"tip": "关闭开关只停止写入新文件，已有缓存仍会复用。",
 			"reset": "还原默认",
 			"dictionary": {
 				"label": "查词缓存",
-				"description": "查词和语境结果保留 30 天。清除当前知识库缓存，内置词典仍可使用。",
 				"clear": "清除",
 				"clearFailed": "无法清除查词缓存。",
 				"cleared": "已清除"
@@ -614,6 +667,10 @@
 			"model": {
 				"label": "模型",
 				"placeholder": "服务商模型 ID"
+			},
+			"advanced": "高级",
+			"concurrency": {
+				"label": "并发数"
 			},
 			"extraRequestBody": {
 				"label": "额外参数",
@@ -653,13 +710,11 @@
 		"autoTranslation": {
 			"section": "自动翻译"
 		},
-		"dictionaryIncluded": "已内置离线英汉词典与 AI 术语，无需配置。",
 		"dictionaryMode": {
 			"label": "划词词典",
 			"auto": "自动",
 			"offline-first": "离线优先",
 			"off": "关闭",
-			"autoDescription": "先显示本地释义，再由当前 AI 服务解释本文语境。",
 			"offline-firstDescription": "命中本地词典后不请求模型；未收录的词使用当前翻译服务。",
 			"offDescription": "所有选区默认翻译，仍可从结果卡片手动切换到词典。"
 		}
@@ -1108,7 +1163,7 @@
 		"gitSslCaHint": "自签 HTTPS 服务器的 PEM 文件绝对路径。留空则使用系统信任库。",
 		"gitAuthFailed": "Git 无法登录，同步不会弹出凭据窗口。\n{{detail}}\nHTTPS：先用 `git credential approve` 或系统凭据助手存好 token。SSH：运行 `ssh-add`。",
 		"gitTlsFailed": "Git 拒绝了服务器证书。\n{{detail}}\n自签 HTTPS 请填写 CA 证书路径后再连接。",
-		"noConditionalWrites": "该存储不支持条件（原子）写入，同步已降级为普通上传。单设备使用不受影响；多设备并发修改可能需要多一轮同步才能收敛。",
+		"noConditionalWrites": "此存储未执行条件写入。为防止覆盖其他设备的改动，同步已停止，请选择其他存储。",
 		"saved": "同步已配置",
 		"disconnect": "解绑",
 		"syncNow": "立即同步",
@@ -1140,8 +1195,8 @@
 		"interval": "同步间隔",
 		"intervalMinutes": "{{count}} 分钟",
 		"scope": "同步范围",
-		"scopeHint": "笔记、元数据与高亮批注永远同步。未勾选的内容不会上传或下载，也不会因过滤而被删除。PDF 与 LaTeX 源码可随时从来源重新下载。",
-		"scopeHintGit": "笔记、元数据与高亮批注永远同步。未勾选的文件会写入 .gitignore，之后不再提交。",
+		"scopeHint": "笔记、元数据与标注永远同步。未勾选的内容不会上传或下载，也不会因过滤而被删除。PDF 与 LaTeX 源码可随时从来源重新下载。",
+		"scopeHintGit": "排除项只对新文件生效。Git 已跟踪的文件仍会在各设备之间同步。",
 		"scopePdf": "PDF 文件",
 		"scopeSource": "LaTeX 源码",
 		"scopeAttachments": "支撑材料",
@@ -1155,23 +1210,6 @@
 		"unlimited": "不限",
 		"signInRequired": "登录后可查看云同步容量。",
 		"notIncluded": "当前套餐不包含云同步。"
-	},
-	"plugins": {
-		"install": "从文件夹安装…",
-		"localOnly": "打开本地 Vault 后可管理插件。",
-		"empty": "尚未安装插件。",
-		"failed": "插件操作失败",
-		"configure": "配置 {{name}}",
-		"remove": "卸载 {{name}}",
-		"enable": "启用 {{name}}",
-		"saveEnable": "保存并启用",
-		"permissions": {
-			"vault:read": "读取 Vault 文件与论文",
-			"catalog:write": "修改论文标签和已读状态",
-			"vault:notes:write": "写入论文笔记",
-			"vault:write": "写入 Vault 文本及移动论文"
-		},
-		"cancel": "取消"
 	},
 	"word": {
 		"damagedField": "引文字段结果为空或已损坏。请恢复文档，或在副本中重新插入引文。",

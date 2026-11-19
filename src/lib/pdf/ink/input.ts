@@ -9,12 +9,14 @@ export type InkViewport = {
 	getMetrics(): { scrollLeft: number; scrollTop: number };
 	scrollTo(position: { x: number; y: number; behavior: "instant" }): void;
 };
-export const INK_LONG_PRESS_MS = 1000;
+export const INK_LONG_PRESS_MS = 1200;
 /** Hold this long anywhere on a page to create a note. */
 export const INK_NOTE_LONG_PRESS_MS = 3000;
 /** A pen in range keeps new finger gestures out of an active writing session. */
 export const INK_PEN_HOVER_GUARD_MS = 1500;
-const HOLD_SLOP_PX = 8;
+/** Pausing this long at the end of a pen stroke snaps it to a clean shape. */
+export const INK_SHAPE_HOLD_MS = 500;
+const HOLD_SLOP_PX = 6;
 /** Native modality boundary: provisional ink is never committed by long press/cancel. */
 export function bindInkInput(options: {
 	target: HTMLElement;
@@ -22,6 +24,13 @@ export function bindInkInput(options: {
 	pageAt(target: EventTarget | null): InkInputPage | null;
 	viewport(): InkViewport | null;
 	automaticPen?: boolean;
+	/** Temporary settings-driven tuning for touch inertia. */
+	inertia?: {
+		velocityWindowMs?: number;
+		friction?: number;
+		minVelocity?: number;
+		speedScale?: number;
+	};
 	onPenDetected?: () => void;
 	onLongPress?: (
 		page: InkInputPage,
@@ -37,13 +46,6 @@ export function bindInkInput(options: {
 	) => void;
 	/** A touch tap that never became a hold/pan; used to clear selection. */
 	onTap?: (page: InkInputPage, point: InkPosition) => void;
-	/** Temporary settings-driven tuning for touch inertia. */
-	inertia?: {
-		velocityWindowMs?: number;
-		friction?: number;
-		minVelocity?: number;
-		speedScale?: number;
-	};
 }) {
 	const { target, editor } = options;
 	let stroke: {
@@ -51,6 +53,7 @@ export function bindInkInput(options: {
 		page: InkInputPage;
 		started: number;
 		lastTime: number;
+		eraser: boolean;
 	} | null = null;
 	const touches = new Map<number, { x: number; y: number }>();
 	let pan: {
@@ -85,6 +88,13 @@ export function bindInkInput(options: {
 		event: PointerEvent;
 		timer: ReturnType<typeof setTimeout>;
 	} | null = null;
+	/** Stillness anchor for hold-to-shape; jitter inside the slop keeps it. */
+	let shapeHold: {
+		id: number;
+		x: number;
+		y: number;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
 	let held: number | null = null;
 	let epoch = 0,
 		suppressMouseUntil = 0;
@@ -99,6 +109,7 @@ export function bindInkInput(options: {
 	const originalTouchAction = target.style.touchAction;
 	const editing = () => editor.getState().mode !== "read";
 	const managed = () => options.automaticPen || editing();
+	// Settings-driven tuning stays clamped to the on-device safe range.
 	const inertiaWindowMs = Math.min(
 		200,
 		Math.max(16, options.inertia?.velocityWindowMs ?? 80),
@@ -147,6 +158,44 @@ export function bindInkInput(options: {
 		if (noteHold) clearTimeout(noteHold.timer);
 		noteHold = null;
 	};
+	const clearShapeHold = () => {
+		if (shapeHold) clearTimeout(shapeHold.timer);
+		shapeHold = null;
+	};
+	/**
+	 * Re-arm only after real movement: sub-slop pen jitter must not postpone
+	 * the snap forever. Moving again after a snap restores the freehand draft.
+	 */
+	const armShapeHold = (event: PointerEvent) => {
+		const active = stroke;
+		if (
+			!active ||
+			active.eraser ||
+			active.id !== event.pointerId ||
+			event.pointerType !== "pen"
+		)
+			return;
+		if (
+			shapeHold &&
+			shapeHold.id === event.pointerId &&
+			Math.hypot(event.clientX - shapeHold.x, event.clientY - shapeHold.y) <=
+				HOLD_SLOP_PX
+		)
+			return;
+		editor.unsnapDraft();
+		clearShapeHold();
+		const id = event.pointerId;
+		shapeHold = {
+			id,
+			x: event.clientX,
+			y: event.clientY,
+			timer: setTimeout(() => {
+				if (disposed || shapeHold?.id !== id || stroke?.id !== id) return;
+				flush();
+				editor.snapDraft();
+			}, INK_SHAPE_HOLD_MS),
+		};
+	};
 	const flush = () => {
 		if (frame) cancelAnimationFrame(frame);
 		frame = 0;
@@ -183,6 +232,7 @@ export function bindInkInput(options: {
 		epoch++;
 		clearHold();
 		clearNoteHold();
+		clearShapeHold();
 		cancelGlide();
 		held = null;
 		const active = stroke;
@@ -211,6 +261,12 @@ export function bindInkInput(options: {
 		!!event.target.closest(
 			"[data-pdf-chrome],button,input,textarea,[contenteditable='true'],[role='dialog']",
 		);
+	/** Transparent link/figure hit buttons are reading surface: a finger on
+	 * them must pan like the rest of the page instead of falling through to
+	 * EmbedPDF drag-selection. Their clicks keep the travel-tolerance guard. */
+	const pageHitTarget = (event: Event) =>
+		event.target instanceof Element &&
+		!!event.target.closest("[data-layout-hit],[data-pdf-link-hit]");
 	const armHold = (event: PointerEvent, page: InkInputPage) => {
 		clearHold();
 		const generation = ++epoch;
@@ -237,6 +293,7 @@ export function bindInkInput(options: {
 				queued = [];
 				if (frame) cancelAnimationFrame(frame);
 				frame = 0;
+				clearShapeHold();
 				editor.cancel();
 				if (active) release(active.id);
 				pan = null;
@@ -260,7 +317,7 @@ export function bindInkInput(options: {
 				}
 			}, INK_LONG_PRESS_MS),
 		};
-		// A longer hold turns into a note. It stays armed after the 1 s text
+		// A longer hold turns into a note. It stays armed after the 1.2 s text
 		// selection so the user can keep holding instead of hunting the menu.
 		clearNoteHold();
 		if (
@@ -312,7 +369,7 @@ export function bindInkInput(options: {
 			clearNoteHold();
 	};
 	const down = (event: PointerEvent) => {
-		if (excluded(event)) return;
+		if (excluded(event) && !pageHitTarget(event)) return;
 		notePenHover(event);
 		if (event.pointerType === "pen") {
 			options.onPenDetected?.();
@@ -324,6 +381,7 @@ export function bindInkInput(options: {
 		epoch++;
 		clearHold();
 		clearNoteHold();
+		clearShapeHold();
 		cancelGlide();
 		held = null;
 		if (event.pointerType === "touch") {
@@ -412,6 +470,7 @@ export function bindInkInput(options: {
 			page,
 			started: event.timeStamp,
 			lastTime: event.timeStamp,
+			eraser,
 		};
 		if (event.pointerType === "pen" && !eraser) armHold(event, page);
 		capture(event.pointerId);
@@ -485,6 +544,7 @@ export function bindInkInput(options: {
 				? event.getCoalescedEvents()
 				: [];
 		for (const sample of coalesced) moveHold(sample);
+		armShapeHold(event);
 		queued.push(...(coalesced.length ? coalesced : [event]));
 		if (!frame) frame = requestAnimationFrame(flush);
 		consume(event);
@@ -580,6 +640,15 @@ export function bindInkInput(options: {
 			return;
 		}
 		if (stroke?.id !== event.pointerId) return;
+		// Lifting far from the stillness anchor means drawing continued (moves
+		// can be coalesced away); commit the freehand ink, not the old snap.
+		if (
+			shapeHold?.id === event.pointerId &&
+			Math.hypot(event.clientX - shapeHold.x, event.clientY - shapeHold.y) >
+				HOLD_SLOP_PX
+		)
+			editor.unsnapDraft();
+		clearShapeHold();
 		queued.push(event);
 		flush();
 		const id = stroke.id;
@@ -591,6 +660,9 @@ export function bindInkInput(options: {
 		consume(event);
 	};
 	const mouse = (event: MouseEvent) => {
+		// Buttons stay excluded here: a tap on a link/figure hit target must
+		// survive the post-touch suppression window and be judged by its
+		// travel-tolerance click guard, not swallowed as a compatibility event.
 		if (excluded(event)) return;
 		if (
 			(editing() || Date.now() < suppressMouseUntil) &&

@@ -1,11 +1,27 @@
+import { translationRetryItems } from "@/lib/pdf/layout/translation-retry";
+import {
+	TRANSLATION_SPINNER_SIZE,
+	translationSpinnerAnchor,
+	translationSpinnerItems,
+} from "@/lib/pdf/layout/translation-spinner";
 import { ReflowPageOverlay } from "./reflow-page-overlay";
+import { TranslationRetryMarker } from "./translation-retry-marker";
+import { TranslationSpinner } from "./translation-spinner";
 /**
  * Progressive translation overlays for layout body-text regions.
  * Full bbox stays covered (hides source PDF text); font size tracks paper
  * body size, then re-fits so the translation fills the block without huge gaps.
  */
 
-import { Fragment, memo, useLayoutEffect, useMemo, useRef } from "react";
+import {
+	Fragment,
+	memo,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/core/utils";
 import { HIGHLIGHT_HEX, highlightFill } from "@/lib/pdf/highlight/palette";
 import {
@@ -86,6 +102,16 @@ type LayoutTranslateOverlayProps = {
 	links?: readonly TranslateLinkBox[];
 	/** Source text runs for this page. Keeps grouped citations on their own glyphs. */
 	glyphRuns?: readonly GlyphRun[];
+	/**
+	 * The page's text is translated while its translated raster is still being
+	 * generated. Keeps the paragraph-end spinner up until the preview paints.
+	 */
+	awaitingPreview?: boolean;
+	/**
+	 * Retry a paragraph's page after its translation failed for good. When
+	 * absent, failed blocks render no in-place retry marker.
+	 */
+	onRetryTranslation?: (pageIndex: number) => void;
 	onOpenLink?: (assignment: PreservedLinkAssignment) => void;
 	onHoverLink?: (
 		assignment: PreservedLinkAssignment | null,
@@ -477,6 +503,7 @@ function applyParagraphMetrics(
 
 type ExactFitParagraphProps = {
 	sourceStyle?: LayoutSourceStyle;
+	running?: boolean;
 	text: string;
 	itemId: string;
 	sentences?: LayoutTranslateItem["sentences"];
@@ -617,6 +644,7 @@ function LinkifiedText({
  */
 export const LayoutTranslateParagraph = memo(function LayoutTranslateParagraph({
 	sourceStyle,
+	running,
 	text,
 	itemId,
 	sentences,
@@ -631,6 +659,11 @@ export const LayoutTranslateParagraph = memo(function LayoutTranslateParagraph({
 	onHoverLink,
 }: ExactFitParagraphProps) {
 	const ref = useRef<HTMLParagraphElement>(null);
+	const [tail, setTail] = useState<{
+		x: number;
+		y: number;
+		size: number;
+	} | null>(null);
 	const sentenceNodes = layoutTranslateSentenceNodes(text, sentences);
 	const slices = sentenceNodes
 		? sentenceSlices(text, sentenceNodes.nodes, sentenceNodes.gap)
@@ -648,10 +681,36 @@ export const LayoutTranslateParagraph = memo(function LayoutTranslateParagraph({
 	useLayoutEffect(() => {
 		const element = ref.current;
 		if (!element || boxWidthPx <= 0 || boxHeightPx <= 0) return;
+		const measureTail = () => {
+			if (!running) return;
+			const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+			let last: Text | null = null;
+			while (walker.nextNode()) {
+				if (walker.currentNode.textContent?.trim())
+					last = walker.currentNode as Text;
+			}
+			if (!last) return;
+			const end = last.data.trimEnd().length;
+			const range = document.createRange();
+			range.setStart(last, Math.max(0, end - 1));
+			range.setEnd(last, end);
+			const rect = range.getClientRects()[0];
+			if (!rect) return;
+			const box = element.getBoundingClientRect();
+			const sx = box.width / element.clientWidth;
+			const sy = box.height / element.clientHeight;
+			const size = TRANSLATION_SPINNER_SIZE;
+			setTail({
+				x: (rect.right - box.left) / sx + size * 0.2,
+				y: (rect.top + rect.height / 2 - box.top) / sy - size / 2,
+				size,
+			});
+		};
 		const cached = readLayoutTranslateDomFit(domFitKey);
 		if (cached) {
 			applyParagraphMetrics(element, cached.fontSize, cached.lineHeight);
 			element.style.overflowWrap = cached.overflowWrap;
+			measureTail();
 			return;
 		}
 		// A page of paragraphs used to binary-search on the mount frame. Spread
@@ -664,83 +723,95 @@ export const LayoutTranslateParagraph = memo(function LayoutTranslateParagraph({
 				initialFontSize,
 				isHeading,
 			});
+			measureTail();
 			if (!fit) return;
 			writeLayoutTranslateDomFit(domFitKey, fit);
 		});
-	}, [boxHeightPx, boxWidthPx, domFitKey, initialFontSize, isHeading, text]);
+	}, [
+		boxHeightPx,
+		boxWidthPx,
+		domFitKey,
+		initialFontSize,
+		isHeading,
+		text,
+		running,
+	]);
 
 	return (
-		<p
-			ref={ref}
-			className={cn(
-				"pdf-translate-selection pointer-events-auto m-0 h-full w-full select-text overflow-hidden whitespace-pre-wrap",
-				isHeading && "font-bold",
-			)}
-			data-layout-item={itemId}
-			data-paper={tone}
-			onPointerDownCapture={(event) => {
-				if (event.button !== 0) return;
-				beginLinkPreviewDrag();
-			}}
-			style={{
-				fontSize: cachedDomFit?.fontSize ?? initialFontSize,
-				fontWeight: sourceStyle ? (sourceStyle.bold ? 700 : 400) : undefined,
-				fontStyle: sourceStyle?.italic ? "italic" : "normal",
-				lineHeight: cachedDomFit?.lineHeight ?? LINE_HEIGHT,
-				overflowWrap: cachedDomFit?.overflowWrap ?? "normal",
-				// Browser-native UAX #14 breaking avoids a CJK opening bracket at a
-				// line end and keeps Latin words intact until the measured fallback.
-				lineBreak: "strict",
-				wordBreak: "normal",
-			}}
-		>
-			{slices && sentenceNodes ? (
-				slices.map((node, index) => {
-					const tint = tintedSentences?.get(node.index);
-					return (
-						<Fragment key={node.index}>
-							{index > 0 ? sentenceNodes.gap : null}
-							<span
-								data-sentence={node.index}
-								className={cn(tint?.shape !== "underline" && "rounded-[1px]")}
-								style={
-									tint
-										? tint.shape === "underline"
-											? {
-													textDecorationLine: "underline",
-													textDecorationColor: HIGHLIGHT_HEX[tint.color],
-													textDecorationThickness: "2px",
-													textUnderlineOffset: "2px",
-												}
-											: { backgroundColor: highlightFill(tint.color) }
-										: undefined
-								}
-							>
-								<LinkifiedText
-									text={node.text}
-									assignments={assignmentsWithin(
-										linkAssignments ?? [],
-										node.start,
-										node.start + node.text.length,
-									)}
-									tone={tone}
-									onOpenLink={onOpenLink}
-									onHoverLink={onHoverLink}
-								/>
-							</span>
-						</Fragment>
-					);
-				})
-			) : (
-				<LinkifiedText
-					text={text}
-					assignments={linkAssignments}
-					tone={tone}
-					onOpenLink={onOpenLink}
-					onHoverLink={onHoverLink}
-				/>
-			)}
-		</p>
+		<div className="relative h-full w-full">
+			<p
+				ref={ref}
+				className={cn(
+					"pdf-translate-selection pointer-events-auto m-0 h-full w-full select-text overflow-hidden whitespace-pre-wrap",
+					isHeading && "font-bold",
+				)}
+				data-layout-item={itemId}
+				data-paper={tone}
+				onPointerDownCapture={(event) => {
+					if (event.button !== 0) return;
+					beginLinkPreviewDrag();
+				}}
+				style={{
+					fontSize: cachedDomFit?.fontSize ?? initialFontSize,
+					fontWeight: sourceStyle ? (sourceStyle.bold ? 700 : 400) : undefined,
+					fontStyle: sourceStyle?.italic ? "italic" : "normal",
+					lineHeight: cachedDomFit?.lineHeight ?? LINE_HEIGHT,
+					overflowWrap: cachedDomFit?.overflowWrap ?? "normal",
+					// Browser-native UAX #14 breaking avoids a CJK opening bracket at a
+					// line end and keeps Latin words intact until the measured fallback.
+					lineBreak: "strict",
+					wordBreak: "normal",
+				}}
+			>
+				{slices && sentenceNodes ? (
+					slices.map((node, index) => {
+						const tint = tintedSentences?.get(node.index);
+						return (
+							<Fragment key={node.index}>
+								{index > 0 ? sentenceNodes.gap : null}
+								<span
+									data-sentence={node.index}
+									className={cn(tint?.shape !== "underline" && "rounded-[1px]")}
+									style={
+										tint
+											? tint.shape === "underline"
+												? {
+														textDecorationLine: "underline",
+														textDecorationColor: HIGHLIGHT_HEX[tint.color],
+														textDecorationThickness: "2px",
+														textUnderlineOffset: "2px",
+													}
+												: { backgroundColor: highlightFill(tint.color) }
+											: undefined
+									}
+								>
+									<LinkifiedText
+										text={node.text}
+										assignments={assignmentsWithin(
+											linkAssignments ?? [],
+											node.start,
+											node.start + node.text.length,
+										)}
+										tone={tone}
+										onOpenLink={onOpenLink}
+										onHoverLink={onHoverLink}
+									/>
+								</span>
+							</Fragment>
+						);
+					})
+				) : (
+					<LinkifiedText
+						text={text}
+						assignments={linkAssignments}
+						tone={tone}
+						onOpenLink={onOpenLink}
+						onHoverLink={onHoverLink}
+					/>
+				)}
+			</p>
+			{running && tail && <TranslationSpinner {...tail} tone={tone} />}
+		</div>
 	);
 });
 
@@ -761,9 +832,12 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 	sentenceRectsByItemId,
 	links,
 	glyphRuns,
+	awaitingPreview,
+	onRetryTranslation,
 	onOpenLink,
 	onHoverLink,
 }: LayoutTranslateOverlayProps) {
+	const { t } = useTranslation("viewer");
 	const onPage = useMemo(() => {
 		const painted = items
 			.filter(
@@ -773,10 +847,7 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 					isLayoutTranslateItemPainted(item),
 			)
 			.map((item) => {
-				const paintText =
-					item.status === "running"
-						? (item.translated ?? "…")
-						: (item.translated ?? "");
+				const paintText = item.translated ?? "";
 				// Size from the source box. Expansion below must not inflate a
 				// heading just because the translation borrowed extra height.
 				const paintFontSize = fontSizeForLayoutTranslateItem(
@@ -844,28 +915,78 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 	const displayMatchesPreview =
 		!previewSources ||
 		(reflowDocumentVersion && previewSources.has(reflowDocumentVersion));
+	const spinnerItems = translationSpinnerItems(
+		items,
+		layoutRegions,
+		awaitingPreview,
+	);
+	const spinnerIds = new Set(spinnerItems.map((item) => item.id));
+	const sourceSpinners = spinnerItems
+		.filter((item) => item.reflow || !isLayoutTranslateItemPainted(item))
+		.map((item) => (
+			<TranslationSpinner
+				key={item.id}
+				{...translationSpinnerAnchor(
+					item,
+					pageWidthPx,
+					pageHeightPx,
+					glyphRuns,
+				)}
+				tone={tone}
+			/>
+		));
+	// A failed paragraph keeps the source text; the warning takes the spinner's
+	// place at the tail and retries the page, so no toast is needed.
+	const retryMarkers = onRetryTranslation
+		? translationRetryItems(items, layoutRegions).map((item) => (
+				<TranslationRetryMarker
+					key={`layout-retry-${item.id}`}
+					{...translationSpinnerAnchor(
+						item,
+						pageWidthPx,
+						pageHeightPx,
+						glyphRuns,
+					)}
+					tone={tone}
+					label={t("pdf.layoutTranslate.retryPage")}
+					onRetry={() => onRetryTranslation(pageIndex)}
+				/>
+			))
+		: [];
 	if (preview || reflowDocumentId)
 		return (
-			<ReflowPageOverlay
-				tints={tintByItem}
-				links={links}
-				glyphRuns={glyphRuns}
-				onOpenLink={onOpenLink}
-				onHoverLink={onHoverLink}
-				tone={tone}
-				items={items}
-				preview={preview ?? ""}
-				pageIndex={pageIndex}
-				renderDocumentId={displayMatchesPreview ? reflowDocumentId : null}
-				zoom={zoom}
-				width={pageWidthPx}
-				height={pageHeightPx}
-			/>
+			<>
+				<ReflowPageOverlay
+					tints={tintByItem}
+					links={links}
+					glyphRuns={glyphRuns}
+					onOpenLink={onOpenLink}
+					onHoverLink={onHoverLink}
+					tone={tone}
+					items={items}
+					preview={preview ?? ""}
+					pageIndex={pageIndex}
+					renderDocumentId={displayMatchesPreview ? reflowDocumentId : null}
+					zoom={zoom}
+					width={pageWidthPx}
+					height={pageHeightPx}
+				/>
+				{sourceSpinners}
+				{retryMarkers}
+			</>
 		);
 
-	if (onPage.length === 0) return null;
+	if (onPage.length === 0)
+		return (
+			<>
+				{sourceSpinners}
+				{retryMarkers}
+			</>
+		);
 	return (
 		<>
+			{sourceSpinners}
+			{retryMarkers}
 			{onPage.map((item) => {
 				const text = item.paintText;
 				const isHeading = isLayoutTranslateHeadingKind(item.kind);
@@ -920,7 +1041,7 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 						</div>
 						<div
 							className={cn(
-								"pointer-events-none absolute z-[6] overflow-hidden rounded-[1px]",
+								"pointer-events-none absolute z-[6] rounded-[1px]",
 								item.status === "running" && "opacity-90",
 							)}
 							style={{ ...boxStyle, padding: "1px 2px" }}
@@ -945,6 +1066,7 @@ export const LayoutTranslateOverlay = memo(function LayoutTranslateOverlay({
 								<LayoutTranslateParagraph
 									text={text}
 									itemId={item.id}
+									running={spinnerIds.has(item.id)}
 									sentences={item.sentences}
 									initialFontSize={fontSize}
 									sourceStyle={item.sourceStyle}

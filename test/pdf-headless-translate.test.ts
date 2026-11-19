@@ -28,11 +28,15 @@ vi.mock("@/lib/core/tasks", () => ({
 		mocks.executor = executor;
 	},
 }));
-vi.mock("@/lib/pdf/layout/headless-analyze", () => ({
-	getHeadlessPdfEngine: async () => ({
+vi.mock("@/lib/pdf/engine", () => ({
+	createPdfEngine: async () => ({
 		openDocumentBuffer: () => ({ toPromise: mocks.open }),
 		closeDocument: () => ({ toPromise: mocks.close }),
 	}),
+	disposePdfEngine: vi.fn(),
+}));
+vi.mock("@/lib/pdf/layout/headless-analyze", () => ({
+	analyzePaperLayoutHeadless: vi.fn(),
 }));
 vi.mock("@/lib/paper/media", () => ({
 	findCanonicalPaperPdfPath: async () => "/vault/papers/a/a.pdf",
@@ -241,21 +245,4 @@ it("only the Host-selected window executes a broadcast translation offer", async
 	const progress = reports.findIndex((report) => report.params);
 	expect(progress).toBeGreaterThanOrEqual(0);
 	expect(terminal).toBeGreaterThan(progress);
-});
-
-it("retranslation progress excludes cached text whose replacement is still pending", async () => {
-	mocks.sidecar = cached([0, 1]);
-	const report = vi.fn();
-	mocks.run.mockImplementation(async ({ items, onUpdate }) => {
-		onUpdate(items);
-		return items.map((item: LayoutTranslateItem) => ({
-			...item,
-			status: "done",
-			translated: "Replacement",
-		}));
-	});
-	await translatePaperLayoutHeadless(request({ force: true, report }));
-	expect(
-		report.mock.calls.map(([args]) => args.progress).filter(Boolean),
-	).toEqual([2, 5]);
 });

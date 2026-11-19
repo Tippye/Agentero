@@ -19,9 +19,18 @@ import {
 	PdfAnnotationSubtype,
 	PdfZoomMode,
 } from "@embedpdf/models";
-import { memo } from "react";
+import {
+	memo,
+	type MouseEvent as ReactMouseEvent,
+	type PointerEvent as ReactPointerEvent,
+	useRef,
+} from "react";
 import type { ScreenPoint } from "@/components/viewer/pdf/types";
 import { normalizeArxivId } from "@/lib/paper/arxiv";
+import {
+	isLayoutRegionActivation,
+	type PointerOrigin,
+} from "@/lib/pdf/layout/click-guard";
 import {
 	linkHoverSuppressed,
 	linkPreviewDragActive,
@@ -151,6 +160,23 @@ export const CitationLinkLayer = memo(function CitationLinkLayer({
 	/** Full external URL (annotation URI / Launch, or detected page text). */
 	onUrlHover?: (url: string | null, clientPoint?: ScreenPoint | null) => void;
 }) {
+	// The browser fires click whenever down/up land on the same button, no
+	// matter how far the finger travelled; a swipe across a wide DOI/URL link
+	// must not jump. Capture-phase origin recording survives the ink layer
+	// consuming pointerdown on these hit targets.
+	const pointerOriginRef = useRef<PointerOrigin | null>(null);
+	const rememberOrigin = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		pointerOriginRef.current = { x: event.clientX, y: event.clientY };
+	};
+	const isTap = (event: ReactMouseEvent<HTMLButtonElement>) => {
+		const origin = pointerOriginRef.current;
+		pointerOriginRef.current = null;
+		return isLayoutRegionActivation({
+			detail: event.detail,
+			origin,
+			end: { x: event.clientX, y: event.clientY },
+		});
+	};
 	if (
 		(!links.length && !textLinks.length) ||
 		pageWidthPt <= 0 ||
@@ -166,6 +192,7 @@ export const CitationLinkLayer = memo(function CitationLinkLayer({
 					type="button"
 					tabIndex={-1}
 					aria-label={label}
+					data-pdf-link-hit=""
 					className="absolute z-[2] cursor-pointer rounded-[2px] border-0 bg-transparent p-0 hover:bg-primary/10"
 					style={{
 						left: `${(link.rect.origin.x / pageWidthPt) * 100}%`,
@@ -173,7 +200,9 @@ export const CitationLinkLayer = memo(function CitationLinkLayer({
 						width: `${(link.rect.size.width / pageWidthPt) * 100}%`,
 						height: `${(link.rect.size.height / pageHeightPt) * 100}%`,
 					}}
+					onPointerDownCapture={rememberOrigin}
 					onClick={(e) => {
+						if (!isTap(e)) return;
 						e.stopPropagation();
 						onActivate(link);
 					}}
@@ -208,6 +237,7 @@ export const CitationLinkLayer = memo(function CitationLinkLayer({
 					tabIndex={-1}
 					aria-label={link.url}
 					data-url={link.url}
+					data-pdf-link-hit=""
 					className="absolute z-[2] cursor-pointer rounded-[2px] border-0 bg-transparent p-0 hover:bg-primary/10"
 					style={{
 						left: `${(link.rect.origin.x / pageWidthPt) * 100}%`,
@@ -215,7 +245,9 @@ export const CitationLinkLayer = memo(function CitationLinkLayer({
 						width: `${(link.rect.size.width / pageWidthPt) * 100}%`,
 						height: `${(link.rect.size.height / pageHeightPt) * 100}%`,
 					}}
+					onPointerDownCapture={rememberOrigin}
 					onClick={(e) => {
+						if (!isTap(e)) return;
 						e.stopPropagation();
 						onTextActivate(link.url);
 					}}

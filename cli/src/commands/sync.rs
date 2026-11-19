@@ -14,6 +14,7 @@ use crate::resolve::{resolve_vault, GlobalOpts};
 use agentero_core::features::sync::config::{
     self as sync_config, SyncBackendConfig, SyncBackendKind,
 };
+use agentero_core::features::sync::lock::SyncLock;
 use agentero_core::features::sync::snapshot::SyncScope;
 use agentero_core::features::sync::{engine, local};
 use clap::{Args, Subcommand, ValueEnum};
@@ -141,7 +142,7 @@ fn sync_not_configured() -> CliError {
 
 fn status(vault: &Path, globals: &GlobalOpts) -> Result<Value, CliError> {
     let (key, cfg) = entry_for(vault);
-    let meta = local::read_meta(vault);
+    let meta = local::read_meta(vault)?;
     let style = globals.style;
 
     let mut v = json!({
@@ -201,6 +202,7 @@ async fn configure(
     args: &ConfigureArgs,
     globals: &GlobalOpts,
 ) -> Result<Value, CliError> {
+    let _lock = SyncLock::acquire(vault)?;
     let (key, existing) = entry_for(vault);
     let mut cfg = if args.stdin_cfg {
         read_config_stdin()?
@@ -252,7 +254,7 @@ async fn configure(
             if cfg.conditional_writes {
                 "yes"
             } else {
-                "no (degraded to plain PUT)"
+                "no (sync blocked)"
             }
         ));
         obj.insert("lines".into(), json!(lines));
@@ -407,6 +409,7 @@ fn read_config_stdin() -> Result<SyncBackendConfig, CliError> {
 }
 
 async fn test(vault: &Path) -> Result<Value, CliError> {
+    let _lock = SyncLock::acquire(vault)?;
     let (_, cfg) = entry_for(vault);
     let cfg = cfg.ok_or_else(sync_not_configured)?;
     let conditional = engine::test_connection(vault, &cfg).await?;
@@ -417,6 +420,7 @@ async fn test(vault: &Path) -> Result<Value, CliError> {
 }
 
 async fn now(vault: &Path, progress_flag: bool, globals: &GlobalOpts) -> Result<Value, CliError> {
+    let lock = SyncLock::acquire(vault)?;
     let (_, cfg) = entry_for(vault);
     let cfg = cfg.ok_or_else(sync_not_configured)?;
 
@@ -427,7 +431,7 @@ async fn now(vault: &Path, progress_flag: bool, globals: &GlobalOpts) -> Result<
         }
     };
 
-    let outcome = engine::sync_vault_locked(vault, &cfg, &progress).await?;
+    let outcome = engine::sync_vault_locked(&lock, &cfg, &progress).await?;
     let style = globals.style;
     let mut v = serde_json::to_value(&outcome)?;
     if let Some(obj) = v.as_object_mut() {
@@ -449,6 +453,7 @@ async fn now(vault: &Path, progress_flag: bool, globals: &GlobalOpts) -> Result<
 }
 
 fn disconnect(vault: &Path, globals: &GlobalOpts) -> Result<Value, CliError> {
+    let lock = SyncLock::acquire(vault)?;
     let (key, cfg) = entry_for(vault);
     if cfg.is_none() {
         return Err(sync_not_configured());
@@ -459,7 +464,6 @@ fn disconnect(vault: &Path, globals: &GlobalOpts) -> Result<Value, CliError> {
     if !prompt::confirm(globals, &message, false)? {
         return Err(CliError::needs_confirmation("disconnect cancelled"));
     }
-    sync_config::remove(&key)?;
-    local::clear(vault);
+    sync_config::disconnect(&key, &lock)?;
     Ok(json!({ "disconnected": key }))
 }

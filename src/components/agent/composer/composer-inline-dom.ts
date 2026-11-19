@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { REFERENCE_CHIP_CLASS } from "@/components/agent/reference-chip-style";
 import {
 	commandInvocationLabel,
 	commandPrefix,
@@ -34,8 +35,6 @@ const INLINE_CHIP_CLASS =
  * a short prefix, so it wraps every time. Reserving 6rem keeps that prefix
  * and the quote on one line, and a longer prefix wraps the quote as a unit.
  */
-const REFERENCE_CHIP_CLASS =
-	"composer-inline-chip mx-0.5 inline-block max-w-[min(14rem,calc(100%-6rem))] align-middle overflow-hidden whitespace-nowrap rounded-md border border-primary/30 bg-primary/10 px-1 text-[0.8125em] leading-[1.25] text-foreground hover:bg-primary/20";
 
 const CHIP_ANIMATION_CLASS =
 	"motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200 motion-reduce:animate-none";
@@ -160,6 +159,19 @@ function appendQuoteIcon(chip: HTMLElement) {
 			"M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z",
 		],
 		"size-3 shrink-0 text-muted-foreground",
+	);
+}
+
+/** Lucide `triangle-alert` glyph for a build-log problem reference. */
+function appendWarningIcon(chip: HTMLElement) {
+	appendLucideIcon(
+		chip,
+		[
+			"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
+			"M12 9v4",
+			"M12 17h.01",
+		],
+		"size-3 shrink-0 text-destructive",
 	);
 }
 
@@ -725,7 +737,8 @@ export function renderChip(
 			name;
 		const snippet = selectionReferenceSnippet(selection.text) || source;
 		const row = referenceRow(chip);
-		appendQuoteIcon(row);
+		if (selection.surface === "build-log") appendWarningIcon(row);
+		else appendQuoteIcon(row);
 		row.appendChild(referenceLabel(snippet));
 		chip.setAttribute("aria-label", snippet);
 	} else if (part.type === "visual") {

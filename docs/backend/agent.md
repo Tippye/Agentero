@@ -4,7 +4,7 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
 
 ## 协议与运行时
 
-- Crate：`agent-client-protocol` ≥ 1.3（及 Codex 的 npm ACP 适配器进程）。
+- Crate：`agent-client-protocol` 5.4（稳定 v1 线协议，不启用实验性 v2）。
 - Quick Chat 和侧边栏的论文上下文走同一解析器。本地会话在 `session/new`、`session/resume`、`session/load` 上传入 `agentero-context` stdio MCP；授权指纹变化时不恢复旧会话。见 [context.md](context.md)。
 - ACP `initialize` 在 run / warm / 历史 list / load 四处统一最多等待 30 秒（设置页
   探针同样保留 30 秒总预算），覆盖 BYOA 冷启动。warm 的 `session/new` 为 30 秒；
@@ -41,7 +41,7 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
   `agent-client-protocol::AcpAgent`。自定义 `windows-spawn` / Job transport 因环境变量名称
   含 `=` 时拒绝启动而回退（Windows 的 `=C:` 等特殊条目可能触发；见
   [故障记录](../bug_fix/windows-acp-orphan-processes.md)）。`ExitRequested` / `Exit` 仍关闭
-  warm 池；SDK 1.3.0 在 Windows 只结束直接子进程，launcher 后代与宿主异常退出后的
+  warm 池；SDK 5.4 的进程传输在 Windows 只结束直接子进程，launcher 后代与宿主异常退出后的
   ACP 进程可能残留，无法保证退出时完整回收。该限制由
   [#774](https://github.com/poco-ai/Agentero/issues/774) 跟踪，后续评估 SDK 的 Windows 进程树能力。
 - Windows Pi / Custom / Zcode 包装的 cwd 与完整 Agent 命令通过环境变量展开，cwd 始终携带双引号，
@@ -147,6 +147,13 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
   国际版 `QwenWork.app` 内置的也是这份大陆版引擎，因此只装国际版桌面端同样能接入 `qoder-cn`。
 - Antigravity ACP：原生 ACP（`agy acp`）。Google Antigravity CLI（`agy`）原生内置 ACP stdio server。
   直接复用本机 `agy` 的登录凭据（无需写入 `settings.json`），登录命令为 `agy acp --login`。
+  模板 id 仍是 `antigravity-acp`（catalog preset，不再是独立的 ACP server / 适配器）。
+  静默 install 走官方 installer（`https://antigravity.google/cli/install.sh`，Windows 为
+  `irm https://antigravity.google/cli/install.ps1 | iex`）：下载校验后把扁平 `agy` 装进
+  `~/.local/bin`（Windows 为 `%LOCALAPPDATA%\agy\bin`），再由 `agy install` 写 PATH；
+  该 installer 在二进制已存在时是 no-op，所以 update 用 `agy update`，失败再重跑 installer。
+  卸载只删这个二进制和 updater 留下的 `agy.*.old` 备份，保留 `~/.gemini/antigravity-cli`
+  里的登录/会话/设置与 shell rc 的 PATH 行；没有 npm 包，因此不参与 npm 版本探测（无 Upgrade 目标）。
 - ZCode：host CLI 无原生 ACP，走社区适配器 `zcode-acp-server server`（桥接无头
   `zcode app-server --stdio`，声明 `session/load` 续聊）。zcode CLI 内置在 ZCode
   桌面应用中、通常不在 PATH 上，适配器会自动发现桌面应用内置 CLI；若装在其他盘符或
@@ -182,6 +189,7 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
   `## Context` / `## Skills` / `## Extensions` 清单）当作普通 agent message 推送。Host
   在本轮首个 message chunk 上识别该横幅并丢弃，不写入内容缓冲、不发 `agent:stream`，
   避免它出现在回答之前。
+- Host 声明 `session.notices`，把实时 notice 的严重程度和原文交给当前会话的 Toast，不写入历史。旧 Codex 仅对已知的 `project_doc_max_bytes` 指令总量告警使用专用提示，普通 `Warning:` 文本照常显示。
 - **Pi 项目信任（#936）**：`pi-acp` 以 headless RPC 启动 pi，pi 的
   `defaultProjectTrust` 默认为 `ask`；无 UI 可回答时按不信任处理，于是 Vault 的
   `.agents/skills` 与 `.pi/*` 项目资源被静默跳过（pi-acp 0.0.33/0.0.34 也不转发
@@ -204,11 +212,11 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
   读取 trust，因此即使信任是在 pi 自己的 TUI 里授予或通过改 `settings.json` 生效，
   下一轮也会因变体不匹配而冷启动，不会复用启动时未信任的旧进程。远程 Vault 拒绝该操作。
 - **内置 ACP 适配器（bundled 兜底层）**：`@agentclientprotocol/claude-agent-acp` 与
-  `@agentclientprotocol/codex-acp` 的纯 JS 依赖树（平台二进制裁掉，~39MB 未压缩）作为应用
+  `@agentclientprotocol/codex-acp` 的纯 JS 依赖树（平台二进制裁掉，约 64 MiB 未压缩）作为应用
   资源随包分发，离线开箱即用。Host CLI（`claude` / `codex`）**永不内置**，仍由用户 PATH
   或 lifecycle 安装。
-  - Staging：`scripts/prepare-adapters.mjs`（版本 pin 在脚本顶部常量；`pnpm adapters:stage`，
-    已挂入 `beforeDevCommand` / `beforeBuildCommand`），临时目录系统 npm
+  - Staging：`scripts/prepare-adapters.mjs`（版本和完整依赖树锁在 `scripts/acp-adapters/`；`pnpm adapters:stage`，
+    已挂入 `beforeDevCommand` / `beforeBuildCommand`），临时目录系统 `npm ci`
     `--omit=optional --omit=dev --ignore-scripts` 安装到共享单树
     `src-tauri/adapters/node_modules/` + `manifest.json`（id/package/version/entry/nodeMajor）；
     护栏：无 symlink / 原生二进制、单文件 ≤5MB、总量 ≤80MB（`AGENTERO_ADAPTER_MAX_MB` 可调）。
@@ -256,8 +264,10 @@ Agentero 作为 **ACP Client**，stdio JSON-RPC 连接用户本机或远端 Agen
   `login_command`；写入脚本前先把命令首个可执行文件解析为绝对路径（用注册 Agent 的合并
   env / login-shell PATH），避免 `bash -lc` 看不到 zsh 的 `~/.local/bin` 而报
   `command not found`（#686）。终端只打印命令、等回车确认后才真正执行。
+- 「登录」「终端」两个按钮都读取「设置 → 通用 → 系统 → 终端打开方式」（`settings.terminalApp`），
+  与「在终端中打开」使用同一个终端；未设置或所选终端不可用时回退系统默认（#1116）。
 - 「终端」按钮（`doctor_open_agent_cli_terminal`，仅已安装 Agent 行显示，位于「升级」与
-  「卸载」之间）**直接**在系统默认终端启动该 Agent 的交互式 CLI（无需回车确认）：命令取
+  「卸载」之间）**直接**在该终端启动该 Agent 的交互式 CLI（无需回车确认）：命令取
   模板的交互式 CLI（`registry::interactive_cli`，通常等同 `detect_command`，如 `claude` /
   `codex` / `opencode` / `agy`；Dsh 需显式 profile，使用 shipped 的 `dsh --profile tui`）；
   ZCode 只有 ACP 适配器、无面向用户的 CLI，故不显示该按钮。二进制解析逻辑与登录按钮共用
@@ -306,6 +316,8 @@ prompt，结束后仍受 TTL 与退出清理约束。setup 总预算为 60 秒�
 slot 替换、evict 和 shutdown 均有独立取消 token，不依赖 slot 是否还在池中。
 取用时只有匹配的 setup 正在执行才等待（最多 5 秒），由发布/取消/退出通知唤醒；无匹配任务、
 连接已被其他请求取走或池已关闭时立即走冷启动。并发取用只允许一个请求领取同一连接。
+预热在收到 `session/new` 并应用首选项后立即发布连接；空闲期间的模型和用量通知更新同一份缓存，不依赖固定等待时间。标准模板使用类型化响应，Hermes、OpenCode（含 MiMo）和自定义适配器保留旧模型列表兼容读取。Unix 启动时 cwd、可执行文件和参数作为独立 argv 传递，不插入 shell 源码。
+
 warm 的 `session/new` 在用户发出 prompt 之前只是临时会话：`session/list` 会跳过这些 id。槽位退出、setup 失败，或这条连接改去续聊另一条会话时，若 Agent 声明 `sessionCapabilities.delete` 就 `session/delete`；删不掉的 id 记在本机，重启后仍然不出现在历史里。真正发出 `session/prompt` 后，这条会话才进入历史。前端若 `session/load` 到一份没有正文的旧会话，也会把它从列表里拿掉并记住。用户在历史里删除一条会话时，Host 先把 provider session id 写入 `dismissed-acp-sessions.json`，之后的 `session/list` 会跳过它，并拆掉仍绑着这个 id 的空闲 warm 槽。若这次 initialize 声明了 `sessionCapabilities.delete`，再发 `session/delete`；没声明或 RPC 失败时，Agentero 不再显示，Agent 自己的 transcript 可能还在。
 取消清理最多允许 1 秒，之后无论 RPC 是否响应均丢弃连接，由 SDK 执行进程清理：
 Unix 终止进程组，Windows 仅结束直接子进程。已有残留不会按进程名自动清扫，需确认路径与
@@ -347,7 +359,7 @@ commands / config 仍可在 load 期间转发。
 
 `agent_load_session` 以 `session/load` 的响应为回放完成边界。
 [ACP 协议](https://agentclientprotocol.com/protocol/v1/session-setup)要求先发送全部历史通知再返回响应，
-SDK 1.3 按序等待通知 handler 完成后再处理下一条消息，因此不需要额外 200–800ms 静默等待。
+SDK 按序等待通知 handler 完成后再处理下一条消息，因此不需要额外 200–800ms 静默等待。
 没有 `session/load` 能力的 Dsh 仍沿用其本地历史读取兼容路径。
 
 回放聚合（`ReplayBuilder`）会丢弃 Agent 侧的合成占位文本：Claude Code 在
@@ -483,3 +495,13 @@ Agentero 是 ACP **Client**：模型 HTTP **不**经 Host 转发，因此只能�
 
 `src-tauri/src/features/agent/`  
 前端：[../frontend/agent.md](../frontend/agent.md)
+
+### Windows 桌面应用内置 CLI
+
+正常 PATH 安装优先；通过已注册安装位置（含 MSIX）定位桌面应用，再查其 `resources`，不扫描下载缓存：ChatGPT 使用 `resources/codex.exe`，Dsh 使用 `resources/runtime/cli/bin/dsh.cmd`，千问办公沿用 `resources/bin/qoderclicn.exe`，WorkBuddy 沿用 `resources/app.asar.unpacked/cli/bin/codebuddy` 的 Windows 可执行文件 / shim 解析。国际版 Qoder 不回退到 CN 引擎。
+
+ChatGPT 的 `resources/cua_node/bin/node.exe` 与 Dsh 的 `resources/runtime/primary-runtime/dependencies/node/bin/node.exe` 可作为内置 ACP 适配器的 Node 回退；独立 Node 仍执行原有版本检查，不把桌面 GUI 当 Node，也不要求捆绑 npm。发现、可用性检查和子进程 PATH 使用同一组目录。新手引导移除独立 Node 安装步骤，设置中的主机诊断仍可用于安装或排查系统 Node/npm。
+
+ChatGPT/Codex 与官方 Dsh 的上述 Windows 布局已在本机核对；千问办公和 WorkBuddy 本机未安装，目录沿用现有适配规则，安装检测不等于 ACP 连接成功，仍须探测实际 CLI。
+
+仅 ChatGPT 的隔离验证：固定版本 `@agentclientprotocol/codex-acp@1.12.0`，运行 PATH 只保留 Windows System32，使用 ChatGPT 自带 Node v24.22.1 与 Codex 0.169.0-alpha.11.1，在独立空 Codex 配置目录完成 ACP `initialize`。运行时无系统 Node/npm 或 Dsh 依赖。此结果只验证带上述组件的 ChatGPT 版本，旧版纯聊天客户端未必携带这些组件；不能仅凭 GUI 已安装就报告 CLI 可用。

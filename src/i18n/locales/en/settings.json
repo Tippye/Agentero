@@ -7,6 +7,7 @@
 	"nav": {
 		"account": "Account and teams",
 		"general": "General",
+		"activity": "Activity",
 		"appearance": "Appearance",
 		"reading": "Reading feel",
 		"agent": "Agent",
@@ -19,8 +20,54 @@
 		"about": "About",
 		"quickSetup": "Quick setup wizard",
 		"featureTour": "Feature tour",
-		"sync": "Sync",
-		"plugins": "Plugins"
+		"sync": "Sync"
+	},
+	"activity": {
+		"title": "Activity",
+		"openFailed": "Couldn't open this paper.",
+		"thisWeek": "This week",
+		"workflows": "Agent",
+		"papers": "Longest reads",
+		"metric": {
+			"reading": "Reading",
+			"tokens": "Tokens"
+		},
+		"week": {
+			"reading": "Reading",
+			"papers": "Papers",
+			"agent": "Agent runs",
+			"tokens": "Tokens",
+			"unreported": "Not reported"
+		},
+		"heatmap": {
+			"reading": "Last 6 months",
+			"tokens": "Tokens",
+			"less": "Less",
+			"more": "More",
+			"cell": "{{date}} · {{value}}"
+		},
+		"weekday": {
+			"mon": "Mon",
+			"tue": "Tue",
+			"wed": "Wed",
+			"thu": "Thu",
+			"fri": "Fri",
+			"sat": "Sat",
+			"sun": "Sun"
+		},
+		"duration": {
+			"minutes": "{{count}}m",
+			"hours": "{{count}}h",
+			"hoursMinutes": "{{hours}}h {{minutes}}m"
+		},
+		"workflow": {
+			"free": "Free",
+			"qa": "Q&A",
+			"summary": "Summary",
+			"related_work": "Related work",
+			"paper_reader": "Paper reader",
+			"translate": "Translate"
+		}
 	},
 	"writing": {
 		"uploadMode": "When to upload",
@@ -82,7 +129,9 @@
 		},
 		"terminalApp": {
 			"label": "Open in Terminal with",
-			"unavailable": "{{name}} (not installed)"
+			"systemDefault": "System default",
+			"unavailable": "{{name}} (not installed)",
+			"noneDetected": "No supported terminal detected. Pick System default to use your desktop terminal."
 		},
 		"finder": {
 			"label": "Finder integration",
@@ -256,6 +305,13 @@
 				"action": "Clear",
 				"done": "Activity history cleared"
 			}
+		},
+		"pdfTranslateTab": {
+			"label": "Page translate button",
+			"description": "Fixed screen size on the page corner. Hidden still leaves the PDF toolbar and the translate shortcut.",
+			"hover": "Show on hover",
+			"always": "Always show",
+			"hidden": "Hidden"
 		}
 	},
 	"appearance": {
@@ -375,7 +431,10 @@
 				"ok": "Reachable",
 				"failed": "Unreachable",
 				"unconfigured": "Not configured"
-			}
+			},
+			"agentero": "Agentero Embedding",
+			"agenteroHint": "Use an Agentero account API key. Account allowances and overage settings apply. Switching clears the previous provider key.",
+			"useAgentero": "Use Agentero"
 		},
 		"desktopOnly": "Agent registry requires the desktop app.",
 		"desktopHint": "Run `pnpm tauri dev` to scan agents on this machine.",
@@ -532,7 +591,7 @@
 		"title": "Translate",
 		"provider": {
 			"label": "Default service",
-			"agentero": "Agentero built-in",
+			"agentero": "Agentero cloud (personal account)",
 			"cnki": "CNKI Translate",
 			"huoshanweb": "Volcengine Web",
 			"tencenttransmart": "Tencent Transmart",
@@ -563,33 +622,27 @@
 		"autoSelection": {
 			"label": "Auto-translate PDF selection"
 		},
+		"alwaysShowCard": {
+			"label": "Keep the translation card visible"
+		},
 		"autoImport": {
 			"label": "Auto-translate after layout analysis",
-			"description": "After import, download, or a layout reparse, runs full-text translation in the background. Reuses cached translations and only requests changed blocks. Uses the current translation service and cache settings.",
 			"concurrency": {
 				"label": "Concurrent papers for auto-translation"
 			}
 		},
-		"displayMode": {
-			"label": "Translation display mode",
-			"overlay": "Overlay on original PDF",
-			"dualPane": "Dual pane"
-		},
 		"cache": {
 			"section": "Cache",
 			"ir": {
-				"label": "Cache reflow IR",
-				"description": "Saves extracted character geometry so reopening a paper skips extraction."
+				"label": "Cache typesetting"
 			},
 			"final": {
-				"label": "Cache translated PDF",
-				"description": "Saves the built translated PDF. Each paper takes about 25 MB."
+				"label": "Cache translated PDF"
 			},
 			"tip": "Turning a switch off only stops new writes; existing entries keep being reused.",
 			"reset": "Restore defaults",
 			"dictionary": {
 				"label": "Word lookup cache",
-				"description": "Completed word and context results are reused for 30 days. Clear for the current Vault; bundled dictionaries stay available.",
 				"clear": "Clear",
 				"clearFailed": "Could not clear the word lookup cache.",
 				"cleared": "Cleared"
@@ -614,6 +667,10 @@
 			"model": {
 				"label": "Model",
 				"placeholder": "Provider model id"
+			},
+			"advanced": "Advanced",
+			"concurrency": {
+				"label": "Concurrency"
 			},
 			"extraRequestBody": {
 				"label": "Extra JSON",
@@ -653,13 +710,11 @@
 		"autoTranslation": {
 			"section": "Auto-translate"
 		},
-		"dictionaryIncluded": "Offline English–Chinese dictionary and AI terminology are included. No setup needed.",
 		"dictionaryMode": {
 			"label": "Word lookup",
 			"auto": "Automatic",
 			"offline-first": "Offline first",
 			"off": "Off",
-			"autoDescription": "Show local definitions, then explain the context with your configured AI service.",
 			"offline-firstDescription": "Use local definitions when available. Only request your service for missing words.",
 			"offDescription": "Translate every selection. You can still open the dictionary from a result card."
 		}
@@ -1108,7 +1163,7 @@
 		"gitSslCaHint": "Absolute PEM path for a self-signed HTTPS server. Empty uses the system trust store.",
 		"gitAuthFailed": "Git could not sign in, and sync does not prompt.\n{{detail}}\nHTTPS: store a token first with `git credential approve` or your credential helper. SSH: run `ssh-add`.",
 		"gitTlsFailed": "Git rejected the server certificate.\n{{detail}}\nFor a self-signed server, set the CA certificate path and connect again.",
-		"noConditionalWrites": "This storage doesn't support conditional (atomic) writes, so sync falls back to plain uploads. Fine for single-device use; concurrent edits from multiple devices may need an extra sync round to converge.",
+		"noConditionalWrites": "Sync is blocked because this storage does not enforce conditional writes. Choose another store to avoid overwriting another device’s changes.",
 		"saved": "Sync configured",
 		"disconnect": "Disconnect",
 		"syncNow": "Sync now",
@@ -1141,7 +1196,7 @@
 		"intervalMinutes": "{{count}} min",
 		"scope": "Sync scope",
 		"scopeHint": "Notes, metadata and highlights always sync. Unselected content is neither uploaded nor downloaded — and is never deleted because of the filter. PDFs and LaTeX sources can be re-downloaded from their source at any time.",
-		"scopeHintGit": "Notes, metadata and highlights always sync. Unselected files are written to .gitignore and left out of new commits.",
+		"scopeHintGit": "Exclusions apply to new files only. Files already tracked by Git continue to sync across devices.",
 		"scopePdf": "PDFs",
 		"scopeSource": "LaTeX sources",
 		"scopeAttachments": "Attachments",
@@ -1155,23 +1210,6 @@
 		"unlimited": "Unlimited",
 		"signInRequired": "Sign in to see your cloud sync capacity.",
 		"notIncluded": "The current plan does not include cloud sync."
-	},
-	"plugins": {
-		"install": "Install from folder…",
-		"localOnly": "Open a local Vault to manage plugins.",
-		"empty": "No plugins installed.",
-		"failed": "Plugin operation failed",
-		"configure": "Configure {{name}}",
-		"remove": "Uninstall {{name}}",
-		"enable": "Enable {{name}}",
-		"saveEnable": "Save and enable",
-		"permissions": {
-			"vault:read": "Read Vault files and papers",
-			"catalog:write": "Change paper tags and read status",
-			"vault:notes:write": "Write paper notes",
-			"vault:write": "Write Vault text and move papers"
-		},
-		"cancel": "Cancel"
 	},
 	"word": {
 		"damagedField": "This citation has an empty or damaged field result. Restore the document or reinsert the citation in a copy.",

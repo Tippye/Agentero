@@ -1,6 +1,6 @@
 /**
  * Layout-analysis cluster for the PDF viewer: region buckets, the analysis
- * run, the Figures-panel handlers, the region-crop screen anchor and the
+ * run, the Figures-panel handlers and the
  * bulk-translate job.
  *
  * Grouped because they form one capability around `layoutAnalysisStore` +
@@ -21,7 +21,6 @@ import type { PdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-lay
 import { usePdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutRun } from "@/components/viewer/pdf/hooks/use-pdf-layout-run";
 import { usePdfLayoutTranslate } from "@/components/viewer/pdf/hooks/use-pdf-layout-translate";
-import { usePdfVisualDraft } from "@/components/viewer/pdf/hooks/use-pdf-visual-draft";
 import { renderPdfRegionPromptImage } from "@/components/viewer/pdf/region-crop";
 import type { PromptImage } from "@/lib/agent/api";
 import { type PdfLayoutRegion, setFocusedLayoutRegion } from "@/lib/pdf/layout";
@@ -63,8 +62,6 @@ export type UsePdfLayoutClusterOptions = {
 	engineRef: RefObject<PdfEngine | null>;
 	/** Scroll scope mirror, for region jumps. */
 	scrollRef: RefObject<ScrollCapability>;
-	/** Viewer host element, for the visual-draft card anchor. */
-	hostRef: RefObject<HTMLDivElement | null>;
 	/** True for remote papers with no local sidecar; disables layout analysis. */
 	isRemotePaper?: boolean;
 	/** True for PDFs outside papers/ (plain viewer): no layout analysis. */
@@ -73,7 +70,6 @@ export type UsePdfLayoutClusterOptions = {
 
 export type PdfLayoutCluster = PdfLayoutRegions &
 	ReturnType<typeof usePdfLayoutRun> &
-	ReturnType<typeof usePdfVisualDraft> &
 	ReturnType<typeof usePdfLayoutTranslate> & {
 		/** Figures panel: run (or re-run) the layout analysis. */
 		handleAnalyzeLayout: () => void;
@@ -103,7 +99,6 @@ export function usePdfLayoutCluster({
 	docCapRef,
 	engineRef,
 	scrollRef,
-	hostRef,
 	isRemotePaper = false,
 	plainViewer = false,
 }: UsePdfLayoutClusterOptions): PdfLayoutCluster {
@@ -113,7 +108,7 @@ export function usePdfLayoutCluster({
 		layoutOverlayVisible,
 		layoutDocRegions,
 		layoutRawRegions,
-		hoverableRegionsByPage,
+		selectableRegionsByPage,
 		rawRegionsByPage,
 	} = usePdfLayoutRegions(docId);
 
@@ -190,8 +185,6 @@ export function usePdfLayoutCluster({
 		[docId],
 	);
 
-	const { screenPointForRegion } = usePdfVisualDraft({ hostRef });
-
 	const {
 		reflowBusy,
 		reflowReady,
@@ -212,7 +205,11 @@ export function usePdfLayoutCluster({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
+		ensureLayoutTranslate,
+		showLayoutTranslate,
+		cancelLayoutTranslate,
 		togglePageLayoutTranslate,
+		retryPageLayoutTranslate,
 	} = usePdfLayoutTranslate({
 		enabled: capabilities.layoutTranslation,
 		apiOnly: capabilities.apiOnly,
@@ -238,7 +235,7 @@ export function usePdfLayoutCluster({
 		exportTranslatedPdf,
 		layoutOverlayVisible,
 		layoutRawRegions,
-		hoverableRegionsByPage,
+		selectableRegionsByPage,
 		rawRegionsByPage,
 		startLayoutAnalysisRef,
 		layoutDocRegions,
@@ -246,7 +243,6 @@ export function usePdfLayoutCluster({
 		handleAnalyzeLayout,
 		handleJumpToLayoutRegion,
 		handleRenderLayoutThumb,
-		screenPointForRegion,
 		layoutTranslateItemsByPage,
 		layoutTranslatePageStateByPage,
 		layoutTranslateRunning,
@@ -262,6 +258,10 @@ export function usePdfLayoutCluster({
 		layoutTranslateProgress,
 		layoutTranslatePageCounts,
 		toggleLayoutTranslate,
+		ensureLayoutTranslate,
+		showLayoutTranslate,
+		cancelLayoutTranslate,
 		togglePageLayoutTranslate,
+		retryPageLayoutTranslate,
 	};
 }

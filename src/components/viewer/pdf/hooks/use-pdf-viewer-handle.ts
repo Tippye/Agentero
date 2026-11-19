@@ -87,6 +87,8 @@ export type UsePdfViewerHandleOptions = {
 	deleteVisualTraceById: (id: string) => void;
 	/** Highlight deletion coordinated with any in-flight commit for the same uid. */
 	deleteHighlightAnnotation: (pageIndex: number, id: string) => void;
+	toggleElementSelection: () => void;
+	/** Mobile lasso marquee toggle (mobile-paper-context); parent callback. */
 	toggleRegionSelect: () => void;
 	/** Dual-pane-aware full-text translate toggle; parent callback — kept in a ref. */
 	toggleLayoutTranslate: () => void;
@@ -112,6 +114,7 @@ export function usePdfViewerHandle({
 	openThread,
 	deleteVisualTraceById,
 	deleteHighlightAnnotation,
+	toggleElementSelection,
 	toggleRegionSelect,
 	toggleLayoutTranslate,
 }: UsePdfViewerHandleOptions): void {
@@ -124,6 +127,10 @@ export function usePdfViewerHandle({
 	// latest callback so the handle object never needs re-registering.
 	const toggleLayoutTranslateRef = useRef(toggleLayoutTranslate);
 	toggleLayoutTranslateRef.current = toggleLayoutTranslate;
+	const toggleElementSelectionRef = useRef(toggleElementSelection);
+	toggleElementSelectionRef.current = toggleElementSelection;
+	const toggleRegionSelectRef = useRef(toggleRegionSelect);
+	toggleRegionSelectRef.current = toggleRegionSelect;
 	const defaultExportNameRef = useRef(defaultExportName);
 	defaultExportNameRef.current = defaultExportName;
 
@@ -202,7 +209,8 @@ export function usePdfViewerHandle({
 			deleteVisualTrace: (id) => {
 				deleteVisualTraceById(id);
 			},
-			toggleVisualAnnotation: toggleRegionSelect,
+			toggleElementSelection: () => toggleElementSelectionRef.current(),
+			toggleRegionSelect: () => toggleRegionSelectRef.current(),
 			toggleLayoutTranslate: () => toggleLayoutTranslateRef.current(),
 			analyzeLayout: () => {
 				// Prefer source/layout.json → merge → sidebar. Full ONNX (PDF→JSON)
@@ -295,6 +303,5 @@ export function usePdfViewerHandle({
 		openThread,
 		deleteVisualTraceById,
 		deleteHighlightAnnotation,
-		toggleRegionSelect,
 	]);
 }

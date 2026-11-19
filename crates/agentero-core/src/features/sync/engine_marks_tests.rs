@@ -597,7 +597,7 @@ async fn marks_scoped_out_last_surviving_pdf_does_not_turn_ink_omission_into_pap
             );
             assert_eq!(page.tombstones, vec![ink_deleted(1, 2, 10)]);
             assert!(vault.join("papers/x/x.pdf").exists());
-            assert!(!local::read_base(vault).files.contains_key("papers/x/x.pdf"));
+            assert!(!local::read_base(vault).unwrap().files.contains_key("papers/x/x.pdf"));
         }
     }
 }
@@ -628,7 +628,7 @@ async fn marks_whole_paper_deletion_removes_unchanged_ink() {
         .unwrap();
     assert!(!a.path().join(INK_PATH).exists());
     assert!(!b.path().join(INK_PATH).exists());
-    assert!(local::read_base(a.path())
+    assert!(local::read_base(a.path()).unwrap()
         .files
         .keys()
         .all(|path| !path.starts_with("papers/x/")));

@@ -149,6 +149,12 @@ export const commands = {
 	desktopAppsProbe: () => typedError<ApiResult<DesktopAppStatus_Serialize[]>, string>(__TAURI_INVOKE("desktop_apps_probe")),
 	/**  Launch one installed desktop app (macOS or Windows). */
 	desktopAppOpen: (id: DesktopAppId) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("desktop_app_open", { id })),
+	/**
+	 *  Retarget in-flight agent runs that emit to `source_label` so later events
+	 *  go to `target_label`. The frontend calls this only after the target window
+	 *  acknowledges the session snapshot; until then emitters keep the source label.
+	 */
+	agentRebindEventWindow: (sourceLabel: string, targetLabel: string) => __TAURI_INVOKE<ApiResult<boolean>>("agent_rebind_event_window", { sourceLabel, targetLabel }),
 	/**  Request cooperative cancellation for a currently streaming ACP session. */
 	agentCancelRun: (sessionId: string) => __TAURI_INVOKE<ApiResult<boolean>>("agent_cancel_run", { sessionId }),
 	jobParseRefsEnqueue: (args: JobEnqueueArgs) => typedError<ApiResult<JobSnapshot>, string>(__TAURI_INVOKE("job_parse_refs_enqueue", { args })),
@@ -501,6 +507,7 @@ export const commands = {
 	researchTableBacklinks: (args: ResearchTableBacklinkArgs) => __TAURI_INVOKE<ApiResult<ResearchTableBacklinkResult>>("research_table_backlinks", { args }),
 	activityRecordEvents: (args: ActivityRecordArgs) => typedError<ApiResult<number>, string>(__TAURI_INVOKE("activity_record_events", { args })),
 	usageClear: (args: UsageClearArgs) => __TAURI_INVOKE<ApiResult<number>>("usage_clear", { args }),
+	usageBoardQuery: (args: UsageBoardArgs) => __TAURI_INVOKE<ApiResult<UsageBoard_Serialize>>("usage_board_query", { args }),
 	feedbackSubmit: (args: FeedbackSubmitArgs) => __TAURI_INVOKE<ApiResult<null>>("feedback_submit", { args }),
 	logsClear: () => __TAURI_INVOKE<ApiResult<number>>("logs_clear"),
 	feedsList: () => __TAURI_INVOKE<ApiResult<FeedList>>("feeds_list"),
@@ -542,16 +549,6 @@ export const commands = {
 	 *  Other platforms have no native menu and need only the renderer recording guard.
 	 */
 	setMenuShortcutRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_menu_shortcut_recording", { recording })),
-	pluginEditorState: (vaultPath: string, paths: string[]) => typedError<null, string>(__TAURI_INVOKE("plugin_editor_state", { vaultPath, paths })),
-	pluginList: (vaultPath: string) => typedError<Json, string>(__TAURI_INVOKE("plugin_list", { vaultPath })),
-	pluginInspect: (directory: string) => typedError<Json, string>(__TAURI_INVOKE("plugin_inspect", { directory })),
-	pluginInstall: (directory: string) => typedError<null, string>(__TAURI_INVOKE("plugin_install", { directory })),
-	pluginConfigure: (id: string, vaultPath: string, enabled: boolean, grants: string[], settings: Json) => typedError<null, string>(__TAURI_INVOKE("plugin_configure", { id, vaultPath, enabled, grants, settings })),
-	pluginRemove: (id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_remove", { id })),
-	pluginActivate: (vaultPath: string) => typedError<DevelopmentPluginInfo[], string>(__TAURI_INVOKE("plugin_activate", { vaultPath })),
-	pluginDevLoad: (directory: string, vaultPath: string) => typedError<DevelopmentPluginInfo, string>(__TAURI_INVOKE("plugin_dev_load", { directory, vaultPath })),
-	pluginUnload: (instanceId: string | null) => __TAURI_INVOKE<void>("plugin_unload", { instanceId }),
-	pluginRun: (instanceId: string, commandId: string, context: DevelopmentPluginContext) => typedError<string, string>(__TAURI_INVOKE("plugin_run", { instanceId, commandId, context })),
 	bridgeStart: (args: BridgeStartArgs) => __TAURI_INVOKE<ApiResult<BridgeStatus>>("bridge_start", { args }),
 	bridgeStop: () => __TAURI_INVOKE<ApiResult<null>>("bridge_stop"),
 	bridgeStatus: () => __TAURI_INVOKE<ApiResult<BridgeStatus>>("bridge_status"),
@@ -721,6 +718,12 @@ export const commands = {
 	syncDisconnect: (args: SyncVaultArgs) => typedError<ApiResult<null>, string>(__TAURI_INVOKE("sync_disconnect", { args })),
 	/**  One full sync pass (manual trigger from the settings pane). */
 	syncNow: (args: SyncVaultArgs) => typedError<ApiResult<SyncOutcome>, string>(__TAURI_INVOKE("sync_now", { args })),
+	/**
+	 *  Local disk usage per bulky-asset category (bytes), for the sync-scope UI.
+	 *  The shared snapshot classifier covers all five categories (including the
+	 *  mobile ink / translated-PDF buckets); the app-aware vault guard keeps the
+	 *  tablet private-Vault boundary.
+	 */
 	syncScopeSizes: (args: SyncVaultArgs) => typedError<ApiResult<SyncScopeSizes>, string>(__TAURI_INVOKE("sync_scope_sizes", { args })),
 	syncGetDownloadPolicy: (args: SyncVaultArgs) => typedError<ApiResult<DownloadPolicy>, string>(__TAURI_INVOKE("sync_get_download_policy", { args })),
 	syncSetDownloadPolicy: (args: SyncDownloadPolicyArgs) => typedError<ApiResult<DownloadPolicy>, string>(__TAURI_INVOKE("sync_set_download_policy", { args })),
@@ -936,8 +939,6 @@ export const events = {
 	paperAssetsReady: makeEvent<PaperAssetsReadyEvent>("paper:assets-ready"),
 	paperImported: makeEvent<PaperImportedEvent>("paper:imported"),
 	paperRenamed: makeEvent<PaperRenamedEventPayload>("paper:renamed"),
-	pluginsChanged: makeEvent<PluginsChangedEvent>("plugins:changed"),
-	pluginsDataChanged: makeEvent<PluginsDataChangedEvent>("plugins:data-changed"),
 	rtexEvent: makeEvent<RtexEventEvt>("rtex:event"),
 	settingsChanged: makeEvent<SettingsChangedEvent_Deserialize>("settings:changed"),
 	settingsSectionRequested: makeEvent<SettingsSectionRequestedEvent>("settings:section-requested"),
@@ -1529,7 +1530,10 @@ export type AgentStatusEvent_Deserialize = {
 	sessionId: string,
 	/**
 	 *  `starting` (spawn/connect) | `waiting-model` (prompt sent, no output
-	 *  yet) | `reconnecting` (upstream connection lost, agent retries).
+	 *  yet) | `reconnecting` (upstream connection lost, agent retries) |
+	 *  `notice-info`, `notice-warning`, `notice-error` (live ACP notices) or
+	 *  `codex-instruction-budget` (legacy Codex text fallback; the UI shows a
+	 *  dismissible notice and does not treat it as a loading phase).
 	 */
 	phase: string,
 	/**  Optional context, e.g. the reconnect attempt counter (`2/5`). */
@@ -1544,7 +1548,10 @@ export type AgentStatusEvent_Serialize = {
 	sessionId: string,
 	/**
 	 *  `starting` (spawn/connect) | `waiting-model` (prompt sent, no output
-	 *  yet) | `reconnecting` (upstream connection lost, agent retries).
+	 *  yet) | `reconnecting` (upstream connection lost, agent retries) |
+	 *  `notice-info`, `notice-warning`, `notice-error` (live ACP notices) or
+	 *  `codex-instruction-budget` (legacy Codex text fallback; the UI shows a
+	 *  dismissible notice and does not treat it as a loading phase).
 	 */
 	phase: string,
 	/**  Optional context, e.g. the reconnect attempt counter (`2/5`). */
@@ -1579,7 +1586,7 @@ export type AgentTemplate = "opencode" |
  *  Docs: https://cursor.com/docs/cli
  */
 "cursor-agent" |
-/**  Google Antigravity's official ACP server (separate from the retired `agy-acp` adapter). */
+/**  Google Antigravity CLI with native ACP (`agy acp`). */
 "antigravity-acp" |
 /**
  *  Qoder CLI native ACP (`qodercli --acp`).
@@ -1833,6 +1840,8 @@ export type AppSettings_Deserialize = {
 	soundEnabled?: boolean,
 	/**  PDF page layout: `none` (single page) | `odd` | `even` (two-page spread). */
 	pdfSpreadMode?: string,
+	/**  In-page translate tab: `hover` (default) | `always` | `hidden`. */
+	pdfTranslateTab?: string,
 	libraryColumns?: LibraryColumnPref_Deserialize[],
 	connectorEnabled?: boolean,
 	connectorPort?: number,
@@ -1994,6 +2003,8 @@ export type AppSettings_Serialize = {
 	soundEnabled: boolean,
 	/**  PDF page layout: `none` (single page) | `odd` | `even` (two-page spread). */
 	pdfSpreadMode: string,
+	/**  In-page translate tab: `hover` (default) | `always` | `hidden`. */
+	pdfTranslateTab: string,
 	libraryColumns: LibraryColumnPref_Serialize[],
 	connectorEnabled: boolean,
 	connectorPort: number,
@@ -3122,30 +3133,6 @@ export type DesktopAppStatus_Serialize = {
 	id: DesktopAppId,
 	installed: boolean,
 	path?: string | null,
-};
-
-export type DevelopmentPluginCommand = {
-	id: string,
-	title: { [key in string]: string },
-};
-
-export type DevelopmentPluginContext = {
-	paperRef?: string,
-	kind?: string,
-	event: string | null,
-	relPath: string | null,
-	selectionText: string | null,
-	payload?: Json,
-	blockedPaths?: string[],
-	locale: string,
-};
-
-export type DevelopmentPluginInfo = {
-	grants: string[],
-	instanceId: string,
-	pluginId: string,
-	commands: DevelopmentPluginCommand[],
-	manifest: Json,
 };
 
 export type DictionaryEntry = {
@@ -5346,10 +5333,6 @@ export type PlazaScratchPrepareArgs = {
 	arxivIds: string[],
 };
 
-export type PluginsChangedEvent = null;
-
-export type PluginsDataChangedEvent = string;
-
 export type PreparationReason = "downloadSource" | "parseBody" | "repairState";
 
 export type ProbeEmbeddingArgs = {
@@ -6217,11 +6200,7 @@ export type SyncBackendConfig_Deserialize = {
 	 */
 	autoSync?: boolean,
 	intervalMinutes?: number,
-	/**
-	 *  Connection-test probe result: `false` for backends whose PUT rejects
-	 *  or ignores conditional headers (e.g. Aliyun OSS 400 NotImplemented,
-	 *  most WebDAV servers). Sync then degrades to plain PUTs.
-	 */
+	/**  Last conditional-write probe result. Unsafe stores cannot publish. */
 	conditionalWrites?: boolean,
 	/**
 	 *  Which bulky paper assets (PDF / LaTeX source / attachments) take part
@@ -6290,11 +6269,7 @@ export type SyncBackendConfig_Serialize = {
 	 */
 	autoSync: boolean,
 	intervalMinutes: number,
-	/**
-	 *  Connection-test probe result: `false` for backends whose PUT rejects
-	 *  or ignores conditional headers (e.g. Aliyun OSS 400 NotImplemented,
-	 *  most WebDAV servers). Sync then degrades to plain PUTs.
-	 */
+	/**  Last conditional-write probe result. Unsafe stores cannot publish. */
 	conditionalWrites: boolean,
 	/**
 	 *  Which bulky paper assets (PDF / LaTeX source / attachments) take part
@@ -6414,7 +6389,9 @@ export type SyncScopeSizes = {
 	pdf: number,
 	source: number,
 	attachments: number,
+	/**  Handwritten ink sidecars (mobile optional category). */
 	ink: number,
+	/**  Finished translated PDFs (mobile optional category). */
 	translated: number,
 };
 
@@ -6497,6 +6474,12 @@ export type TranslateProviderConfig = {
 	region?: string,
 	model?: string,
 	extraRequestBody?: string,
+	/**
+	 *  Full-document translation batch concurrency for the OpenAI-compatible
+	 *  path (1–8, default 2). Selection translation and the Agent path stay
+	 *  serial; other providers ignore it.
+	 */
+	concurrency?: number,
 };
 
 export type TranslateSettings = {
@@ -6506,10 +6489,6 @@ export type TranslateSettings = {
 	sourceLang?: string,
 	providerConfigs?: { [key in string]: TranslateProviderConfig },
 	autoTranslateSelection?: boolean,
-	/**  Deprecated: kept for migration. Use `display_mode` + `dual_pane_source`. */
-	dualPaneTranslate?: boolean,
-	displayMode?: string,
-	dualPaneSource?: string,
 	agentId?: string,
 	modelId?: string,
 	/**
@@ -6542,6 +6521,12 @@ export type TranslateSettings = {
 	 *  Seeded into the JobCenter `LayoutTranslate` cap (1–5, default 1).
 	 */
 	autoTranslateImportConcurrency?: number,
+	/**
+	 *  Keep the selection translation result card open after a click elsewhere
+	 *  on the page (default off: a completed click outside the card closes it).
+	 *  Scrolling, page turns and viewer toolbars never close it.
+	 */
+	alwaysShowTranslateCard?: boolean,
 };
 
 export type TranslateTextArgs = {
@@ -6730,8 +6715,52 @@ export type UpsertAgentRequest_Serialize = {
 	setDefault: boolean,
 };
 
+export type UsageBoard = UsageBoard_Serialize | UsageBoard_Deserialize;
+
+export type UsageBoardArgs = {
+	vault: string,
+	startDay: string,
+	endDay: string,
+	weekStart: string,
+};
+
+export type UsageBoard_Deserialize = {
+	days: UsageDayStat[],
+	papers: UsagePaperStat_Deserialize[],
+	workflows: UsageWorkflowStat[],
+	weekPaperCount: number,
+};
+
+export type UsageBoard_Serialize = {
+	days: UsageDayStat[],
+	papers: UsagePaperStat_Serialize[],
+	workflows: UsageWorkflowStat[],
+	weekPaperCount: number,
+};
+
 export type UsageClearArgs = {
 	vault?: string | null,
+};
+
+export type UsageDayStat = {
+	day: string,
+	readingMs: number,
+	agentRuns: number,
+	tokens: number,
+};
+
+export type UsagePaperStat = UsagePaperStat_Serialize | UsagePaperStat_Deserialize;
+
+export type UsagePaperStat_Deserialize = {
+	path: string,
+	title: string | null,
+	readingMs: number,
+};
+
+export type UsagePaperStat_Serialize = {
+	path: string,
+	title?: string | null,
+	readingMs: number,
 };
 
 export type UsageRecord = {
@@ -6742,6 +6771,11 @@ export type UsageRecord = {
 	mode?: string | null,
 	durMs?: number | null,
 	extra?: Json | null,
+};
+
+export type UsageWorkflowStat = {
+	workflow: string,
+	count: number,
 };
 
 export type VaultFileChangedEvent = VaultFileChangedEvent_Serialize | VaultFileChangedEvent_Deserialize;

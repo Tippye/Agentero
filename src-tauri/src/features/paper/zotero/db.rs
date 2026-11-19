@@ -1884,12 +1884,17 @@ pub(crate) fn persist_zotero_highlights(
     }
 }
 
+// PDF geometry mapping depends on desktop PDFium. Keep metadata and note
+// migration available on mobile without linking the desktop locator.
 #[cfg(mobile)]
 pub(crate) fn persist_zotero_highlights(
     _paper_dir: &Path,
     _pdf_path: &Path,
-    _marks: &[ZoteroPdfMark],
+    marks: &[ZoteroPdfMark],
 ) -> usize {
+    if !marks.is_empty() {
+        log::warn!("zotero highlights: PDF annotation import requires the desktop app");
+    }
     0
 }
 
@@ -1998,6 +2003,7 @@ fn annotation_paint(color: Option<&str>) -> (String, &'static str) {
     (format!("#{r:02x}{g:02x}{b:02x}"), best.0)
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn parse_hex_color(raw: &str) -> Option<(u8, u8, u8)> {
     let hex = raw.trim().trim_start_matches('#');
     if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {

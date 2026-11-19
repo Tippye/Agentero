@@ -44,12 +44,12 @@ export type { DiskChangeSink } from "./persistence";
 export {
 	applyDiskChange,
 	dirtyVaultPaths,
-	persistExcalidrawFile,
 	persistFile,
 	persistTextFile,
 } from "./persistence";
 export {
 	closeTexLive,
+	closeTranslationTab,
 	compileTexOnManualSave,
 	compileTexOnSave,
 	compileTexProject,

@@ -26,6 +26,8 @@
 
 渲染使用固定的 [perfect-freehand 1.2.3（MIT）](https://github.com/steveruizok/perfect-freehand) 生成压力轮廓，保留原始点而非生成的屏幕多边形。输入使用合并 pointer samples；手指平移复用 EmbedPDF 的公开 viewport scrolling，双指缩放交给已有 ZoomGestureWrapper。笔输入期间隔离掌触，cancel、blur 和变换变化取消当前手势。共享数据控制器与每视图的工具状态分开，笔记里的只读嵌入不会关闭主阅读器的书写工具。
 
+一笔成形（hold-to-shape）只对笔笔迹生效：笔未抬起且停止移动 500 ms（`INK_SHAPE_HOLD_MS`，6 CSS px 抖动容差）时，[shapes.ts](../../src/lib/pdf/ink/shapes.ts) 对已积累采样做识别，把草稿预览替换为规范图形；抬笔提交该图形，继续绘制则恢复原始手写，抬笔点远离停留点也按手写提交。支持直线、箭头、矩形、三角形、圆/椭圆：先用 [simplify-js 1.2.4（MIT）](https://github.com/mourner/simplify-js) 做 Ramer–Douglas–Peucker 简化，按角点数量分类，再对原始采样验证拟合置信度；手写、弧线、对勾、菱形等置信度不足时保留墨迹。规范图形仍存为普通点序列：压力取原始采样均值，点时间按弧长在绘制时长内分配，倾角为空，因此撤销/重做、同步与副本导出不变；吸附预览按完成笔迹渲染。橡皮与套索不触发，cancel、blur、缩放仍丢弃草稿。ML 识别方案（如 desert-ant-labs shapes）因 WASM 体积与限制性 source-available 许可未采用。
+
 副本导出先用公开 `engine.saveAsCopy` 取得当前 PDF，再通过已有 `pdf-lib` 添加标准 Ink、原始 InkList 及带压力轮廓的 `/AP` Form。保留 CropBox、旋转、原有标注和源字节；不把导出时的临时标注写入开放文档或 sidecar。移动端复用已安装的官方 dialog/fs 插件：Android SAF content URI 和 iOS security-scoped file URL 原样交给文件插件。默认文件名是受限且唯一的 basename，选择原论文目录内的目标会被拒绝。文件分享面板属于后续平台入口；原生保存仍需真机验证。
 
 回归覆盖并发 CAS、原字节保留、未知/超限文件、路径和 actor 隔离、删除/撤销/重做及超出 JavaScript 安全范围的原生元数据。前端还覆盖指针取消、手指导航、模式切换、未知保存、冲突后撤销，以及由独立 PDFium 解析并栅格化四种裁剪/旋转副本。模拟 pointer 事件和桌面原生预览不能替代 Apple Pencil、Android 手写取消、延迟与设备内存验收。

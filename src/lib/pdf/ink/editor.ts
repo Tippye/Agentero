@@ -11,6 +11,7 @@ import {
 	inkLassoIds,
 	moveInk,
 } from "./geometry";
+import { recognizeInkShape } from "./shapes";
 
 export type InkMode = "read" | "pen" | "highlighter" | "eraser" | "lasso";
 export type InkEditorState = Readonly<{
@@ -19,7 +20,7 @@ export type InkEditorState = Readonly<{
 	width: number;
 	paletteRequest: number;
 	selection: { page: number; ids: string[]; bounds: InkBounds | null } | null;
-	draft: { page: number; stroke: InkShape } | null;
+	draft: { page: number; stroke: InkShape; snapped?: boolean } | null;
 	lasso: { page: number; points: InkPosition[] } | null;
 	moving: { page: number; strokes: InkShape[] } | null;
 	erasing: { page: number; ids: string[] } | null;
@@ -37,6 +38,8 @@ type Gesture = {
 	origin: InkPosition;
 	samples: InkSample[];
 	stroke?: InkShape;
+	/** Hold-to-shape preview; lifting commits it, moving again restores ink. */
+	snapped?: InkShape;
 	originals?: InkShape[];
 };
 export const INK_COLORS = [
@@ -46,6 +49,46 @@ export const INK_COLORS = [
 	"#2b8a3e",
 	"#f0b429",
 ] as const;
+
+/**
+ * Synthesize point metadata along a snapped path: mean observed pressure and
+ * arc-length-proportional elapsed time keep the native point contract (u32,
+ * nondecreasing) without inventing device samples.
+ */
+function snappedStroke(
+	base: InkShape,
+	samples: readonly InkSample[],
+	polyline: readonly InkPosition[],
+): InkShape {
+	let pressureSum = 0,
+		pressureCount = 0;
+	for (const sample of samples)
+		if (sample.pressure !== null && Number.isFinite(sample.pressure)) {
+			pressureSum += sample.pressure;
+			pressureCount++;
+		}
+	const pressure = pressureCount ? pressureSum / pressureCount : null;
+	const duration = samples.at(-1)?.elapsedMs ?? 0;
+	const cumulative = [0];
+	let total = 0;
+	for (let i = 1; i < polyline.length; i++) {
+		total += Math.hypot(
+			polyline[i].x - polyline[i - 1].x,
+			polyline[i].y - polyline[i - 1].y,
+		);
+		cumulative.push(total);
+	}
+	return {
+		...base,
+		points: polyline.map((point, i) => ({
+			x: point.x,
+			y: point.y,
+			pressure,
+			tilt: null,
+			elapsedMs: total > 0 ? Math.round((duration * cumulative[i]) / total) : 0,
+		})),
+	};
+}
 
 /** Tool state is independent of native revisions and the PDF annotation plugin. */
 export class InkEditor {
@@ -235,9 +278,12 @@ export class InkEditor {
 		gesture.samples.push(...samples);
 		if (gesture.stroke) {
 			gesture.stroke = { ...gesture.stroke, points: gesture.samples.slice() };
-			this.update({
-				draft: { page: gesture.page.page, stroke: gesture.stroke },
-			});
+			// While snapped, jitter keeps accumulating for a possible restore but
+			// the preview stays the clean shape.
+			if (!gesture.snapped)
+				this.update({
+					draft: { page: gesture.page.page, stroke: gesture.stroke },
+				});
 		} else if (gesture.tool === "eraser") {
 			let ids = this.state.erasing?.ids ?? [];
 			for (const point of samples) {
@@ -262,11 +308,42 @@ export class InkEditor {
 				lasso: { page: gesture.page.page, points: gesture.samples },
 			});
 	}
+	/**
+	 * Hold-to-shape: recognize the accumulated samples and preview a clean
+	 * shape. Returns false when the stroke is not a confident shape, keeping
+	 * handwriting as ink.
+	 */
+	snapDraft(): boolean {
+		const gesture = this.gesture;
+		if (!gesture?.stroke) return false;
+		if (gesture.snapped) return true;
+		const polyline = recognizeInkShape(gesture.samples);
+		if (!polyline) return false;
+		gesture.snapped = snappedStroke(gesture.stroke, gesture.samples, polyline);
+		this.update({
+			draft: {
+				page: gesture.page.page,
+				stroke: gesture.snapped,
+				snapped: true,
+			},
+		});
+		return true;
+	}
+	/** Drawing resumed after a snap: restore the freehand preview. */
+	unsnapDraft() {
+		const gesture = this.gesture;
+		if (!gesture?.snapped || !gesture.stroke) return;
+		gesture.snapped = undefined;
+		this.update({
+			draft: { page: gesture.page.page, stroke: gesture.stroke },
+		});
+	}
 	finish() {
 		const gesture = this.gesture;
 		if (!gesture) return;
 		let operations: InkEdit[] = [];
-		if (gesture.stroke) operations = [{ kind: "put", stroke: gesture.stroke }];
+		if (gesture.stroke)
+			operations = [{ kind: "put", stroke: gesture.snapped ?? gesture.stroke }];
 		else if (gesture.tool === "eraser")
 			operations = (this.state.erasing?.ids ?? []).map((id) => ({
 				kind: "delete",

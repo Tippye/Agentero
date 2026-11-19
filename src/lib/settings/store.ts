@@ -48,25 +48,25 @@ import {
 	isPaperNoteMode,
 	isPdfScrollStrategy,
 	isPdfSpreadMode,
+	isPdfTranslateTabMode,
 	LIBRARY_COLUMN_KEYS,
 	type LibraryColumnKey,
 	type LibraryColumnPref,
 	type PaperReaderSettings,
 	type PdfAskSettings,
 } from "@/lib/settings/types";
-import { DEFAULT_TRANSLATE_SETTINGS } from "@/lib/translate/defaults";
+import {
+	DEFAULT_TRANSLATE_SETTINGS,
+	normalizeTranslateConcurrency,
+} from "@/lib/translate/defaults";
 import { stripUnknownTranslatePlaceholders } from "@/lib/translate/prompt";
 import {
 	isCommercialTranslateProvider,
 	isTranslateProviderId,
 } from "@/lib/translate/services";
-import {
-	DUAL_PANE_SOURCES,
-	type DualPaneSource,
-	TRANSLATION_DISPLAY_MODES,
-	type TranslateSettings,
-	type TranslateTargetLang,
-	type TranslationDisplayMode,
+import type {
+	TranslateSettings,
+	TranslateTargetLang,
 } from "@/lib/translate/types";
 import { isKnownUiTheme } from "@/lib/ui/theme";
 
@@ -395,6 +395,9 @@ function normalizePartial(
 	}
 	if (!isPdfSpreadMode(merged.pdfSpreadMode)) {
 		merged.pdfSpreadMode = DEFAULT_SETTINGS.pdfSpreadMode;
+	}
+	if (!isPdfTranslateTabMode(merged.pdfTranslateTab)) {
+		merged.pdfTranslateTab = DEFAULT_SETTINGS.pdfTranslateTab;
 	}
 	merged.libraryColumns = normalizeLibraryColumns(merged.libraryColumns);
 	if (typeof parsed.autoPaperReader !== "boolean") {
@@ -745,27 +748,6 @@ function normalizeTranslateSettings(
 	if (typeof raw.autoTranslateSelection === "boolean") {
 		base.autoTranslateSelection = raw.autoTranslateSelection;
 	}
-	// Migrate legacy dualPaneTranslate boolean to the new displayMode pair.
-	const legacyDualPane = (raw as { dualPaneTranslate?: boolean })
-		.dualPaneTranslate;
-	if (typeof legacyDualPane === "boolean") {
-		base.displayMode = legacyDualPane ? "dualPane" : "overlay";
-		base.dualPaneSource = "pdf";
-	}
-	if (
-		raw.displayMode &&
-		TRANSLATION_DISPLAY_MODES.includes(
-			raw.displayMode as TranslationDisplayMode,
-		)
-	) {
-		base.displayMode = raw.displayMode as TranslationDisplayMode;
-	}
-	if (
-		raw.dualPaneSource &&
-		DUAL_PANE_SOURCES.includes(raw.dualPaneSource as DualPaneSource)
-	) {
-		base.dualPaneSource = raw.dualPaneSource as DualPaneSource;
-	}
 	if (typeof raw.agentId === "string") {
 		base.agentId = raw.agentId.trim();
 	}
@@ -798,6 +780,9 @@ function normalizeTranslateSettings(
 	) {
 		base.autoTranslateImportConcurrency = raw.autoTranslateImportConcurrency;
 	}
+	if (typeof raw.alwaysShowTranslateCard === "boolean") {
+		base.alwaysShowTranslateCard = raw.alwaysShowTranslateCard;
+	}
 	return base;
 }
 
@@ -820,6 +805,7 @@ function normalizeTranslateProviderConfigs(
 			region?: unknown;
 			model?: unknown;
 			extraRequestBody?: unknown;
+			concurrency?: unknown;
 		};
 		out[id] = {
 			apiKey: typeof cfg.apiKey === "string" ? cfg.apiKey.trim() : "",
@@ -833,6 +819,7 @@ function normalizeTranslateProviderConfigs(
 				typeof cfg.extraRequestBody === "string"
 					? cfg.extraRequestBody.trim()
 					: "",
+			concurrency: normalizeTranslateConcurrency(cfg.concurrency),
 		};
 	}
 	return out;

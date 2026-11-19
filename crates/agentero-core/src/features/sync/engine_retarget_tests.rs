@@ -24,7 +24,7 @@ async fn retarget_empty_store_uploads_physical_files_without_old_virtual_assets(
     assert_eq!(result.deleted_local, 0);
     assert_eq!(fs::read(b.path().join("papers/x/NOTES.md")).unwrap(), note);
     assert_asset_files(b.path(), false);
-    assert!(!local::read_base(b.path()).files.contains_key(ASSET_PDF));
+    assert!(!local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
     assert!(availability::read_state(b.path())
         .unwrap()
         .deferred
@@ -59,8 +59,8 @@ async fn retarget_equal_version_foreign_store_performs_handshake_and_merges() {
     run_sync(peer.path(), &new_config, &new_store, noop_progress())
         .await
         .unwrap();
-    assert_eq!(local::read_meta(local_vault.path()).last_version, 1);
-    assert_eq!(local::read_meta(peer.path()).last_version, 1);
+    assert_eq!(local::read_meta(local_vault.path()).unwrap().last_version, 1);
+    assert_eq!(local::read_meta(peer.path()).unwrap().last_version, 1);
     let peer_id = local::ensure_vault_id(peer.path()).unwrap();
     assert_ne!(local::ensure_vault_id(local_vault.path()).unwrap(), peer_id);
     let before = new_store.counts();
@@ -106,7 +106,7 @@ async fn retarget_interrupted_reset_retries_old_binding_after_each_durable_cut()
             .unwrap()
             .deferred
             .is_empty());
-        assert!(!local::read_base(b.path()).files.contains_key(ASSET_PDF));
+        assert!(!local::read_base(b.path()).unwrap().files.contains_key(ASSET_PDF));
         assert!(b.path().join("papers/x/NOTES.md").is_file());
         assert_eq!(
             stored_binding(b.path())["storeIdentity"],
@@ -215,7 +215,7 @@ async fn bound_store_losing_head_is_not_a_remote_file_deletion() {
         fs::read(vault.path().join("notes/local.md")).unwrap(),
         b"keep even when server HEAD is lost"
     );
-    assert!(local::read_base(vault.path())
+    assert!(local::read_base(vault.path()).unwrap()
         .files
         .contains_key("notes/local.md"));
 }
@@ -236,9 +236,9 @@ async fn empty_agreed_store_losing_head_cannot_restart_versions_and_strand_a_lag
     run_sync(a.path(), &config, &store, noop_progress())
         .await
         .unwrap();
-    assert!(local::read_base(a.path()).files.is_empty());
-    assert_eq!(local::read_meta(a.path()).last_version, 2);
-    assert_eq!(local::read_meta(b.path()).last_version, 1);
+    assert!(local::read_base(a.path()).unwrap().files.is_empty());
+    assert_eq!(local::read_meta(a.path()).unwrap().last_version, 2);
+    assert_eq!(local::read_meta(b.path()).unwrap().last_version, 1);
     let deleted_head = store.objects.lock().unwrap().remove(HEAD_KEY).unwrap().0;
     let before = store.counts();
     let error = run_sync(a.path(), &config, &store, noop_progress())
@@ -304,10 +304,10 @@ async fn idle_requires_the_base_and_metadata_to_describe_the_same_snapshot() {
         .unwrap();
     // Another metadata writer (e.g. Git) must not make an older blob-store
     // base appear current just because its status version equals remote HEAD.
-    let mut meta = local::read_meta(vault.path());
-    meta.last_version = local::read_meta(peer.path()).last_version;
+    let mut meta = local::read_meta(vault.path()).unwrap();
+    meta.last_version = local::read_meta(peer.path()).unwrap().last_version;
     local::write_meta(vault.path(), &meta).unwrap();
-    assert_ne!(local::read_base(vault.path()).version, meta.last_version);
+    assert_ne!(local::read_base(vault.path()).unwrap().version, meta.last_version);
     let outcome = run_sync(vault.path(), &config, &store, noop_progress())
         .await
         .unwrap();
@@ -339,8 +339,8 @@ async fn same_version_different_manifest_is_a_fork_not_an_idle_or_deletion_proof
     run_sync(b.path(), &config, &branch, noop_progress())
         .await
         .unwrap();
-    assert_eq!(local::read_meta(a.path()).last_version, 2);
-    assert_eq!(local::read_meta(b.path()).last_version, 2);
+    assert_eq!(local::read_meta(a.path()).unwrap().last_version, 2);
+    assert_eq!(local::read_meta(b.path()).unwrap().last_version, 2);
     assert_ne!(
         stored_binding(a.path())["manifestKey"],
         stored_binding(b.path())["manifestKey"]
@@ -357,7 +357,7 @@ async fn same_version_different_manifest_is_a_fork_not_an_idle_or_deletion_proof
         .unwrap();
     assert!(a.path().join("notes/a.md").is_file());
     assert!(a.path().join("notes/b.md").is_file());
-    assert_eq!(local::read_meta(a.path()).last_version, 3);
+    assert_eq!(local::read_meta(a.path()).unwrap().last_version, 3);
     run_sync(b.path(), &config, &store, noop_progress())
         .await
         .unwrap();
@@ -413,7 +413,7 @@ async fn cas_retry_compares_forks_against_its_current_merge_ancestor() {
             a.path().join(path).is_file(),
             "CAS retry must preserve {path}"
         );
-        assert!(local::read_base(a.path()).files.contains_key(path));
+        assert!(local::read_base(a.path()).unwrap().files.contains_key(path));
     }
     run_sync(remote.path(), &config, &store, noop_progress())
         .await
@@ -544,7 +544,7 @@ async fn normal_base_meta_and_error_updates_preserve_store_binding() {
     run_sync(vault.path(), &config, &store, noop_progress())
         .await
         .unwrap();
-    assert!(local::read_meta(vault.path()).last_error.is_none());
+    assert!(local::read_meta(vault.path()).unwrap().last_error.is_none());
     write_mark(vault.path(), "notes/local.md", b"two");
     run_sync(vault.path(), &config, &store, noop_progress())
         .await
