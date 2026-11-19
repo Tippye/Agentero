@@ -245,7 +245,12 @@ export function usePdfHighlights({
 	const applyPeerEvent = useCallback(
 		(event: Exclude<AnnotationEvent, { type: "loaded" }>) => {
 			if (reloadRequiredRef.current) return;
-			if (!initialImportDoneRef.current) return;
+			if (!initialImportDoneRef.current) {
+				// Buffer early peer edits until this pane's canonical import lands,
+				// so a simultaneous split/translation view mirrors them on replay.
+				pendingPeerEventsRef.current.push(event);
+				return;
+			}
 			const scope = annotationCap?.forDocument(docId);
 			if (!scope) return;
 			const wasImporting = importingRef.current;
@@ -273,14 +278,27 @@ export function usePdfHighlights({
 		},
 		[annotationCap, docId, history],
 	);
+	const pendingPeerEventsRef = useRef<
+		Exclude<AnnotationEvent, { type: "loaded" }>[]
+	>([]);
 	const peerSubscriptionRef = useRef<(() => void) | null>(null);
-	useEffect(
-		() => () => {
+	// Subscribe as soon as the pane mounts so a simultaneous peer's early edits
+	// are received (and buffered until import) instead of being lost before the
+	// canonical post-import re-subscribe. The post-import subscribe re-binds with
+	// the authoritative baseline for epoch invalidation.
+	useEffect(() => {
+		if (!paperAbsPath || !annotationCap) return;
+		peerSubscriptionRef.current?.();
+		peerSubscriptionRef.current = subscribeAnnotationPeer(
+			paperAbsPath,
+			docId,
+			applyPeerEvent,
+		);
+		return () => {
 			peerSubscriptionRef.current?.();
 			peerSubscriptionRef.current = null;
-		},
-		[],
-	);
+		};
+	}, [paperAbsPath, docId, annotationCap, applyPeerEvent]);
 
 	const rebuildHighlights = useCallback(() => {
 		if (!annotationCap) return;
@@ -635,6 +653,8 @@ export function usePdfHighlights({
 						annotationBase.content,
 					);
 				}
+				for (const event of pendingPeerEventsRef.current.splice(0))
+					applyPeerEvent(event);
 				rebuildHighlights();
 			}, 0);
 		})().catch((error) => {
