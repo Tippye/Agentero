@@ -2,6 +2,8 @@
 
 笔迹保存在 `papers/<folder>/marks/ink/p<一基页码>.json`，源 PDF 保持不变；移动端设置可以关闭 `marks/ink/` 的云同步（桌面只读显示，始终按开启处理）。格式与按 ID 合并位于 [ink.rs](../../crates/agentero-core/src/features/pdf/ink.rs)；文件存取位于 [ink_store.rs](../../crates/agentero-core/src/features/pdf/ink_store.rs)，原生命令壳位于[原生 ink.rs](../../src-tauri/src/features/pdf/ink.rs)。三者由桌面和平板共享，桌面阅读器当前提供只读显示和副本导出。
 
+笔迹只相对于空白页面几何，与页面文字内容无关：原文 PDF 与译文 PDF 页面尺寸一致，笔迹在两者上按同一页坐标原位置显示。切换原文 / 译文（覆盖模式）不隐藏、不移动笔迹，也不中断书写；译文覆盖层之上仍可落笔、擦除、套索移动。双栏对照时原文与译文栏共享同一个 `InkEditor` / `InkController`（按论文 key），任一侧书写、移动、撤销立即更新另一侧并写回同一页文件；译文栏页面壳带 `data-annotation-pdf/page` 属性，笔输入桥据此把笔势映射到译文表面。原文工具栏是唯一的笔工具控制。
+
 ## 格式与坐标
 
 版本为 1。每页包含 `strokes` 和 `tombstones`；缺失一笔不代表删除。笔迹有 UUID、页码、工具、RGBA、基准宽度、点序列、Lamport revision 和创建/更新时间。坐标与宽度使用未旋转的可见 CropBox 左上角、向右/向下的 PDF 点空间；原始 `/Rotate` 由现有页面框架处理，不能存屏幕坐标。压力为 `[0,1]` 或 `null`，零压力与设备未提供压力不同。点时间是笔内经过时间，倾角成对出现。
