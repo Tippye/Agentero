@@ -326,7 +326,6 @@ function VaultSyncForm({
 	}, [refresh]);
 
 	useEffect(() => {
-	useEffect(() => {
 		setStatus(null);
 		setForm(newConfig());
 		setSyncError(null);
