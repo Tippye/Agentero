@@ -86,6 +86,7 @@
 			"stop": "Stop full-text translate",
 			"hide": "Hide translations",
 			"show": "Show translations",
+			"dualPane": "Side-by-side translation",
 			"translatePage": "Translate this page",
 			"translatePageShort": "Translate",
 			"hidePage": "Hide this page translation",
