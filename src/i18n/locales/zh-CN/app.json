@@ -235,6 +235,7 @@
 	"tasks": {
 		"title": "后台任务",
 		"clearFinished": "清除已完成",
+		"dismiss": "关闭通知",
 		"cancel": "取消",
 		"cancelled": "已取消",
 		"failed": "任务失败",

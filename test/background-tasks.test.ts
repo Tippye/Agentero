@@ -3,6 +3,8 @@ import {
 	backgroundTasksStore,
 	clearFinishedBackgroundTasks,
 	completeBackgroundTask,
+	dismissBackgroundTask,
+	failBackgroundTask,
 	mapDownloadProgress,
 	startBackgroundTask,
 	updateBackgroundTask,
@@ -59,6 +61,87 @@ describe("background task download progress", () => {
 		expect(
 			backgroundTasksStore.getState().tasks.find((task) => task.id === id),
 		).toBeUndefined();
+	});
+});
+
+describe("stale failure notifications", () => {
+	const tasks = () => backgroundTasksStore.getState().tasks;
+	const find = (id: string) => tasks().find((task) => task.id === id);
+
+	it("retires a paper's earlier failure when a same-kind retry starts", () => {
+		const failed = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		failBackgroundTask(failed, "Could not reach the translation service");
+		const retry = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		expect(find(failed)).toBeUndefined();
+		expect(find(retry)?.status).toBe("running");
+	});
+
+	it("retires a paper's earlier failure when the same kind completes", () => {
+		const failed = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		failBackgroundTask(failed, "Could not reach the translation service");
+		const done = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		completeBackgroundTask(done);
+		expect(find(failed)).toBeUndefined();
+		expect(find(done)?.status).toBe("completed");
+	});
+
+	it("keeps failures scoped to other papers or other kinds", () => {
+		const otherPaper = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/b",
+		});
+		failBackgroundTask(otherPaper, "unreachable");
+		const otherKind = startBackgroundTask({
+			kind: "layoutAnalyze",
+			title: "Analyze",
+			paperPath: "papers/a",
+		});
+		failBackgroundTask(otherKind, "model missing");
+		const retry = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		completeBackgroundTask(retry);
+		expect(find(otherPaper)?.status).toBe("failed");
+		expect(find(otherKind)?.status).toBe("failed");
+	});
+
+	it("dismisses one finished row manually without touching active rows", () => {
+		const failed = startBackgroundTask({
+			kind: "layoutTranslate",
+			title: "Translate full text",
+			paperPath: "papers/a",
+		});
+		failBackgroundTask(failed, "unreachable");
+		const active = startBackgroundTask({
+			kind: "layoutAnalyze",
+			title: "Analyze",
+			paperPath: "papers/a",
+		});
+		dismissBackgroundTask(failed);
+		expect(find(failed)).toBeUndefined();
+		expect(find(active)?.status).toBe("running");
+		// Active rows cannot be dismissed.
+		dismissBackgroundTask(active);
+		expect(find(active)?.status).toBe("running");
 	});
 });
 

@@ -46,6 +46,7 @@ import {
 	type BackgroundTaskKind,
 	cancelBackgroundTask,
 	clearFinishedBackgroundTasks,
+	dismissBackgroundTask,
 	getActiveBackgroundTasks,
 	getBackgroundTasksSnapshot,
 	isFinishedBackgroundTask,
@@ -264,6 +265,23 @@ function TaskRow({ task }: { task: BackgroundTask }) {
 						<TooltipContent side="left">
 							{t("tasks.openTranslateSettings")}
 						</TooltipContent>
+					</Tooltip>
+				) : null}
+				{isFinishedBackgroundTask(task) ? (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="size-6 shrink-0"
+								aria-label={t("tasks.dismiss")}
+								onClick={() => dismissBackgroundTask(task.id)}
+							>
+								<X className="size-3.5" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="left">{t("tasks.dismiss")}</TooltipContent>
 					</Tooltip>
 				) : null}
 			</div>
