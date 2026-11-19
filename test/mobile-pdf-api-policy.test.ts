@@ -61,7 +61,7 @@ vi.mock("@/lib/pdf/layout/store", () => ({
 }));
 vi.mock("@/lib/pdf/layout/paddle", () => ({
 	invokeLayoutRemoteAnalyzePdf: state.remote,
-	paddlePageToRegions: vi.fn(),
+	paddlePageToRegions: vi.fn(() => []),
 }));
 vi.mock("@/lib/translate/services", () => ({
 	getTranslateService: () => ({ translate: state.service }),
@@ -132,7 +132,10 @@ describe("mobile PDF API-only execution boundaries", () => {
 		state.configs = {
 			paddle: { apiKey: "configured", baseUrl: "", selfHosted: false },
 		};
-		state.remote.mockResolvedValue({ pages: [] });
+		// Upstream 0.17.0 validates the returned page count against totalPages
+		// (validateRemoteLayoutPageCount); return one page so the remote job
+		// completes and onDone fires instead of failing 0/1.
+		state.remote.mockResolvedValue({ pages: [{}] });
 		const local = scope();
 		const onDone = vi.fn();
 		await runDocumentLayoutAnalysis(local, "remote", {
