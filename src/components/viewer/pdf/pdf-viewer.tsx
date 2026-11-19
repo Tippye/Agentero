@@ -616,6 +616,8 @@ function PdfViewerInner({
 	onAsksChange,
 	onVisualTracesChange,
 	onOpenTranslationTab,
+	onCloseTranslationPane,
+	translationCompanionOpen = false,
 	onCloseTranslationTab,
 }: PdfViewerInnerProps) {
 	const capabilities = pdfViewerCapabilities(runtime);
@@ -1819,6 +1821,58 @@ function PdfViewerInner({
 		isActive,
 		viewMode,
 		ensureTranslationForReading,
+	]);
+
+	/**
+	 * The translate button is a convenience toggle over the reading view; the
+	 * view-mode switch remains the single authority. A run owned by this viewer
+	 * is always stopped by the button. With the comparison companion open it
+	 * closes back to the single-pane original; otherwise it toggles 原文 ↔ 译文
+	 * cache-first, the same action as ⌥A. Opening the companion belongs to the
+	 * layout controls (desktop side-by-side button / mobile compare preset /
+	 * view switcher dual), never to this button.
+	 */
+	const handleToggleLayoutTranslateWithDualPane = useCallback(() => {
+		if (!capabilities.layoutTranslation || plainViewer) return;
+		if (layoutTranslateRunning || layoutTranslateWaiting) {
+			toggleLayoutTranslate();
+			return;
+		}
+		if (translationCompanionOpen) {
+			if (capabilities.apiOnly) onCloseTranslationPane?.();
+			else handleSelectViewMode("original");
+			return;
+		}
+		handleToggleTranslationView();
+	}, [
+		capabilities.layoutTranslation,
+		capabilities.apiOnly,
+		plainViewer,
+		layoutTranslateRunning,
+		layoutTranslateWaiting,
+		translationCompanionOpen,
+		onCloseTranslationPane,
+		handleSelectViewMode,
+		handleToggleTranslationView,
+		toggleLayoutTranslate,
+	]);
+
+	/** Desktop layout control: open / close the side-by-side translation pane. */
+	const handleToggleTranslationLayout = useCallback(() => {
+		if (!capabilities.layoutTranslation || plainViewer) return;
+		if (translationCompanionOpen) {
+			if (capabilities.apiOnly) onCloseTranslationPane?.();
+			else handleSelectViewMode("original");
+		} else {
+			handleSelectViewMode("dual");
+		}
+	}, [
+		capabilities.layoutTranslation,
+		capabilities.apiOnly,
+		plainViewer,
+		translationCompanionOpen,
+		onCloseTranslationPane,
+		handleSelectViewMode,
 	]);
 
 	const { smartHighlightBusy, handleSmartHighlight } = usePdfSmartHighlights({
@@ -3210,7 +3264,17 @@ function PdfViewerInner({
 					layoutTranslatePartial={layoutTranslatePartial}
 					layoutTranslateProgress={layoutTranslateProgress}
 					layoutTranslatePageCounts={layoutTranslatePageCounts}
-					onToggleLayoutTranslate={cancelLayoutTranslate}
+					onToggleLayoutTranslate={
+						capabilities.layoutTranslation
+							? handleToggleLayoutTranslateWithDualPane
+							: undefined
+					}
+					onToggleTranslationLayout={
+						capabilities.layoutTranslation && !capabilities.apiOnly
+							? handleToggleTranslationLayout
+							: undefined
+					}
+					translationLayoutActive={translationCompanionOpen}
 					isRemotePaper={isRemotePaper}
 					onImportToLibrary={handleImportToLibrary}
 					importBusy={importBusy}

@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { PapersLibrary } from "@/components/library/papers-library";
 import { PlazaTabView } from "@/components/plaza/plaza-tab-view";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,8 +26,12 @@ import {
 	openWritingFile,
 	rememberWritingSource,
 } from "@/lib/workspace/navigation";
-import { updateTab } from "@/lib/workspace/store";
-import { type DocTab, tabIsPaperNotes } from "@/lib/workspace/tabs";
+import { updateTab, workspaceStore } from "@/lib/workspace/store";
+import {
+	type DocTab,
+	tabIdForPath,
+	tabIsPaperNotes,
+} from "@/lib/workspace/tabs";
 import {
 	isHtmlPath,
 	isPlainPdfPath,
@@ -134,7 +139,7 @@ export type DocViewPdfProps = {
 		paperAbsPath: string | null,
 		paperTitle?: string | null,
 	) => void;
-	/** Close that tab again when the reader leaves 对照. */
+	/** Close the paper's translation companion tab (translate / layout button). */
 	onCloseTranslationTab?: (paperTabId: string) => void;
 };
 
@@ -286,6 +291,10 @@ const DocumentContent = memo(function DocumentContent({
 }: DocViewProps) {
 	const plazaEnabled = useSettings((s) => s.plazaEnabled);
 	const cloud = useSharedWritingEditor(tab.path);
+	// Boolean selector: only re-render when this paper's companion opens/closes.
+	const translationCompanionOpen = useStore(workspaceStore, (s) =>
+		s.tabs.some((t) => t.id === `${tabIdForPath(tab.path)}::translation`),
+	);
 	// Bind tab.id once per tab so PdfViewer's memo bails out when only the tab
 	// record changes (highlight / ask patches via updateTab).
 	const handlePdfHandle = useCallback(
@@ -496,6 +505,7 @@ const DocumentContent = memo(function DocumentContent({
 						onVisualTracesChange={handlePdfVisualTracesChange}
 						onOpenTranslationTab={pdf.onOpenTranslationTab}
 						onCloseTranslationTab={pdf.onCloseTranslationTab}
+						translationCompanionOpen={translationCompanionOpen}
 					/>
 				</Suspense>
 				{tab.texCompiling && <TexCompilingIndicator />}

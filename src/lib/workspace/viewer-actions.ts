@@ -763,9 +763,11 @@ export function openTranslationTab(
 }
 
 /**
- * Close the rendered-translation pane paired with a paper body. Used by the
- * reading-view switch when it leaves 对照; the tab is not pushed to ⇧⌘T
- * history because switching views is not closing a document.
+ * Close the paper's side-by-side translation companion tab, returning the
+ * reader to the single-pane original. The translate button calls this when
+ * the companion is open; the layout button uses it to collapse the split.
+ * The tab is not pushed to ⇧⌘T history because switching views is not
+ * closing a document.
  */
 export function closeTranslationTab(paperTabId: string): void {
 	const tabs = getTabs();

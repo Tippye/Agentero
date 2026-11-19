@@ -135,12 +135,18 @@ export type PdfViewerProps = {
 	 * Open a rendered-translation workspace tab split to the right. The reading
 	 * view switch calls this when the reader picks 对照.
 	 */
+	/** Mobile: open the dual-pane translation companion inside the reader. */
+	onOpenTranslationPane?: () => void;
+	/** Mobile: hide the companion and return to the single-pane reader. */
+	onCloseTranslationPane?: () => void;
+	/** Whether the translation companion (pane / workspace tab) is open. */
+	translationCompanionOpen?: boolean;
 	onOpenTranslationTab?: (
 		paperTabId: string,
 		paperAbsPath: string | null,
 		paperTitle?: string | null,
 	) => void;
-	/** Close the paired translation tab when the reader leaves 对照. */
+	/** Desktop: close the paper's translation companion tab. */
 	onCloseTranslationTab?: (paperTabId: string) => void;
 	/**
 	 * Workspace active tab. Dock may keep inactive PDFs mounted (`keepMounted`);
