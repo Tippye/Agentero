@@ -67,7 +67,6 @@ import {
 import { CommentCardsLayer } from "@/components/viewer/pdf/layers/comment-cards-layer";
 import { HighlightAnnotationMenu } from "@/components/viewer/pdf/layers/highlight-annotation-menu";
 import { LayoutElementSelectionLayer } from "@/components/viewer/pdf/layers/layout-element-selection-layer";
-import { PdfRegionSelectLayer } from "@/components/viewer/pdf/layers/region-select-layer";
 import { LayoutTranslateOverlay } from "@/components/viewer/pdf/layers/layout-translate-overlay";
 import { PASSIVE_LINK_RENDERER } from "@/components/viewer/pdf/layers/link-annotation";
 import { PdfInkLayer } from "@/components/viewer/pdf/layers/pdf-ink-layer";
@@ -77,6 +76,7 @@ import {
 	PASSIVE_UNDERLINE_RENDERER,
 	READING_ANNOTATION_RENDERERS,
 } from "@/components/viewer/pdf/layers/reading-annotation-renderers";
+import { PdfRegionSelectLayer } from "@/components/viewer/pdf/layers/region-select-layer";
 import { SelectionGutter } from "@/components/viewer/pdf/layers/selection-gutter";
 import { PDF_VISUAL_REGION_FRAME_CLASS } from "@/components/viewer/pdf/layers/visual-region-frame";
 import { PdfSentenceHighlight } from "@/components/viewer/pdf/layout-sentence-pairing";
@@ -551,6 +551,8 @@ type AnnotationCapabilityProvides = ReturnType<
 
 export type PdfPageLayersProps = {
 	inkEditor?: InkEditor | null;
+	/** Paint the shared ink layer over the reflow (translated) page surface. */
+	inkOverReflow?: boolean;
 	onBookmarkPage?: (pageIndex: number) => void;
 	pageBookmarked?: boolean;
 	bookmarkSaving?: boolean;
@@ -686,6 +688,7 @@ const PageTranslateTab = memo(function PageTranslateTab({
 
 export const PdfPageLayers = memo(function PdfPageLayers({
 	inkEditor,
+	inkOverReflow = false,
 	onBookmarkPage,
 	pageBookmarked = false,
 	bookmarkSaving = false,
@@ -1310,6 +1313,8 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				style={{ width, height }}
 				onPointerEnter={() => setPageHovered(true)}
 				onPointerLeave={() => setPageHovered(false)}
+				data-annotation-pdf={docId}
+				data-annotation-page={pageIndex + 1}
 				{...{ [EMBED_PAGE_ATTR]: pageIndex }}
 			>
 				{paperRaster}
@@ -1350,6 +1355,24 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					/>
 				) : null}
 				{pageTranslateTab}
+				{/* Ink is page-relative, so the companion paints and edits the same
+				    strokes as the original pane (shared InkEditor). The page attrs
+				    above let InkInputBridge map pen gestures onto this surface. */}
+				{inkEditor && !mode.plainViewer && (
+					<UnrotatedPageFrame
+						rotation={pageRotation}
+						widthPx={frameWidth}
+						heightPx={frameHeight}
+						className="z-[9]"
+					>
+						<PdfInkLayer
+							editor={inkEditor}
+							page={pageIndex + 1}
+							width={pageSize?.width ?? frameWidth / pageScale}
+							height={pageSize?.height ?? frameHeight / pageScale}
+						/>
+					</UnrotatedPageFrame>
+				)}
 				<SearchLayer
 					documentId={activeSearchDocumentId}
 					pageIndex={pageIndex}
@@ -1447,21 +1470,23 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				</button>
 			)}
 			{paperRaster}
-			{inkEditor && !reflowDocumentId && !mode.plainViewer && (
-				<UnrotatedPageFrame
-					rotation={pageRotation}
-					widthPx={frameWidth}
-					heightPx={frameHeight}
-					className="z-[9]"
-				>
-					<PdfInkLayer
-						editor={inkEditor}
-						page={pageIndex + 1}
-						width={pageSize?.width ?? frameWidth / pageScale}
-						height={pageSize?.height ?? frameHeight / pageScale}
-					/>
-				</UnrotatedPageFrame>
-			)}
+			{inkEditor &&
+				!mode.plainViewer &&
+				(!reflowDocumentId || inkOverReflow) && (
+					<UnrotatedPageFrame
+						rotation={pageRotation}
+						widthPx={frameWidth}
+						heightPx={frameHeight}
+						className="z-[9]"
+					>
+						<PdfInkLayer
+							editor={inkEditor}
+							page={pageIndex + 1}
+							width={pageSize?.width ?? frameWidth / pageScale}
+							height={pageSize?.height ?? frameHeight / pageScale}
+						/>
+					</UnrotatedPageFrame>
+				)}
 			{mode.sentencePairing ? (
 				<PdfSentenceHighlight
 					docId={docId}
@@ -1662,7 +1687,9 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						label={t("pdfExplain.regionSelectionLabel", {
 							page: pageIndex + 1,
 						})}
-						onSelect={(region) => handlers.onRegionSelect(pageIndex + 1, region)}
+						onSelect={(region) =>
+							handlers.onRegionSelect(pageIndex + 1, region)
+						}
 					/>
 				) : null}
 				{marks.visualCropRegion?.page === pageIndex + 1 ? (

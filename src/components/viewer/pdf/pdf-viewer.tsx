@@ -1568,12 +1568,11 @@ function PdfViewerInner({
 	const mobileRuntime =
 		(runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
 	const mobileInk = mobileRuntime;
-	const inkEditable =
-		mobileInk &&
-		!layoutTranslateActive &&
-		!reflowDisplayDocument?.id &&
-		!embeddedTarget &&
-		!translationPane;
+	// Ink is page-relative: strokes are stored per page against the blank page
+	// geometry, independent of the text content. They stay visible and editable
+	// whether the original or the translated PDF is on screen — both surfaces
+	// share the same page size, so switching translations never moves a stroke.
+	const inkEditable = mobileInk && !embeddedTarget && !translationPane;
 	const { editor: inkEditor, mode: inkMode } = usePdfInk({
 		vaultPath,
 		paperRelPath,
@@ -2838,11 +2837,8 @@ function PdfViewerInner({
 	const renderPage = useCallback(
 		({ pageIndex, width, height, rotatedWidth, rotatedHeight }: PageLayout) => (
 			<PdfPageLayers
-				inkEditor={
-					!layoutTranslateActive && !reflowDisplayDocument?.id
-						? inkEditor
-						: null
-				}
+				inkEditor={inkEditor}
+				inkOverReflow
 				bookmarkSaving={Boolean(bookmarkEditor.draft?.saving)}
 				onBookmarkPage={bookmarkEditor.canEdit ? handleBookmarkPage : undefined}
 				pageBookmarked={bookmarkedPages.has(pageIndex)}
@@ -2871,7 +2867,6 @@ function PdfViewerInner({
 		),
 		[
 			inkEditor,
-			layoutTranslateActive,
 			docId,
 			paperRelPath,
 			paperAbsPath,

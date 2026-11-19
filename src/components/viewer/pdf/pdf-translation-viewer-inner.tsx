@@ -38,6 +38,7 @@ import { usePdfCompanionSelection } from "@/components/viewer/pdf/hooks/use-pdf-
 import { usePdfCrossrefPreview } from "@/components/viewer/pdf/hooks/use-pdf-crossref-preview";
 import { usePdfFind } from "@/components/viewer/pdf/hooks/use-pdf-find";
 import { usePdfHighlights } from "@/components/viewer/pdf/hooks/use-pdf-highlights";
+import { usePdfInk } from "@/components/viewer/pdf/hooks/use-pdf-ink";
 import { usePdfLayoutRegions } from "@/components/viewer/pdf/hooks/use-pdf-layout-regions";
 import { usePdfLayoutTranslate } from "@/components/viewer/pdf/hooks/use-pdf-layout-translate";
 import { usePdfLinkUrlTip } from "@/components/viewer/pdf/hooks/use-pdf-link-url-tip";
@@ -62,6 +63,7 @@ import type {
 } from "@/components/viewer/pdf/types";
 import { ActiveCardScrollSync } from "@/components/viewer/pdf/viewport/active-card-scroll-sync";
 import { DockviewViewport } from "@/components/viewer/pdf/viewport/dockview-viewport";
+import { InkInputBridge } from "@/components/viewer/pdf/viewport/ink-input-bridge";
 import { KeyboardScrollHandler } from "@/components/viewer/pdf/viewport/keyboard-scroll-handler";
 import { PanDragHandler } from "@/components/viewer/pdf/viewport/pan-handler";
 import { PdfHistoryKeyHandler } from "@/components/viewer/pdf/viewport/pdf-history-key-handler";
@@ -172,6 +174,19 @@ export function PdfTranslationViewerInner({
 	const { provides: docCap } = useDocumentManagerCapability();
 	const docCapRef = useRef(docCap);
 	docCapRef.current = docCap;
+	const inkEditable = Boolean(paperRelPath && vaultPath && !isRemotePaper);
+	// Ink is page-relative and shared with the original pane (sharedEditor keyed
+	// by paper): the companion paints and edits the same strokes over its reflow
+	// surface. The original pane's toolbar owns the ink controls.
+	const { editor: inkEditor } = usePdfInk({
+		vaultPath,
+		paperRelPath,
+		enabled: inkEditable,
+		editable: inkEditable,
+		isActive,
+		sharedEditor: inkEditable,
+		controlsMode: false,
+	});
 	// Interaction manager is registered; keep the capability subscribed so
 	// GlobalPointerProvider / pan-zoom gestures stay wired.
 	useInteractionManagerCapability();
@@ -606,6 +621,8 @@ export function PdfTranslationViewerInner({
 				tone={pdfTone}
 				zoomRef={zoomRef}
 				annotationCap={null}
+				inkEditor={inkEditor}
+				inkOverReflow
 				marks={pageMarks}
 				layout={pageLayout}
 				mode={pageMode}
@@ -616,6 +633,7 @@ export function PdfTranslationViewerInner({
 			docId,
 			pdfTone,
 			zoomRef,
+			inkEditor,
 			pageMarks,
 			pageLayout,
 			pageHandlers,
@@ -646,6 +664,12 @@ export function PdfTranslationViewerInner({
 					onReplay={highlights.replayAnnotationHistory}
 				/>
 				<WheelZoomHandler docId={docId} />
+				<InkInputBridge
+					editor={inkEditor}
+					documentId={docId}
+					enabled={inkEditable && isActive}
+					docCapRef={docCapRef}
+				/>
 				<KeyboardScrollHandler
 					documentId={docId}
 					active={isActive}
