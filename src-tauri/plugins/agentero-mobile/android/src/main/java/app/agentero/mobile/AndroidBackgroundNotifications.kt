@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 
 internal object AndroidBackgroundNotifications {
     const val AGENT_CHANNEL = "agentero_background_agent"
@@ -32,7 +33,15 @@ internal object AndroidBackgroundNotifications {
     }
 
     fun granted(context: Context): Boolean =
-        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // POST_NOTIFICATIONS does not exist below Android 13; checkSelfPermission
+            // would always report denied and lock the background gate. Notifications
+            // there need no runtime grant; the app toggle and channel importance are
+            // still enforced by enabled().
+            true
+        }
 
     fun enabled(context: Context, lane: BackgroundLane? = null): Boolean {
         val manager = manager(context)
