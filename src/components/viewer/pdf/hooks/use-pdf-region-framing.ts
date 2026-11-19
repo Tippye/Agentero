@@ -25,9 +25,7 @@ import { isPdfDocumentCloseRaceError } from "@/components/viewer/pdf/host-dom";
 import { renderPdfRegionPromptImage } from "@/components/viewer/pdf/region-crop";
 import type {
 	PdfRegionPromptDraft,
-	ScreenPoint,
 	SelectionMenuState,
-	VisualDraftEditorState,
 } from "@/components/viewer/pdf/types";
 import { notifyError } from "@/lib/core/notify";
 import type { PdfAskNormalizedRect } from "@/lib/pdf/ask/types";
@@ -52,21 +50,11 @@ export type UsePdfRegionFramingOptions = {
 	/** EmbedPDF capabilities; owned by `PdfViewerInner` (plugin context). */
 	docCap: DocumentManagerCapability;
 	selectionCap: SelectionCapabilityProvides;
-	interactionCap: InteractionManagerCapability;
+	interactionCap?: InteractionManagerCapability;
 	/** Text-selection cluster: framing a region dismisses an open menu. */
 	setSelectionMenu: Dispatch<SetStateAction<SelectionMenuState | null>>;
-	/**
-	 * Draft completion callback: persist the crop as a note-only visual mark and
-	 * open it in the right-rail comment editor (#396).
-	 */
-	onVisualDraft: (draft: VisualDraftEditorState) => void;
 	/** Unsent crop for a parent-owned review/composer; never creates a mark. */
 	onRegionPrompt?: (draft: PdfRegionPromptDraft) => void;
-	/** Screen anchor beside a page-normalized region (draft card placement). */
-	screenPointForRegion: (
-		pageIndex0: number,
-		region: PdfAskNormalizedRect,
-	) => ScreenPoint;
 	/** True for PDFs outside papers/ (plain viewer): no visual annotation. */
 	plainViewer?: boolean;
 };
@@ -83,17 +71,12 @@ export type PdfRegionFraming = {
 	visualCropRegion: { page: number; region: PdfAskNormalizedRect } | null;
 	/** Enter / leave region framing. Shared by the toolbar and the handle (⌘.). */
 	toggleRegionSelect: () => void;
-	/** Crop a region and open the draft editor (does not send). */
-	beginVisualAnnotation: (
-		page: number,
-		region: PdfAskNormalizedRect,
-	) => Promise<void>;
 	/** Crop a lasso region into an unsent context draft, without the mark flow. */
 	beginRegionPrompt: (
 		page: number,
 		region: PdfAskNormalizedRect,
 	) => Promise<void>;
-	/** Marquee release on a page → crop that region. */
+	/** Marquee release on a page → crop that region into a context draft. */
 	handleVisualRegionSelect: (
 		page: number,
 		region: PdfAskNormalizedRect,
@@ -107,9 +90,7 @@ export function usePdfRegionFraming({
 	selectionCap,
 	interactionCap,
 	setSelectionMenu,
-	onVisualDraft,
 	onRegionPrompt,
-	screenPointForRegion,
 	plainViewer = false,
 }: UsePdfRegionFramingOptions): PdfRegionFraming {
 	const { t } = useTranslation("viewer");
@@ -147,17 +128,13 @@ export function usePdfRegionFraming({
 
 	/** Shared source-PDF crop pipeline; the destination owns review/persistence. */
 	const beginCrop = useCallback(
-		async (
-			page: number,
-			input: PdfAskNormalizedRect,
-			kind: "visual" | "prompt",
-		) => {
+		async (page: number, input: PdfAskNormalizedRect) => {
 			if (
 				plainViewer ||
 				!engine ||
 				!docCap ||
 				visualCropPendingRef.current ||
-				(kind === "prompt" && !onRegionPrompt)
+				!onRegionPrompt
 			)
 				return;
 			if (
@@ -200,14 +177,7 @@ export function usePdfRegionFraming({
 					region,
 				});
 				if (!isCurrent()) return;
-				if (kind === "prompt") onRegionPrompt?.({ page, region, image });
-				else
-					onVisualDraft({
-						screen: screenPointForRegion(page - 1, region),
-						page,
-						region,
-						image,
-					});
+				onRegionPrompt({ page, region, image });
 			} catch (error) {
 				if (!isCurrent() || isPdfDocumentCloseRaceError(error)) return;
 				const message =
@@ -230,28 +200,20 @@ export function usePdfRegionFraming({
 			docId,
 			t,
 			onRegionPrompt,
-			onVisualDraft,
-			screenPointForRegion,
 			setSelectionMenu,
 			selectionCap,
 		],
 	);
-	const beginVisualAnnotation = useCallback(
-		(page: number, region: PdfAskNormalizedRect) =>
-			beginCrop(page, region, "visual"),
-		[beginCrop],
-	);
 	const beginRegionPrompt = useCallback(
-		(page: number, region: PdfAskNormalizedRect) =>
-			beginCrop(page, region, "prompt"),
+		(page: number, region: PdfAskNormalizedRect) => beginCrop(page, region),
 		[beginCrop],
 	);
 
 	const handleVisualRegionSelect = useCallback(
 		(page: number, region: PdfAskNormalizedRect) => {
-			void beginVisualAnnotation(page, region);
+			void beginRegionPrompt(page, region);
 		},
-		[beginVisualAnnotation],
+		[beginRegionPrompt],
 	);
 
 	useEffect(() => {
@@ -282,7 +244,6 @@ export function usePdfRegionFraming({
 		visualCropPending,
 		visualCropRegion,
 		toggleRegionSelect,
-		beginVisualAnnotation,
 		beginRegionPrompt,
 		handleVisualRegionSelect,
 	};

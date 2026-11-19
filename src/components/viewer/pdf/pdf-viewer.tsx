@@ -92,6 +92,7 @@ import { usePdfPageText } from "@/components/viewer/pdf/hooks/use-pdf-page-text"
 import { usePdfPaperTone } from "@/components/viewer/pdf/hooks/use-pdf-paper-tone";
 import { usePdfPinAnchors } from "@/components/viewer/pdf/hooks/use-pdf-pin-anchors";
 import { usePdfReadingMode } from "@/components/viewer/pdf/hooks/use-pdf-reading-mode";
+import { usePdfRegionFraming } from "@/components/viewer/pdf/hooks/use-pdf-region-framing";
 import { usePdfScrollSync } from "@/components/viewer/pdf/hooks/use-pdf-scroll-sync";
 import { usePdfSelectionActions } from "@/components/viewer/pdf/hooks/use-pdf-selection-actions";
 import { usePdfSelectionTranslate } from "@/components/viewer/pdf/hooks/use-pdf-selection-translate";
@@ -234,7 +235,11 @@ import { PDF_ZOOM_MAX, PDF_ZOOM_MIN } from "@/lib/pdf/zoom";
 import { loadSettings } from "@/lib/settings";
 import type { MenuContext } from "@/lib/shell/commands/menu-contributions";
 import { layout } from "@/lib/shell/ui-store";
-import { normalizePathKey, vaultRelativePath } from "@/lib/vault/path";
+import {
+	basenameOf,
+	normalizePathKey,
+	vaultRelativePath,
+} from "@/lib/vault/path";
 import { workspaceStore } from "@/lib/workspace/store";
 
 export type {
@@ -315,6 +320,8 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 
 	const translationOnly = Boolean(props.translationOnly);
 	const apiOnly = pdfViewerCapabilities(props.runtime).apiOnly;
+	const mobileRuntime =
+		(props.runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
 	const plugins = useMemo(() => {
 		if (!source && !effectiveSourceBytes) return null;
 		// Prefer bytes (no fetch step); fall back to a URL (remote https).
@@ -378,6 +385,13 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 				// large blue rectangle over the page; visual region annotation uses our
 				// explicit ScanSearch mode instead.
 				marquee: { enabled: false },
+				// Finger drags that still reach EmbedPDF (read-only surfaces without
+				// the ink bridge) must not select on the first few px: at phone
+				// fit-width zoom the 3-unit default is a 1-2 px screen tripwire, and
+				// the 1.5x glyph-height tolerance anchors selections beside the finger.
+				...(mobileRuntime
+					? { minSelectionDragDistance: 10, toleranceFactor: 1.0 }
+					: {}),
 			}),
 			createPluginRegistration(PdfHistoryPluginPackage),
 			createPluginRegistration(AnnotationPluginPackage, {
@@ -406,7 +420,14 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 				renderScale: 2,
 			}),
 		];
-	}, [source, effectiveSourceBytes, docId, translationOnly, apiOnly]);
+	}, [
+		source,
+		effectiveSourceBytes,
+		docId,
+		translationOnly,
+		apiOnly,
+		mobileRuntime,
+	]);
 
 	const hostClass = cn(
 		"relative flex h-full min-h-0 flex-col bg-muted/40",
@@ -1542,8 +1563,9 @@ function PdfViewerInner({
 		reflowOutput,
 		docId,
 	);
-	const mobileInk =
+	const mobileRuntime =
 		(runtime ?? (isMobileApp() ? "mobile" : "desktop")) === "mobile";
+	const mobileInk = mobileRuntime;
 	const inkEditable =
 		mobileInk &&
 		!layoutTranslateActive &&
@@ -2055,7 +2077,6 @@ function PdfViewerInner({
 		visualCropPending,
 		visualCropRegion,
 		toggleRegionSelect,
-		beginVisualAnnotation,
 		beginRegionPrompt,
 		handleVisualRegionSelect,
 	} = usePdfRegionFraming({
@@ -2063,11 +2084,8 @@ function PdfViewerInner({
 		engine,
 		docCap,
 		selectionCap,
-		interactionCap,
 		setSelectionMenu,
-		onVisualDraft: handleVisualDraft,
 		onRegionPrompt,
-		screenPointForRegion,
 		plainViewer,
 	});
 
@@ -2592,6 +2610,9 @@ function PdfViewerInner({
 	const pageMode = useMemo<PdfPageModeSlice>(
 		() => ({
 			elementSelecting,
+			regionSelecting,
+			visualCropPending,
+			visualDraftOpen: false,
 			insetCommentCards,
 			inkEditing: inkEditable && inkMode !== "read",
 			translationOnly,
@@ -2608,13 +2629,6 @@ function PdfViewerInner({
 			inkEditable,
 			inkMode,
 		],
-	);
-
-	const handleLayoutRegionClick = useCallback(
-		(region: PdfLayoutRegion) => {
-			void beginVisualAnnotation(region.pageIndex + 1, region.bbox);
-		},
-		[beginVisualAnnotation],
 	);
 
 	const handleCopyCommentLink = useCallback(
@@ -2713,9 +2727,6 @@ function PdfViewerInner({
 			onCitationHover: handleLinkHover,
 			onLinkUrlHover: handleLinkUrlHover,
 			onRegionSelect: handleVisualRegionSelect,
-			// Visual region annotation is the mobile lasso path only; desktop
-			// layout-region clicks go through element selection (upstream 357cf8466).
-			onLayoutRegionClick: onRegionPrompt ? handleLayoutRegionClick : undefined,
 			onTogglePageLayoutTranslate: handleTogglePageTranslate,
 			onRetryPageLayoutTranslate: retryPageLayoutTranslate,
 			onDeleteHighlightAnnotation: handleDeleteHighlightAnnotation,
@@ -2744,8 +2755,6 @@ function PdfViewerInner({
 			handleLinkHover,
 			handleLinkUrlHover,
 			handleVisualRegionSelect,
-			handleLayoutRegionClick,
-			onRegionPrompt,
 			capabilities.addToChat,
 			handleTogglePageTranslate,
 			retryPageLayoutTranslate,

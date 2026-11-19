@@ -1,5 +1,11 @@
 import type { PdfEngine } from "@embedpdf/models";
-import { Download, Highlighter, Library, Loader2, ScanSearch } from "lucide-react";
+import {
+	Download,
+	Highlighter,
+	Library,
+	Loader2,
+	ScanSearch,
+} from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -235,7 +241,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 									lingerFull={lingerFull}
 									showStop
 									stopLabel={translateAriaLabel}
-									onStop={onToggleLayoutTranslate}
+									onStop={() => onToggleLayoutTranslate?.()}
 									stopDisabled={!engine}
 								/>
 							) : null}
@@ -264,7 +270,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 											size="icon-xs"
 											variant={regionSelecting ? "secondary" : "ghost"}
 											className="shrink-0 self-center"
-											aria-label={t("pdf.lasso")}
+											aria-label={t("ink.lasso")}
 											aria-pressed={regionSelecting}
 											disabled={!engine || visualCropPending}
 											onClick={onToggleRegionSelect}
@@ -273,7 +279,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 										</Button>
 									</TooltipTrigger>
 									<TooltipContent side="bottom">
-										{t("pdf.lasso")}
+										{t("ink.lasso")}
 									</TooltipContent>
 								</Tooltip>
 							</div>

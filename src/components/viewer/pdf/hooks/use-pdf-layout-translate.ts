@@ -70,7 +70,6 @@ import {
 	isApiOnlyPdfProcessing,
 } from "@/lib/pdf/processing-policy";
 import { loadSettings } from "@/lib/settings";
-import { openSettingsWindow } from "@/lib/shell/settings-window";
 import { displayTranslateError } from "@/lib/translate";
 
 export type UsePdfLayoutTranslateOptions = {
@@ -570,7 +569,7 @@ export function usePdfLayoutTranslate({
 			try {
 				assertApiTranslationSettings(loadSettings().translate, apiOnly);
 			} catch (error) {
-				notifyTranslateFailure(errorText(error));
+				notifyError(displayTranslateError(errorText(error)));
 				return;
 			}
 			layoutTranslateWaitTargetRef.current = target;
@@ -599,14 +598,7 @@ export function usePdfLayoutTranslate({
 				status: "waitingLayout",
 			}));
 		},
-		[
-			parsePendingForPaper,
-			apiOnly,
-			paperAbsPath,
-			cancelWaitingLayout,
-			notifyTranslateFailure,
-			t,
-		],
+		[parsePendingForPaper, apiOnly, paperAbsPath, cancelWaitingLayout, t],
 	);
 
 	/** Attach to the queue-owned execution. Disposal never cancels the job. */
@@ -767,16 +759,7 @@ export function usePdfLayoutTranslate({
 				throw error;
 			}
 		},
-		[
-			paperAbsPath,
-			paperRelPath,
-			vaultPath,
-			apiOnly,
-			prepareReflow,
-			notifyTranslateFailure,
-			notifyTranslateItemErrors,
-			t,
-		],
+		[paperAbsPath, paperRelPath, vaultPath, apiOnly, prepareReflow, t],
 	);
 
 	const startSharedDocumentTranslate = useCallback(
@@ -1454,7 +1437,6 @@ export function usePdfLayoutTranslate({
 		paperKey,
 		vaultPath,
 		apiOnly,
-		notifyTranslateFailure,
 		paperRelPath,
 		startSharedDocumentTranslate,
 	]);
@@ -1572,7 +1554,6 @@ export function usePdfLayoutTranslate({
 		paperKey,
 		vaultPath,
 		apiOnly,
-		notifyTranslateFailure,
 		paperRelPath,
 		startSharedDocumentTranslate,
 	]);

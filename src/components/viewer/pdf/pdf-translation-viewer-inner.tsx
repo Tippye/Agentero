@@ -120,6 +120,7 @@ const EMPTY_HANDLERS: PdfPageHandlers = {
 	onCitationActivate: NOOP,
 	onTextLinkActivate: NOOP,
 	onCitationHover: NOOP,
+	onRegionSelect: NOOP,
 	onTogglePageLayoutTranslate: NOOP,
 	onRetryPageLayoutTranslate: NOOP,
 	onDeleteHighlightAnnotation: NOOP,
@@ -140,6 +141,9 @@ const EMPTY_HANDLERS: PdfPageHandlers = {
 };
 
 const PAGE_MODE: PdfPageModeSlice = {
+	regionSelecting: false,
+	visualCropPending: false,
+	visualDraftOpen: false,
 	sentencePairing: true,
 	translationOnly: true,
 };
@@ -578,7 +582,6 @@ export function PdfTranslationViewerInner({
 			onDismissSelectionComment: selection.dismissNote,
 		}),
 		[
-			capabilities.layoutTranslation,
 			togglePageLayoutTranslate,
 			retryPageLayoutTranslate,
 			activateCitation,

@@ -196,6 +196,8 @@
 	},
 	"pdfExplain": {
 		"cropFailed": "Could not capture the selected PDF region.",
+		"regionSelectionLabel": "Drag to select a region on page {{page}}",
+		"cropping": "Capturing region…",
 		"annotationPreviewAlt": "Cropped region from page {{page}}",
 		"visualAnnotation": "Visual annotation",
 		"addToSidebarChat": "Add to sidebar chat",

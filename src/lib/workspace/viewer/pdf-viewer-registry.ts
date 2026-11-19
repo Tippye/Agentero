@@ -34,6 +34,8 @@ export type PdfViewerHandle = {
 	deleteVisualTrace: (id: string) => void;
 	/** Toggle layout element selection (⌘.). */
 	toggleElementSelection: () => void;
+	/** Toggle the mobile lasso marquee (mobile-paper-context); optional on desktop. */
+	toggleRegionSelect?: () => void;
 	/** Toggle the reading view between 原文 and 译文 (⌥A). */
 	toggleLayoutTranslate: () => void;
 	/** Run EmbedPDF layout analysis for figures / tables / formulas. */

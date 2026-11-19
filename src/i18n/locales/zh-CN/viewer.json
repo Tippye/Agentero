@@ -196,6 +196,8 @@
 	},
 	"pdfExplain": {
 		"cropFailed": "无法截取所选 PDF 区域。",
+		"regionSelectionLabel": "在第 {{page}} 页拖动选择区域",
+		"cropping": "正在截取区域…",
 		"annotationPreviewAlt": "第 {{page}} 页裁剪区域",
 		"visualAnnotation": "视觉批注",
 		"addToSidebarChat": "加入侧边栏对话",
