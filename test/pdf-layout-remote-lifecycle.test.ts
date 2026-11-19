@@ -21,7 +21,10 @@ const mocks = vi.hoisted(() => ({
 	ui: vi.fn(),
 }));
 
-vi.mock("@/lib/core/tauri", () => ({ isTauri: () => true }));
+vi.mock("@/lib/core/tauri", () => ({
+	isTauri: () => true,
+	isMobileApp: () => false,
+}));
 vi.mock("@/lib/core/bindings", () => ({
 	events: {
 		layoutRemoteProgress: {

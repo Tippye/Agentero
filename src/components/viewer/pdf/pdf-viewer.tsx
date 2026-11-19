@@ -2078,7 +2078,6 @@ function PdfViewerInner({
 		visualCropRegion,
 		toggleRegionSelect,
 		beginRegionPrompt,
-		handleVisualRegionSelect,
 	} = usePdfRegionFraming({
 		docId,
 		engine,
@@ -2726,7 +2725,9 @@ function PdfViewerInner({
 			onTextLinkActivate: openExternalUrl,
 			onCitationHover: handleLinkHover,
 			onLinkUrlHover: handleLinkUrlHover,
-			onRegionSelect: handleVisualRegionSelect,
+			onRegionSelect: (page, region) => {
+				void beginRegionPrompt(page, region);
+			},
 			onTogglePageLayoutTranslate: handleTogglePageTranslate,
 			onRetryPageLayoutTranslate: retryPageLayoutTranslate,
 			onDeleteHighlightAnnotation: handleDeleteHighlightAnnotation,
@@ -2754,7 +2755,7 @@ function PdfViewerInner({
 			handleCitationLinkActivate,
 			handleLinkHover,
 			handleLinkUrlHover,
-			handleVisualRegionSelect,
+			beginRegionPrompt,
 			capabilities.addToChat,
 			handleTogglePageTranslate,
 			retryPageLayoutTranslate,
