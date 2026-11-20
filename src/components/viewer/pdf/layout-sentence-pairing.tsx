@@ -130,7 +130,20 @@ export function usePdfSentenceInteraction(
 			});
 		};
 
+		/**
+		 * Sentence pairing is a mouse affordance. A pen in range — hovering just
+		 * above the page, or writing on it — belongs to the ink editor, and a
+		 * finger has no hover at all. Neither may update the hover record: a
+		 * stroke or pan crossing a sentence would otherwise paint its band like
+		 * a selection. Any band the mouse left behind is dropped, so the other
+		 * input cannot inherit a stale highlight.
+		 */
 		const onMove = (event: PointerEvent) => {
+			if (event.pointerType === "pen" || event.pointerType === "touch") {
+				pending = null;
+				clearLayoutSentenceHover();
+				return;
+			}
 			pending = event;
 			if (raf) return;
 			raf = requestAnimationFrame(apply);
