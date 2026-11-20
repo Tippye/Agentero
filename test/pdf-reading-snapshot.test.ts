@@ -145,9 +145,11 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 it("normalizes finite snapshots and never reseeds a live paper from new prop objects", () => {
+	// Upstream 0.17.0 raised PDF_ZOOM_MAX to 4 (400% zoom controls); the clamp
+	// now saturates at 4 rather than the former 3.
 	expect(normalizePdfReadingSnapshot({ page: 3.9, zoom: 99 })).toEqual({
 		page: 3,
-		zoom: 3,
+		zoom: 4,
 	});
 	expect(normalizePdfReadingSnapshot({ page: 2, zoom: 0.1 })).toEqual({
 		page: 2,

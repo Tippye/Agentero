@@ -38,6 +38,14 @@ export type PdfRegionPromptDraft = {
 	image: PromptImage;
 };
 
+/** Crop handed to the visual-note draft editor (mobile lasso visual path). */
+export type VisualDraftEditorState = {
+	screen: ScreenPoint;
+	page: number;
+	region: PdfAskNormalizedRect;
+	image: PromptImage;
+};
+
 /** Normalized rectangle emitted by the jEV smart-highlight job. */
 type SuggestedHighlightRect = {
 	x: number | null;

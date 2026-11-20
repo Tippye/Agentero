@@ -119,9 +119,11 @@ describe("PDF viewer host capabilities", () => {
 				onAddToChat: capabilities.addToChat ? vi.fn() : undefined,
 			}),
 		);
-		expect(html).toContain('aria-label="selection.note"');
+		// Upstream 0.17.0 SelectionToolbarIconButton appends the keyboard shortcut
+		// to the aria-label (e.g. "selection.note N"), matching the copy button.
+		expect(html).toContain('aria-label="selection.note N"');
 		expect(html).toContain('aria-label="selection.copy ');
-		expect(html).toContain('aria-label="selection.translate"');
+		expect(html).toContain('aria-label="selection.translate T"');
 		expect(html).not.toContain("selection.addToChat");
 		expect(html).not.toContain("selection.chatActions");
 	});

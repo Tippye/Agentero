@@ -69,6 +69,19 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 
 笔迹的本地发布还须保持[原生保存](pdf-ink.md)的持久性：规范逐页文件及完整 SHA-256 命名的原始冲突副本先 flush 临时文件，再 rename，Unix 随后 flush ink、marks 与论文目录；只有这些步骤成功，pass 才继续上传、HEAD 与 base 推进。重命名后的 flush 失败返回 `sync_ink_durability_uncertain`，保留可能已可见的新字节，不能回滚或把错误解释成原文件未变。重试时，即便相同冲突副本已经存在，也先重新确认其落盘，再替换可能持有唯一已确认笔迹的规范文件。此规则不扩展其他文件的既有同步 IO 策略。
 
+### 落盘时序与上游安全网分层（mobile apply-before-publish）
+
+对象存储后端的本地落盘采用 **mobile 的 apply-before-publish 时序**：`apply_local` 先在文件 mutation lane（`crate::fs::with_file_mutation`）内把下载/语义合并写入/冲突副本/删除落盘，每一步都在 lane 内用 `ensure_current` 复核扫描基线——协作编辑器的并发保存会被拒绝（`changed during sync`）而不是被静默覆盖；笔迹替换走 `write_atomic` 的 fsync-before-rename + 目录 flush。**先落盘，再上传 blob、发布 manifest、CAS HEAD**。这与上游 0.17.0 一度引入的 stage→publish→apply（先暂存、CAS 成功后再落盘）不同：mobile 是 android 的上游，落盘语义变更必须显式而非合并副作用，故 0.17.0 同步时恢复 mobile 时序（见 `engine_marks_tests`/`engine_availability_tests`/`engine_retarget_tests` 的高价值数据安全回归）。
+
+上游安全网作为**外层**叠加，不改变 lane 内落盘时序：
+
+- **recovery journal**（`engine/recovery.rs`）：落盘前 `save(pending)` 记录 intent（store/head/scope/落盘前条目）；`apply_local`/上传在 HEAD CAS 之前失败时 `discard`（未发布的 pass 不被当作 accepted，已落盘的本地改动下一轮重新合并）；CAS 成功后 `accept`，`record_sync` 后 `finish`。崩溃恢复时 `resume`：accepted 且远端 HEAD 匹配 intent → 用远端 manifest + 本地观测重建 base（`needs_merge`）；pending 且 HEAD 未匹配 → discard。CAS 失败/manifest 发布失败 → discard，把已落盘的 merged 作为新的本地真相、winner manifest 作为新 base 重试。
+- **scope.rs**：嵌套集合论文根识别 + 逐类对称过滤（含 mobile 的 `ink`/`translated`），排除路径双向失明、绝不因缺失被当作删除。
+- **强制条件写**：pass 前 `probe_conditional_writes`，远端不支持条件写则停止（不改本地）。
+- **fork 保守合并**：plain-PUT 后端同版本号不同 manifest（或回滚 HEAD）视为 fork，无共享祖先时按新增/编辑合并而非推断删除。
+
+下次上游同步若再引入 stage→publish→apply，须显式评估并保留 mobile 的 lane 内落盘与上述数据安全断言，不得作为合并副作用翻回时序。
+
 ## 同步范围（Sync Scope）
 
 论文库中体积大或由某类设备产生的附件可以按设备排除，节省云端空间；笔记、`metadata.json` sidecar、高亮/文字批注、`assets/` 永远同步（小且不可再生）。S3 / WebDAV 在清单合并时对排除路径双向失明。Git 使用同一套开关，但做法是在仓库 `.gitignore` 里维护一段 `# agentero-sync-start` / `# agentero-sync-end` 标记区块，并 `git rm --cached` 取消跟踪（工作区文件保留）。规则随仓库同步，所以是整库一份策略，不是每台设备各看各的。
