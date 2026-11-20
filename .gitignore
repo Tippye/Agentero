@@ -17,6 +17,10 @@ dist-ssr
 # macOS signing / notarization artifacts (never commit)
 *.p12
 *.p8
+# Android signing keystores (never commit private keys)
+*.jks
+*.keystore
+*.pfx
 AuthKey_*.p8
 certificate-base64.txt
 site/
