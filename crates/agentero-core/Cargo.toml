@@ -52,6 +52,10 @@ base64 = "0.22"
 aes = "0.8"
 urlencoding = "2"
 url = "2"
+# Degraded-sync publish lock: parse PROPFIND multistatus (href +
+# getlastmodified) for Joplin-style lock arbitration. Same version as the
+# desktop Host already uses.
+roxmltree = "0.20"
 uuid = { version = "1", features = ["v4", "serde"] }
 # Used by lookup batch import (all platforms).
 futures-util = "0.3.33"

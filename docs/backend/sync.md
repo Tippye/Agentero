@@ -77,7 +77,7 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 
 - **recovery journal**（`engine/recovery.rs`）：落盘前 `save(pending)` 记录 intent（store/head/scope/落盘前条目）；`apply_local`/上传在 HEAD CAS 之前失败时 `discard`（未发布的 pass 不被当作 accepted，已落盘的本地改动下一轮重新合并）；CAS 成功后 `accept`，`record_sync` 后 `finish`。崩溃恢复时 `resume`：accepted 且远端 HEAD 匹配 intent → 用远端 manifest + 本地观测重建 base（`needs_merge`）；pending 且 HEAD 未匹配 → discard。CAS 失败/manifest 发布失败 → discard，把已落盘的 merged 作为新的本地真相、winner manifest 作为新 base 重试。
 - **scope.rs**：嵌套集合论文根识别 + 逐类对称过滤（含 mobile 的 `ink`/`translated`），排除路径双向失明、绝不因缺失被当作删除。
-- **强制条件写**：pass 前 `probe_conditional_writes`，远端不支持条件写则停止（不改本地）。
+- **强制条件写**：pass 前 `probe_conditional_writes`，远端不支持条件写则停止（不改本地），错误域码 `sync_no_conditional_writes`（设置页本地化）。唯一例外是设备显式 opt-in 的降级协议（`allowDegradedSync`，仅 WebDAV，见「条件写硬停与可选降级同步」）。
 - **fork 保守合并**：plain-PUT 后端同版本号不同 manifest（或回滚 HEAD）视为 fork，无共享祖先时按新增/编辑合并而非推断删除。
 
 下次上游同步若再引入 stage→publish→apply，须显式评估并保留 mobile 的 lane 内落盘与上述数据安全断言，不得作为合并副作用翻回时序。
@@ -107,8 +107,8 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 
 - **目录模型**：WebDAV 需显式建目录。PUT 前按需逐级 `MKCOL`（405 = 已存在），已建目录在客户端内缓存，稳态零额外请求；连接测试 `PROPFIND Depth:0` 根目录，404 则连目录一起创建——用户可直接指向一个不存在的目录（如 `https://dav.jianguoyun.com/dav/agentero/`）。坚果云根地址（`https://dav.jianguoyun.com/dav/`）自动展开为专用文件夹 `agentero/`：根集合可列表但拒绝创建文件（PUT 一律 404 ObjectNotFound），而它恰是官方文档给出的地址；展开是纯函数（trim 尾斜杠 + 根地址映射），`normalized()` 与客户端构造共用——新配置回显实际地址，旧配置无需重存即自愈。
 - **连接测试**：PROPFIND 207 / 创建成功即凭据与目录可用；401/403 报凭证错误，不保存配置。随后做一次**无条件试写**（一次性 key，写完即删）：地址写不进去（不可写位置、权限或配额拒绝）在配置阶段就报错并带上目标目录 URL，不再静默保存坏配置、把错误推迟到首次同步。
-- **条件写**：WebDAV 实现差异大，探测针对 `If-Match`（HEAD CAS 的唯一依托）：无条件试写建出一次性 key 后，带过期 etag 再 PUT，412 = 真支持，2xx = 降级为普通 PUT（与 OSS 共用 `conditionalWrites=false` 与降级语义，见上节）；`If-None-Match: *` 不探测——被忽略也无害（blob 内容寻址、manifest key 唯一随机）。实测坚果云忽略 `If-None-Match` 但强制 `If-Match`，即 CAS 原子性完整保留。硬错误（非 2xx/412）直接让连接测试失败；只有探测无结论（如条件头被忽略/拒绝）才按支持处理（fail open——被忽略的头无害，漏掉 CAS 才有害）。`test_connection` 以 `conditionalWrites=true` 构造探测客户端，保证测的是服务器行为而非持久化的旧结论。
-- **无 ETag 的服务器**：`If-Match` 退化为普通 PUT，同降级语义收敛。
+- **条件写**：WebDAV 实现差异大。探测（`store.rs::probe_conditions`）用一次性 key 实测 **HEAD CAS 所依赖的 `If-Match` 语义**：创建探测对象 → GET 取 etag → 当前 etag 替换必须成功 → 过期 etag 替换必须 412，任一不满足即 `conditionalWrites=false`。`If-None-Match` 是否被强制**不作为门槛**：blob 内容寻址、manifest key 唯一随机，create-only 写被忽略时退化为幂等普通 PUT，不损害 CAS。实测坚果云忽略 `If-None-Match` 但强制 `If-Match` → 探测为支持，正常模式不变；fnOS 自带 WebDAV 忽略全部条件头 → 不支持，需 opt-in 降级或换存储。`vault.json` 创建后一律 read-back 比对 vaultId，堵住忽略 `If-None-Match` 时的并发创建竞争。硬错误（非 2xx/412）直接让连接测试失败。`test_connection` 每次重新探测服务器行为，不沿用持久化旧结论。
+- **无 ETag / 弱 ETag 的服务器**：探测判为不支持；正常模式拒绝发布（`If-Match` 需要强 ETag），降级模式不依赖 ETag（发布锁 + read-back）。
 - **重试**：与 S3 客户端一致的传输层 3 次重试（幂等操作）。三次都失败且请求从未到达服务器（DNS 解析失败、连接被拒绝/重置、连接超时）时，错误域码为 `sync_unreachable`；证书被拒不算——它每次都会以同样方式失败，需要用户改证书或地址。自动同步只对 `sync_unreachable` 退避重试（见「自动同步」）。
 - **安全约束同 S3**：`https://` 强制（仅 loopback 放行 http），密码掩码同 `secretKey`。NAS 场景的明文 http 与自签名证书 https 均不可用。
 - **兼容性（实测）**：路径段 percent-encode、请求带尾斜杠集合形式。坚果云特性：MKCOL 对根 `/dav` 返回 403 OperationNotAllowed（按「已存在/受保护」容忍）；根 `/dav` 不允许创建文件（PUT 一律 404 ObjectNotFound，[#681](https://github.com/poco-ai/Agentero/issues/681)），故根地址自动落到 `agentero/` 子文件夹（见「目录模型」）；顶层目录名长度有限制（`sandbox name is too long`）；顶层目录不可经 WebDAV 删除、非空目录删除需先清空子项——`sync_disconnect` 本就不动远端数据，仅测试清理需注意；**请求按账号限频**（免费 600 次/30 分钟、付费 1500 次/30 分钟），空转成本见「空转短路」。Nextcloud / Apache mod_dav 按标准实现工作。
@@ -126,14 +126,27 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 - **触发**：复用自动同步调度（打开 Vault、静置 30s、定时间隔）。退出 flush 跳过 Git——5s 预算可能中断 commit/push 并留下 `index.lock`，下次启动补推。`.git` 与 `.agentero` 已被 watcher 忽略，不会事件回环。
 - **限制**：关掉的类别不再进入新提交；已经在 Git 历史里的 PDF/TeX 不会被清掉（未接 Git LFS）。没有按论文按需拉取；partial clone + sparse-checkout 尚未接入。
 
-## 条件写降级（OSS 等后端）
+## 条件写硬停与可选降级同步
 
-阿里云 OSS 的 PutObject 不支持任何条件请求头（`If-Match` / `If-None-Match` 等，带则返回 `400 NotImplemented`），S3 / R2 / MinIO 均支持。处理：
+不支持 `If-Match` CAS 的存储（fnOS 自带 WebDAV、hacdias/webdav 等忽略条件头的实现）**默认硬停**：探测失败即报 `sync_no_conditional_writes`，不改任何本地文件。这是 [同步审计](../development/vault-sync-review.md) A 项 P1（并发无条件覆盖 HEAD → 误判删除丢数据）之后的强制保护，不存在静默降级。
 
-- **连接测试探测**：`sync_configure` 在 ListObjects 之后用一次性 key（`.sync-probe-<uuid>`）带 `If-None-Match: *` 试写并删除；`400 NotImplemented` → `conditionalWrites=false` 持久化到 `sync.json`，探测无结论时按支持处理（fail open）。
-- **命令面**：当前没有独立 `sync_probe`；配置保存即执行连接探测，失败则不保存，成功后设置页按已连接展示。
-- **运行时兜底**：旧配置未探测过时，首个条件 PUT 收到 `400 NotImplemented` 即在客户端内标记并立即以无条件 PUT 重试，同一 pass 内后续写入全部降级。
-- **降级语义**：blobs / manifests 内容寻址或 key 唯一，无条件 PUT 幂等无害；HEAD 指针退化为 GET → PUT，牺牲严格 CAS，靠三方合并与重试收敛（单用户场景最终一致）。设置页对 `conditionalWrites=false` 显示一行小字提示。
+设备可在设置页显式开启「允许降级同步」（`SyncBackendConfig.allowDegradedSync`，**每设备独立**，默认关；CLI `--allow-degraded-sync true`）。一期仅 WebDAV；S3 无条件写后端（OSS 等）的降级列二期。设计稿与参考实现取舍见 [sync-degraded-mode.md](../development/sync-degraded-mode.md)。
+
+降级协议站在既有安全网（fork 保守合并、冲突副本、恢复日志、空转短路）之上，只替换不安全的部分：
+
+- **blob / manifest**：保持 `If-None-Match` create-only 写——被忽略时退化为幂等普通 PUT（内容寻址 / 唯一随机 key），无害；上传保持串行（FN Connect 等中继限并发）。
+- **HEAD 发布锁**（`webdav.rs`，Joplin 式软锁）：PUT `locks/<deviceId>.json` → `PROPFIND Depth:1` 列表 → 按服务器 `getlastmodified` 仲裁（最旧有效锁获胜，平局比 deviceId；缺失时回退锁内容时间戳），赢家持锁、输家删自己的锁退避重试。持锁窗口内重读 HEAD（变了即按 CAS 输家重基线）→ 普通 PUT HEAD → **GET read-back 校验** → 释放锁。TTL 90s、不刷新；持锁超过 TTL/2 即放弃本轮（自己的锁过期 ⇒ 取消）。deviceId 持久化于 `.agentero/sync/device.json`。锁是 best-effort：仲裁异常时并发的 HEAD PUT 由 fork 合并兜底收敛（不丢本地数据，可能产生冲突副本）。
+- **vault.json 首触**：普通 PUT + read-back 比对 vaultId（正常模式创建后同样 read-back）。
+- **风险（opt-in 即接受）**：可能产生冲突副本、他端合法删除的文件可能复活；所有共享设备都需开启；非合作写者不受锁保护。设置页警告卡片常驻说明。
+
+## 手动覆盖（远端覆盖本地 / 本地覆盖远端）
+
+合并结果不符合预期时的手动逃生门，对象存储后端通用（Git 拒绝）：
+
+- **`remoteToLocal`（force pull）**：本地完全对齐远端 HEAD 清单——下载远端独有、还原被修改、删除本地独有；被丢弃的本地内容**直接丢弃，不存冲突副本**。尊重下载策略（按需类别保持虚拟，分歧物理字节删除转虚拟）。不发布新版本，采用远端 HEAD 为基线，复用 adopt 路径与恢复日志。
+- **`localToRemote`（force push）**：本地全量扫描发布为 HEAD version + 1；远端独有文件移出清单，其他设备下次同步经正常三方合并推断删除。本地无改动故无需恢复日志；旧 manifest / blob 仍在远端，GC 前可恢复。正常模式走 CAS，降级模式走发布锁。
+- **影响预览**：`engine::overwrite_preview` 只读计算 `{willDeleteLocal, willDownload, willRemoveRemote, willUpload, remoteVersion}`（不 flush sidecar、不绑定 store、不 resume）。
+- **入口与确认**：设置页两个 outline 按钮 → 弹窗展示预览计数 + 破坏性说明 → destructive 确认；CLI `agentero sync overwrite <remote-to-local|local-to-remote>`（先打印预览，`prompt::confirm`，非交互需 `--yes`）。IPC `sync_overwrite_preview` / `sync_overwrite`，复用 `sync:state` / `sync:progress` 事件。执行持 Vault 锁与进程内 lease，失败记入 `last_error`。
 
 ## 身份与 Catalog 联动
 
@@ -142,7 +155,7 @@ S3 / WebDAV 共用同一套状态化同步协议（内容寻址 blob + 不可变
 
 ## 前端
 
-设置窗口「同步」pane：`src/components/settings/panes/sync-pane.tsx`；命令封装 `src/lib/sync/api.ts`。仅本地 Vault 可配置（`remote:` 句柄显示提示）。标题旁用小色点展示连接状态（灰=未连接，绿=已连接，蓝=同步中，红=最近一次同步/连接失败）。后端选择为与服务商 logo 同行的下拉框（对象存储 / WebDAV / Git；已配置时禁用并提示先解绑），随后按后端渲染表单（S3：endpoint/bucket/AK/SK + 高级项；WebDAV：服务器地址/用户名/密码；Git：仓库地址/分支、明文 HTTP 开关、CA 证书路径，并说明 HTTPS 需预先存好凭据）。服务商 logo 按钮按后端分组（S3：AWS/R2/MinIO/OSS/BOS；WebDAV：坚果云/Nextcloud；Git：GitHub/GitLab），打开官方配置指南，不会通过外链自动创建或回填凭据。同步范围（见上）在同一 pane：小标题 + 逐类开关（行内显示本地体积）。`ink` 仅在移动端（`mobile`）渲染；`translated` 全端渲染并附带说明其依赖翻译缓存开关。Git 下说明改为写入 `.gitignore`。
+设置窗口「同步」pane：`src/components/settings/panes/sync-pane.tsx`；命令封装 `src/lib/sync/api.ts`。仅本地 Vault 可配置（`remote:` 句柄显示提示）。标题旁用小色点展示连接状态（灰=未连接，绿=已连接，蓝=同步中，红=最近一次同步/连接失败）。后端选择为与服务商 logo 同行的下拉框（对象存储 / WebDAV / Git；已配置时禁用并提示先解绑），随后按后端渲染表单（S3：endpoint/bucket/AK/SK + 高级项；WebDAV：服务器地址/用户名/密码；Git：仓库地址/分支、明文 HTTP 开关、CA 证书路径，并说明 HTTPS 需预先存好凭据）。服务商 logo 按钮按后端分组（S3：AWS/R2/MinIO/OSS/BOS；WebDAV：坚果云/Nextcloud；Git：GitHub/GitLab），打开官方配置指南，不会通过外链自动创建或回填凭据。同步范围（见上）在同一 pane：小标题 + 逐类开关（行内显示本地体积）。`ink` 仅在移动端（`mobile`）渲染；`translated` 全端渲染并附带说明其依赖翻译缓存开关。Git 下说明改为写入 `.gitignore`。探测不支持条件写时显示警告卡片：说明文案 + 「允许降级同步」开关（开启后附风险说明，需保存生效）；绑定已保存且无草稿时另显示「远端覆盖本地 / 本地覆盖远端」按钮，点击先取影响预览再弹 destructive 确认窗。`sync:state` 错误事件按 `errorCode` 本地化（`sync_no_conditional_writes` / `sync_unreachable`），不再直出英文引擎消息。
 
 ## 自动同步
 

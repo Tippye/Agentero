@@ -480,6 +480,14 @@ agentero sync status --vault ~/papers --json   # lastError 给出上次失败原
 agentero sync test --vault ~/papers --json     # 凭据/桶/条件写连通测试
 agentero sync disconnect --vault ~/papers -y   # 解绑（远端数据不动）
 
+# 忽略条件写的 WebDAV（fnOS 自带 WebDAV 等）：显式 opt-in 降级同步
+agentero sync configure --vault ~/papers --backend webdav \
+  --webdav-url https://dav.example.net/agentero/ --webdav-user me \
+  --allow-degraded-sync true
+# 手动覆盖（先打印影响预览，确认后才执行；-y 跳过确认）
+agentero sync overwrite remote-to-local --vault ~/papers   # 远端覆盖本地（丢弃本地分歧）
+agentero sync overwrite local-to-remote --vault ~/papers   # 本地覆盖远端（发布本地全量）
+
 # Git：Vault 即 work tree；认证走系统 credential helper / SSH agent
 agentero sync configure --vault ~/papers \
   --backend git --git-remote git@github.com:you/papers.git --git-branch main
@@ -494,6 +502,8 @@ agentero sync now --vault ~/papers --json
 - **状态与错误码**：未配置 → `sync_not_configured`；配置非法（缺 secret 等，非交互下无法补提示时错误里附 secret 传入门径）→ `sync_config_invalid`；引擎错误透传 `AppError` 域码。`status` 输出 `configured` / `config`（掩码）/ `lastSyncAt` / `lastVersion` / `lastError`。
 - **进度**：`now` 的阶段进度（scan/pull/download/upload/finalize）打 stderr，stdout 始终纯 JSON；text 模式默认显示，`--progress` 在 `--json` 下开启。
 - **同步范围**：`configure --exclude pdf,source,attachments,ink` 排除对应类别，`--include translated` 打开默认关闭的译文 PDF（与设置页「同步范围」一致）；笔记、sidecar、高亮/文字批注永远同步。CLI 的 `--exclude`/`--include` 从设置页默认值出发（`translated` 默认关）。Git 把同一组排除项写进仓库 `.gitignore`，并取消跟踪。
+- **降级同步**：探测不支持条件写的存储默认硬停（`sync_no_conditional_writes`）；`configure --allow-degraded-sync true` 显式开启降级协议（一期仅 WebDAV：发布锁 + 普通 HEAD PUT + read-back，见 [sync.md](sync.md#条件写硬停与可选降级同步)）。每设备独立开启；`configure` 输出的 conditional writes 行会标注 `no (degraded sync enabled)`。
+- **手动覆盖**：`sync overwrite <remote-to-local|local-to-remote>` 先经 `overwrite_preview` 打印影响计数（将删除/还原/上传/移除的文件数与远端版本），再 `prompt::confirm` 确认（非交互需 `--yes`/`-y`）；执行持同一 Vault 锁，输出含 `direction` / `preview` / 结果计数。`remote-to-local` 直接丢弃本地分歧内容（不存冲突副本）；`local-to-remote` 发布本地全量为新 HEAD，旧清单保留在远端。Git 后端拒绝该命令。
 - **Git**：`--backend git --git-remote <url|path> [--git-branch main] [--git-allow-insecure-http true|false] [--git-ssl-ca <pem>]`；不接收 secret flag、不做 TTY 提示，使用系统 Git 凭据。HTTPS 需事先写入 credential helper；非 loopback 的 `http://` 必须显式打开 `--git-allow-insecure-http true`（令牌明文传输）。`--git-ssl-ca` 是自签 HTTPS 的绝对 PEM 路径，传给 `http.sslCAInfo`。Vault 已有仓库时要求当前分支与 `--git-branch` 一致、`origin` 与配置一致，否则报错。冲突、`.agentero` 被跟踪、历史重写等分别返回 `sync_conflict` / `git_agentero_tracked` / `git_history_rewritten`；推送被非 fast-forward 拒绝会自动重试 fetch+merge+push。认证失败与证书失败分别为 `git_auth_failed` / `git_tls_failed`。
 
 ## Doctor

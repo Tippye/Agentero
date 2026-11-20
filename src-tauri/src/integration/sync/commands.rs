@@ -47,6 +47,10 @@ struct SyncStateEvent<'a> {
     status: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// Stable domain code of `error` (e.g. `sync_no_conditional_writes`) so
+    /// listeners can localize without matching message text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -396,7 +400,7 @@ async fn perform_sync_task(
         .await?
         .ok_or_else(|| AppError::message("sync is not configured"))?;
     attach_agentero_session(app, &mut cfg).await;
-    emit_state(app, vault_key, "syncing", None);
+    emit_state(app, vault_key, "syncing", None, None);
     let progress_app = app.clone();
     let progress_key = vault_key.to_string();
     let progress = move |phase: &str, current: usize, total: usize| {
@@ -429,11 +433,17 @@ async fn perform_sync_task(
     drop(lease);
     match result {
         Ok(outcome) => {
-            emit_state(app, vault_key, "idle", None);
+            emit_state(app, vault_key, "idle", None, None);
             Ok(outcome)
         }
         Err(e) => {
-            emit_state(app, vault_key, "error", Some(e.to_string()));
+            emit_state(
+                app,
+                vault_key,
+                "error",
+                Some(e.to_string()),
+                Some(e.code().to_string()),
+            );
             Err(e)
         }
     }
@@ -459,6 +469,113 @@ pub async fn sync_now(
                 outcome.uploaded,
                 outcome.downloaded,
                 outcome.conflict_copies.len()
+            ));
+            Ok(ApiResult::ok(outcome))
+        }
+        Err(e) => {
+            op.finish_err(&e);
+            Ok(map_err(e))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncOverwriteArgs {
+    pub vault_path: String,
+    pub direction: engine::OverwriteDirection,
+}
+
+/// Read-only impact preview for the manual-overwrite confirmation dialog.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_overwrite_preview(
+    app: AppHandle,
+    args: SyncOverwriteArgs,
+) -> Result<ApiResult<engine::OverwritePreview>, String> {
+    let inner = async {
+        let dir = vault_dir(&app, &args.vault_path)?;
+        let mut cfg = super::credentials::load(&app, args.vault_path.trim())
+            .await?
+            .ok_or_else(|| AppError::message("sync is not configured"))?;
+        attach_agentero_session(&app, &mut cfg).await;
+        engine::overwrite_preview(&dir, &cfg, args.direction).await
+    };
+    Ok(match inner.await {
+        Ok(preview) => ApiResult::ok(preview),
+        Err(error) => map_err(error),
+    })
+}
+
+/// Manual overwrite: `remoteToLocal` mirrors the remote HEAD onto disk
+/// (discarding divergent local content); `localToRemote` publishes the local
+/// scan as the new HEAD. The UI confirms with a preview before calling this.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_overwrite(
+    app: AppHandle,
+    service: State<'_, SyncService>,
+    args: SyncOverwriteArgs,
+) -> Result<ApiResult<SyncOutcome>, String> {
+    use crate::core::log_util::OpTimer;
+
+    let vault_key = args.vault_path.trim().to_string();
+    let op = OpTimer::start_with(
+        "sync_overwrite",
+        format!("vault={vault_key} direction={:?}", args.direction),
+    );
+    let inner = async {
+        let dir = vault_dir(&app, &vault_key)?;
+        prepare_download_policy(&dir)?;
+        let lease = service
+            .try_begin(&vault_key)
+            .ok_or_else(|| AppError::message("sync already running"))?;
+        let mut cfg = super::credentials::load(&app, &vault_key)
+            .await?
+            .ok_or_else(|| AppError::message("sync is not configured"))?;
+        attach_agentero_session(&app, &mut cfg).await;
+        emit_state(&app, &vault_key, "syncing", None, None);
+        let progress_app = app.clone();
+        let progress_key = vault_key.clone();
+        let progress = move |phase: &str, current: usize, total: usize| {
+            let _ = progress_app.emit(
+                "sync:progress",
+                SyncProgressEvent {
+                    vault_path: &progress_key,
+                    phase,
+                    current,
+                    total,
+                },
+            );
+        };
+        let result = crate::features::mobile_background::with_work(
+            &app,
+            crate::features::mobile_background::BackgroundReason::Sync,
+            async {
+                let lock = SyncLock::acquire(&dir)?;
+                engine::overwrite_locked(&lock, &cfg, args.direction, &progress).await
+            },
+        )
+        .await;
+        // Terminal event consumers immediately re-read status; release first.
+        drop(lease);
+        match &result {
+            Ok(_) => emit_state(&app, &vault_key, "idle", None, None),
+            Err(e) => emit_state(
+                &app,
+                &vault_key,
+                "error",
+                Some(e.to_string()),
+                Some(e.code().to_string()),
+            ),
+        }
+        result
+    };
+    match inner.await {
+        Ok(outcome) => {
+            op.finish_ok_extra(format!(
+                "version={} up={} down={} deletedLocal={}",
+                outcome.version, outcome.uploaded, outcome.downloaded, outcome.deleted_local
             ));
             Ok(ApiResult::ok(outcome))
         }
@@ -573,13 +690,20 @@ pub async fn sync_cloud_usage(
     }))
 }
 
-fn emit_state(app: &AppHandle, vault_path: &str, status: &str, error: Option<String>) {
+fn emit_state(
+    app: &AppHandle,
+    vault_path: &str,
+    status: &str,
+    error: Option<String>,
+    error_code: Option<String>,
+) {
     let _ = app.emit(
         "sync:state",
         SyncStateEvent {
             vault_path,
             status,
             error,
+            error_code,
         },
     );
 }
@@ -604,11 +728,13 @@ mod events_contract_shape_tests {
             vault_path: "/vault",
             status: "configured",
             error: Some("offline".to_string()),
+            error_code: Some("sync_unreachable".to_string()),
         };
         let mirror = MirrorSyncState {
             vault_path: "/vault".to_string(),
             status: "configured".to_string(),
             error: Some("offline".to_string()),
+            error_code: Some("sync_unreachable".to_string()),
         };
         assert_eq!(
             serde_json::to_value(&real).unwrap(),
@@ -619,11 +745,13 @@ mod events_contract_shape_tests {
             vault_path: "/vault",
             status: "disconnected",
             error: None,
+            error_code: None,
         };
         let mirror_none = MirrorSyncState {
             vault_path: "/vault".to_string(),
             status: "disconnected".to_string(),
             error: None,
+            error_code: None,
         };
         assert_eq!(
             serde_json::to_value(&real_none).unwrap(),

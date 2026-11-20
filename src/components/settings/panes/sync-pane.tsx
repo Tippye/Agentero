@@ -1,4 +1,11 @@
-import { ChevronRight, CloudUpload, LoaderCircle, Unplug } from "lucide-react";
+import {
+	ArrowDownToLine,
+	ArrowUpFromLine,
+	ChevronRight,
+	CloudUpload,
+	LoaderCircle,
+	Unplug,
+} from "lucide-react";
 import type { ComponentProps, ComponentType } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,6 +37,14 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -65,6 +80,8 @@ import {
 	SYNC_INTERVAL_CHOICES,
 	type SyncBackendConfig,
 	type SyncCloudUsage,
+	type SyncOverwriteDirection,
+	type SyncOverwritePreview,
 	type SyncProgressEvent,
 	type SyncScopeSizes,
 	type SyncStateEvent,
@@ -73,6 +90,8 @@ import {
 	syncDisconnect,
 	syncGetStatus,
 	syncNow,
+	syncOverwrite,
+	syncOverwritePreview,
 	syncScopeSizes,
 } from "@/lib/sync/api";
 import { vaultDisplayName } from "@/lib/vault/path";
@@ -269,6 +288,11 @@ function VaultSyncForm({
 	const [syncError, setSyncError] = useState<string | null>(null);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
 	const [scopeSizes, setScopeSizes] = useState<SyncScopeSizes | null>(null);
+	const [overwriteDialog, setOverwriteDialog] = useState<{
+		direction: SyncOverwriteDirection;
+		preview: SyncOverwritePreview;
+	} | null>(null);
+	const [overwriting, setOverwriting] = useState(false);
 	const [activeOrgId, setActiveOrgId] = useState("");
 	const cloudSubject =
 		form.agenteroSubject === "organization" ? "organization" : "user";
@@ -357,10 +381,20 @@ function VaultSyncForm({
 						// the user what to check beats reqwest's error chain.
 						const detail = payload.error ?? t("sync.statusError");
 						const unreachable = isLikelyNetworkFailure(detail);
-						notifyError(unreachable ? t("sync.unreachable") : detail, {
-							id: `sync:${localVault}`,
-							description: unreachable ? detail : undefined,
-						});
+						const noConditionalWrites =
+							payload.errorCode === "sync_no_conditional_writes";
+						notifyError(
+							unreachable
+								? t("sync.unreachable")
+								: noConditionalWrites
+									? t("sync.noConditionalWrites")
+									: detail,
+							{
+								id: `sync:${localVault}`,
+								description:
+									unreachable || noConditionalWrites ? detail : undefined,
+							},
+						);
 					}
 					if (payload.status !== "syncing") {
 						setProgress(null);
@@ -472,6 +506,11 @@ function VaultSyncForm({
 			notifyError(t("sync.unreachable"), { description: detail });
 			return;
 		}
+		if (code === "sync_no_conditional_writes") {
+			setSyncError(detail);
+			notifyError(t("sync.noConditionalWrites"), { description: detail });
+			return;
+		}
 		setSyncError(detail);
 		notifyError(detail);
 	};
@@ -520,6 +559,43 @@ function VaultSyncForm({
 		} finally {
 			setSyncing(false);
 			setProgress(null);
+			void refresh().catch(() => undefined);
+		}
+	};
+
+	const openOverwrite = async (direction: SyncOverwriteDirection) => {
+		if (!localVault) return;
+		try {
+			const preview = await syncOverwritePreview(localVault, direction);
+			setOverwriteDialog({ direction, preview });
+		} catch (error) {
+			reportSyncError(error);
+		}
+	};
+
+	const confirmOverwrite = async () => {
+		if (!localVault || !overwriteDialog) return;
+		setOverwriting(true);
+		try {
+			const outcome = await syncOverwrite(
+				localVault,
+				overwriteDialog.direction,
+			);
+			await onSynced?.();
+			setOverwriteDialog(null);
+			setSyncError(null);
+			notifySuccess(
+				t("sync.overwriteDone", {
+					version: outcome.version,
+					up: outcome.uploaded,
+					down: outcome.downloaded,
+					deleted: outcome.deletedLocal,
+				}),
+			);
+		} catch (error) {
+			reportSyncError(error);
+		} finally {
+			setOverwriting(false);
 			void refresh().catch(() => undefined);
 		}
 	};
@@ -771,9 +847,50 @@ function VaultSyncForm({
 			) : null}
 
 			{status?.configured && !isGit && !form.conditionalWrites ? (
-				<p className="mb-3 text-muted-foreground text-xs">
-					{t("sync.noConditionalWrites")}
-				</p>
+				<div className="mb-3 space-y-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3.5">
+					<p className="text-muted-foreground text-xs">
+						{t("sync.noConditionalWrites")}
+					</p>
+					<div className="flex items-center justify-between gap-3">
+						<span className="text-sm">{t("sync.allowDegradedSync")}</span>
+						<Switch
+							checked={form.allowDegradedSync}
+							onCheckedChange={(value) => patch({ allowDegradedSync: value })}
+							disabled={controlsDisabled}
+							aria-label={t("sync.allowDegradedSync")}
+						/>
+					</div>
+					{form.allowDegradedSync ? (
+						<p className="text-muted-foreground text-xs">
+							{t("sync.degradedSyncRisk")}
+						</p>
+					) : null}
+				</div>
+			) : null}
+
+			{status?.configured && !isGit && !configChanged ? (
+				<div className="mb-3 flex flex-wrap gap-2">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={controlsDisabled}
+						onClick={() => void openOverwrite("remoteToLocal")}
+					>
+						<ArrowDownToLine data-icon="inline-start" />
+						{t("sync.overwritePull")}
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={controlsDisabled}
+						onClick={() => void openOverwrite("localToRemote")}
+					>
+						<ArrowUpFromLine data-icon="inline-start" />
+						{t("sync.overwritePush")}
+					</Button>
+				</div>
 			) : null}
 
 			<div className="mb-3 flex flex-wrap items-center gap-2">
@@ -1242,6 +1359,61 @@ function VaultSyncForm({
 					</Button>
 				) : null}
 			</div>
+			<Dialog
+				open={overwriteDialog !== null}
+				onOpenChange={(open) => {
+					if (!open && !overwriting) setOverwriteDialog(null);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>
+							{overwriteDialog?.direction === "remoteToLocal"
+								? t("sync.overwritePullTitle")
+								: t("sync.overwritePushTitle")}
+						</DialogTitle>
+						<DialogDescription>
+							{overwriteDialog?.direction === "remoteToLocal"
+								? t("sync.overwritePullBody", {
+										delete: overwriteDialog.preview.willDeleteLocal,
+										download: overwriteDialog.preview.willDownload,
+										version: overwriteDialog.preview.remoteVersion,
+									})
+								: overwriteDialog
+									? t("sync.overwritePushBody", {
+											upload: overwriteDialog.preview.willUpload,
+											remove: overwriteDialog.preview.willRemoveRemote,
+											version: overwriteDialog.preview.remoteVersion,
+										})
+									: null}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => setOverwriteDialog(null)}
+							disabled={overwriting}
+						>
+							{t("sync.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							onClick={() => void confirmOverwrite()}
+							disabled={overwriting}
+						>
+							{overwriting ? (
+								<LoaderCircle
+									data-icon="inline-start"
+									className="animate-spin"
+								/>
+							) : null}
+							{t("sync.overwriteConfirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</section>
 	);
 }

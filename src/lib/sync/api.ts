@@ -70,6 +70,9 @@ export type SyncBackendConfig = {
 	intervalMinutes: number;
 	/** Detected on connect: false when the backend rejects conditional PUTs. */
 	conditionalWrites: boolean;
+	/** Per-device opt-in to the degraded protocol (WebDAV stores that ignore
+	 * conditional writes). Off by default; every device must enable it. */
+	allowDegradedSync: boolean;
 	/** Sync scope for bulky paper assets (default: everything). */
 	scope: SyncScope;
 };
@@ -146,6 +149,7 @@ export const emptySyncConfig = (
 	autoSync: true,
 	intervalMinutes: 30,
 	conditionalWrites: true,
+	allowDegradedSync: false,
 	// Product defaults: ink has always synced; translated PDFs are opt-in.
 	scope: {
 		pdf: true,
@@ -206,6 +210,7 @@ function configFromWire(config: SyncBackendConfigWire): SyncBackendConfig {
 		autoSync: config.autoSync ?? true,
 		intervalMinutes: config.intervalMinutes ?? 30,
 		conditionalWrites: config.conditionalWrites ?? true,
+		allowDegradedSync: config.allowDegradedSync ?? false,
 		scope: {
 			pdf: config.scope?.pdf ?? true,
 			source: config.scope?.source ?? true,
@@ -241,6 +246,35 @@ export async function syncDisconnect(vaultPath: string): Promise<void> {
 
 export function syncNow(vaultPath: string): Promise<SyncOutcome> {
 	return callApiResult(() => commands.syncNow({ vaultPath }));
+}
+
+/** Which side wins a manual overwrite. */
+export type SyncOverwriteDirection = "remoteToLocal" | "localToRemote";
+
+/** Impact preview for the overwrite confirmation dialog (read-only). */
+export type SyncOverwritePreview = {
+	willDeleteLocal: number;
+	willDownload: number;
+	willRemoveRemote: number;
+	willUpload: number;
+	remoteVersion: number;
+};
+
+export function syncOverwritePreview(
+	vaultPath: string,
+	direction: SyncOverwriteDirection,
+): Promise<SyncOverwritePreview> {
+	return callApiResult(() =>
+		commands.syncOverwritePreview({ vaultPath, direction }),
+	);
+}
+
+/** Destructive manual overwrite; the UI confirms with a preview first. */
+export function syncOverwrite(
+	vaultPath: string,
+	direction: SyncOverwriteDirection,
+): Promise<SyncOutcome> {
+	return callApiResult(() => commands.syncOverwrite({ vaultPath, direction }));
 }
 
 export function syncGetDownloadPolicy(
