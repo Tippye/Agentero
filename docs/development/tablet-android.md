@@ -493,7 +493,34 @@ Android 12 上的已知降级（不崩溃）：掌触取消（`MotionEvent.FLAG_
 
 验证边界：Rust 按 android31 目标完整编译、Kotlin/清单合并/R8/签名通过；通知门控改动为纯 SDK 分支，JVM 策略测试不涉及 `granted()`（需 Android Context）。**真机验收待客户**：12 上后台运行开关与通知渠道、掌触降级表现、WebView 升级提示、息屏保活；13+ 回归确认门控分支无行为变化。
 
-## 23. 参考
+## 23. 0.17.0 上游同步合并（2026-11-20）
+
+把 mobile 的 0.17.0 合并成果同步进 android。android 先由 `6eaa2041b`（tippy）合并 mobile 至 `e1964f598`，完成 0.17.0 主体与 `input.ts` 三方 reconcile（android 专属输入 noteHold/hoverGuard/pageHitTarget、形状功能、上游 0.17.0 新 input、并行调参 click-guard 4px 等共存）；本轮合并 `3342982fb`「merge: sync mobile 0.17.0 into android」补齐 mobile 剩余 4 个聚焦修复，干净合并、无冲突：
+
+- `86ed3b963` sync 引擎 Path A：恢复 mobile apply-before-publish（mutation lane 内落盘、publish 前），叠加上游 recovery journal/scope.rs/强制条件写/fork 保守合并；journal 落盘前记 intent、apply/upload 失败 discard、CAS 成功 accept+finish。
+- `350ac2ab6` 套索视觉笔记路径恢复（beginVisualAnnotation/onVisualDraft 与 region-prompt 并存，视觉 deps 可选）+ 上游 PDF 行为测试对齐（zoom=4、aria-label 含快捷键、isMobileApp mock）。
+- `8f9214c08` api-policy 测试 mock 满足上游远程版面页数校验（validateRemoteLayoutPageCount）。
+- `f0a5ee42f` 跨视图高亮即时 peer 镜像恢复（挂载即订阅 + 导入前事件缓冲重放）。
+
+android 平台适配全部保留：minSdk 33 / targetSdk 36 / compileSdk 36（Android 12 撤回决定不变）、MainActivity 守卫/insets、FileProvider 边界、清单服务/权限、`agentero-mobile` 插件 Kotlin（后台服务、手写笔适配、WebView 兼容守卫、铅笔快捷、原生导入、外部 PDF intent）及 android 专属 input 层。共享代码（sync 引擎/region-framing/highlights/bindings/i18n）与 mobile `f0a5ee42f` 一致；android 另保留其独有的移动增强（figure-lightbox、mobile-task-indicator、mirror-store 等）。
+
+验证：agentero-core 全量、bindings 只读 + events 契约、android cfg check、Kotlin `:app:compileUniversalReleaseKotlin`、typecheck/deps:check/biome、vitest 广域（含 ink/shape/click-guard/stylus/region-prompt）全绿。产物见下（0.17.0 ARM64 测试签名包，真机验收待用户）。
+
+## 24. dsh 修复分支集成与 0.17.0 测试包（2026-11-20）
+
+出包前把 `dsh-5629cae8-7588` 的 5 个修复提交 cherry-pick 进 android（保留原作者 tippy 与原消息），测试包须含这些修复：
+
+- `447079ffc`→`aa4b638a2` 翻译按钮改为译文可见性开关。**display-mode→view-mode 适配**：上游 0.17.0 已删 `translate.displayMode` 设置，改用 view-mode(original/translated/dual) 单一权威。按钮复用 view-mode 机制——single 视图 toggle 原文↔译文（同 ⌥A）、companion 开则收回单栏原文、运行中则停止；布局切换交给独立控件（桌面新增 side-by-side 工具栏按钮 `handleSelectViewMode("dual"/"original")`、mobile compare 预设）。丢弃 dsh 的「首次点击跟随配置显示模式」（无配置可跟随）与 `display-entry.ts`/`dualLayoutRequested` 死代码；`translationShown` 保留 0.17.0 语义（overlay 跟随 view-mode，original 不画译文）。
+- `710d92fa9`→`ad63e8c10` 笔迹页相对、原文/译文共享。主视图不再因译文显示而解除 ink，`inkOverReflow` 让笔迹画在重排页上；译文 companion 接入共享 `usePdfInk(sharedEditor)` + `InkInputBridge` + 页属性，两栏显示/书写/移动/擦除同一笔迹。
+- `74b778ae1`→`498787a0d` 同类同论文新任务启动/完成时 retire 旧失败行；桌面面板逐行 dismiss、mobile 失败 pill 可关闭/滑走（含 background-tasks 测试，用户授权分发）。
+- `9587c2271`→`b8f1588c8` plaza tab 套件补 workspaceStore mock（DocView 现订阅 workspace store 检测 companion tab）。
+- `ad2ff414b`→`9327a0703` `cacheReflowFinal` 默认翻转为开 + 一次性迁移（设置开关仍可关）；settings/mod.rs 文档注释改动→重生成 bindings。
+
+合并遗留修绿（`985b48837`/`09bb4681b`）：0.17.0 同步曾把 mobile 的 EasyScholar 设置块从 android mobile-paper-info 丢掉，恢复共享 `EasyScholarSettingsBlock`（保留 android `openMobilePaperLink`）；android mobile-settings-page 有意新增 EasyScholar 独立导航分区，native-pdf-import 导航断言更新为 7 项并注释；translation-recovery 套件补 viewport/zoom/interaction capability mock（companion ink bridge 新订阅）。
+
+验证：agentero-core 全量 1047/0/9ignored、bindings 只读 + events 契约、android cfg check、Kotlin `:app:compileUniversalReleaseKotlin`、typecheck/deps:check/biome、vitest 广域（含 background-tasks/plaza-tab-persistence/mobile-task-indicator/ink/translate/region/highlight）全绿。产物：0.17.0 ARM64 测试签名包（minSdk 33、v1+v2+v3、zipalign -P 16），真机验收待用户。
+
+## 25. 参考
 
 - 共享部分：[tablet-shared.md](tablet-shared.md)
 - DSH Go（`74e1faa`，AGPL-3.0，仅参考设计）：清单里的保活服务声明与权限、使用指南的「后台运行」一节 <https://github.com/ccch1mneyyy/dsh-Go>
