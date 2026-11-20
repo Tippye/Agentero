@@ -14,10 +14,12 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// CI writes keystore.properties (gitignored) with keyAlias/keyPassword/
-// storeFile/storePassword; local builds without it stay unsigned.
+// Release signing defaults to the versioned release.keystore via
+// release-signing.properties, so every release (local and CI) uses the same
+// unified key. A local keystore.properties (gitignored) overrides it.
 val keystoreProperties = Properties().apply {
-    val propFile = file("keystore.properties")
+    val localFile = file("keystore.properties")
+    val propFile = if (localFile.exists()) localFile else file("release-signing.properties")
     if (propFile.exists()) {
         propFile.inputStream().use { load(it) }
     }
