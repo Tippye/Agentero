@@ -292,7 +292,7 @@ export const PdfToolbar = memo(function PdfToolbar({
 							</div>
 						</div>
 					) : null}
-{!isRemotePaper && onToggleTranslationLayout ? (
+					{!isRemotePaper && onToggleTranslationLayout ? (
 						<div className={asideClass} inert={meterOpen}>
 							<div className="min-w-0 overflow-hidden">
 								<Tooltip>
