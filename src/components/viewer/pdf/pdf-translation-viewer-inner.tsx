@@ -1,7 +1,7 @@
-/**
- * Dual-pane translation companion. Native text selection shares the reader
- * annotation actions while PDF text layers and ONNX layout stay unmounted; find searches the generated translated PDF instead
- * of the source text layer.
+﻿/**
+ * Dual-pane translation companion. It renders the generated translated PDF and
+ * keeps its own find / citation / crossref chrome; source text selection and
+ * its floating menu live in the reader pane only.
  */
 
 import type { PdfLinkAnnoObject } from "@embedpdf/models";
@@ -23,18 +23,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
-import { AskPopover } from "@/components/viewer/pdf/cards/ask-popover";
 import { PdfCitationPreview } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
-import { SelectionMenu } from "@/components/viewer/pdf/cards/selection-menu";
-import { TranslateCard } from "@/components/viewer/pdf/cards/translate-card";
 import { PdfFindBar } from "@/components/viewer/pdf/chrome/pdf-find-bar";
 import { PdfTranslateProgressChip } from "@/components/viewer/pdf/chrome/pdf-translate-progress";
 import { EMPTY_LAYOUT_REGIONS_BY_PAGE } from "@/components/viewer/pdf/constants";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
 import { usePdfCitations } from "@/components/viewer/pdf/hooks/use-pdf-citations";
-import { usePdfCompanionSelection } from "@/components/viewer/pdf/hooks/use-pdf-companion-selection";
 import { usePdfCrossrefPreview } from "@/components/viewer/pdf/hooks/use-pdf-crossref-preview";
 import { usePdfFind } from "@/components/viewer/pdf/hooks/use-pdf-find";
 import { usePdfHighlights } from "@/components/viewer/pdf/hooks/use-pdf-highlights";
@@ -61,7 +57,6 @@ import type {
 	PdfViewerInnerProps,
 	ScreenPoint,
 } from "@/components/viewer/pdf/types";
-import { ActiveCardScrollSync } from "@/components/viewer/pdf/viewport/active-card-scroll-sync";
 import { DockviewViewport } from "@/components/viewer/pdf/viewport/dockview-viewport";
 import { InkInputBridge } from "@/components/viewer/pdf/viewport/ink-input-bridge";
 import { KeyboardScrollHandler } from "@/components/viewer/pdf/viewport/keyboard-scroll-handler";
@@ -86,7 +81,6 @@ import {
 	subscribeLinkPreviewDrag,
 } from "@/lib/pdf/link-preview-drag";
 import { pickPdfSearchDocumentId } from "@/lib/pdf/search-target";
-import { openSettingsWindow } from "@/lib/shell/settings-window";
 import { getTabs } from "@/lib/workspace/store";
 import { findTranslationSourceId } from "@/lib/workspace/tabs";
 
@@ -145,7 +139,6 @@ const EMPTY_HANDLERS: PdfPageHandlers = {
 const PAGE_MODE: PdfPageModeSlice = {
 	regionSelecting: false,
 	visualCropPending: false,
-	visualDraftOpen: false,
 	sentencePairing: true,
 	translationOnly: true,
 };
@@ -163,7 +156,6 @@ export function PdfTranslationViewerInner({
 	isActive = true,
 	onHandle,
 	onHighlightsChange,
-	onOpenSettings,
 }: PdfViewerInnerProps) {
 	const capabilities = pdfViewerCapabilities(runtime);
 	usePdfScrollSync(docId);
@@ -256,20 +248,6 @@ export function PdfTranslationViewerInner({
 		totalPages: docCap?.getDocument(docId)?.pages.length ?? 0,
 		onHighlightsChangeRef,
 	});
-	const selection = usePdfCompanionSelection({
-		docId,
-		hostRef,
-		zoomRef,
-		engineRef,
-		docCapRef,
-		enabled: layoutTranslateActive,
-		isActive,
-		itemsByPage: layoutTranslateItemsByPage,
-		paperRelPath,
-		paperAbsPath,
-		highlights,
-	});
-	const { selectionMenu, actions, ask, translation } = selection;
 	const highlightPaint = useMemo(
 		() => partitionHighlightPaint(highlights.highlights),
 		[highlights.highlights],
@@ -343,7 +321,7 @@ export function PdfTranslationViewerInner({
 		if (translationAutoStartedRef.current) return;
 		if (!hasRegions) {
 			// Layout is not ready yet. Park the job on the shared analysis queue
-			// so the user sees the "queued — waiting for layout analysis" toast
+			// so the user sees the "queued 闁?waiting for layout analysis" toast
 			// (with a cancel action) instead of a silent empty pane. The hook
 			// starts the job once regions land; the mirror above delivers them
 			// even when the source pane finishes after this pane opened.
@@ -398,9 +376,8 @@ export function PdfTranslationViewerInner({
 			textLinks: linkSource.textLinks,
 			translatedHighlightsByPage: highlightPaint.translatedByPage,
 			highlightQuotesByPage: highlightPaint.quotesByPage,
-			selectionCommentDraft: selection.noteDraft,
 		}),
-		[linkSource, highlightPaint, selection.noteDraft],
+		[linkSource, highlightPaint],
 	);
 
 	const pageLayout = useMemo<PdfPageLayoutSlice>(
@@ -531,7 +508,7 @@ export function PdfTranslationViewerInner({
 
 	const handleLinkHover = useCallback(
 		(link: PdfLinkAnnoObject | null, point?: ScreenPoint | null) => {
-			if (linkPreviewDragActive() || selectionMenu) {
+			if (linkPreviewDragActive()) {
 				clearCitationPreview();
 				clearCrossrefPreview();
 				clearLinkUrlTip();
@@ -546,19 +523,18 @@ export function PdfTranslationViewerInner({
 			clearLinkUrlTip,
 			handleCitationLinkHover,
 			handleCrossrefLinkHover,
-			selectionMenu,
 		],
 	);
 
 	const handleLinkUrlHover = useCallback(
 		(url: string | null, point?: ScreenPoint | null) => {
-			if (linkPreviewDragActive() || selectionMenu) {
+			if (linkPreviewDragActive()) {
 				clearLinkUrlTip();
 				return;
 			}
 			hoverLinkUrl(url, point);
 		},
-		[clearLinkUrlTip, hoverLinkUrl, selectionMenu],
+		[clearLinkUrlTip, hoverLinkUrl],
 	);
 
 	const handleCitationImportOpenChange = useCallback(
@@ -593,8 +569,6 @@ export function PdfTranslationViewerInner({
 			onTextLinkActivate: openExternalUrl,
 			onCitationHover: handleLinkHover,
 			onLinkUrlHover: handleLinkUrlHover,
-			onCommitSelectionComment: selection.commitNote,
-			onDismissSelectionComment: selection.dismissNote,
 		}),
 		[
 			togglePageLayoutTranslate,
@@ -602,8 +576,6 @@ export function PdfTranslationViewerInner({
 			activateCitation,
 			handleLinkHover,
 			handleLinkUrlHover,
-			selection.commitNote,
-			selection.dismissNote,
 		],
 	);
 
@@ -654,10 +626,6 @@ export function PdfTranslationViewerInner({
 				hostRef={hostRef}
 				className="agentero-scroll-both min-h-0 min-w-0 flex-1"
 			>
-				<ActiveCardScrollSync
-					active={!!selectionMenu}
-					onScroll={selection.rePlaceSelectionMenu}
-				/>
 				<PdfHistoryKeyHandler
 					active={isActive}
 					hostRef={hostRef}
@@ -715,54 +683,6 @@ export function PdfTranslationViewerInner({
 			{typeof document !== "undefined"
 				? createPortal(
 						<>
-							{selectionMenu ? (
-								<SelectionMenu
-									screen={selectionMenu.screen}
-									selectionText={
-										selectionMenu.copyText ?? selectionMenu.anchor.quote
-									}
-									onHighlight={actions.handleHighlight}
-									onAsk={actions.handleMenuAsk}
-									onAddToChat={actions.handleMenuAddToChat}
-									onTranslate={selection.translateSelection}
-									onCopy={actions.handleMenuCopy}
-									onNote={selection.openNote}
-									showHighlight={
-										!isRemotePaper && selectionMenu.pages.length > 0
-									}
-								/>
-							) : null}
-							{ask.ask ? (
-								<AskPopover
-									thread={ask.ask.thread}
-									screen={ask.ask.screen}
-									streaming={ask.streaming}
-									error={ask.askError}
-									onSend={ask.sendAskQuestion}
-									onResend={ask.resendAskQuestion}
-									onHide={ask.hideAsk}
-									onDelete={ask.deleteAsk}
-									onStop={ask.stopAskStreaming}
-								/>
-							) : null}
-							{translation.translation ? (
-								<TranslateCard
-									screen={translation.translation.screen}
-									sourceText={translation.translation.selection.text}
-									mode={translation.translation.mode}
-									onModeChange={translation.switchMode}
-									result={translation.translation.result}
-									streaming={translation.translation.streaming}
-									error={translation.translation.error}
-									onHide={translation.close}
-									onOpenSettings={
-										onOpenSettings ??
-										(() => {
-											void openSettingsWindow("translate");
-										})
-									}
-								/>
-							) : null}
 							{citationPreview ? (
 								<PdfCitationPreview
 									screen={citationPreview.screen}
