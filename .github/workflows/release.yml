@@ -290,26 +290,20 @@ jobs:
         id: signing-config
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=()
-          for VAR in ANDROID_KEYSTORE ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [[ -z "${!VAR:-}" ]]; then
-              missing+=("$VAR")
-            fi
-          done
-
-          # An unsigned release APK cannot be installed, so skip rather than
-          # publish a broken asset — the desktop release still goes out.
-          if ((${#missing[@]} > 0)); then
-            echo "::warning::Skipping Android APK because signing secrets are missing: ${missing[*]}"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          # The release keystore is versioned (release.keystore + release-signing.properties),
+          # so Android always signs with the unified key — no secrets required. An optional
+          # ANDROID_KEYSTORE secret overrides it for a custom key.
+          if [[ ! -f src-tauri/gen/android/app/release.keystore ]]; then
+            echo "::error::Committed release.keystore is missing"
+            exit 1
           fi
-
+          if [[ -n "${ANDROID_KEYSTORE:-}" ]]; then
+            echo "override=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "override=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup Java
@@ -353,8 +347,8 @@ jobs:
         if: steps.signing-config.outputs.ready == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Install release keystore
-        if: steps.signing-config.outputs.ready == 'true'
+      - name: Install release keystore (optional secret override)
+        if: steps.signing-config.outputs.override == 'true'
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

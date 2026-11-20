@@ -21,6 +21,8 @@ dist-ssr
 *.jks
 *.keystore
 *.pfx
+# Unified release signing key is versioned intentionally so every release uses it
+!src-tauri/gen/android/app/release.keystore
 AuthKey_*.p8
 certificate-base64.txt
 site/
