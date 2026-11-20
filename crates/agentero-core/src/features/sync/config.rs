@@ -875,7 +875,10 @@ mod tests {
         assert_eq!(cfg.git_branch, "main");
         assert!(!cfg.git_allow_insecure_http);
         assert!(cfg.git_ssl_ca_info.is_empty());
-        assert!(cfg.scope.is_all());
+        // Mobile product default: translated PDFs are opt-in (off), so the
+        // default scope is not "all"; the other bulky categories stay on.
+        assert!(cfg.scope.pdf && cfg.scope.source && cfg.scope.attachments && cfg.scope.ink);
+        assert!(!cfg.scope.translated);
         assert_eq!(
             cfg.remote_identity(),
             r#"["git","https://github.com/u/papers.git","main"]"#

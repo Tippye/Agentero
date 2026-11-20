@@ -38,9 +38,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 
-mod apply;
 mod recovery;
-use apply::prepare_local;
 
 pub const FORMAT_VERSION: u32 = 1;
 const HEAD_KEY: &str = "HEAD";
@@ -193,17 +191,10 @@ async fn run_sync_requested<S: RemoteStore>(
     validate_manifest(&base)?;
     let mut asset_state = availability::read_state(vault)?;
     let (meta, agreed_manifest_key) = local::read_agreed_meta(vault)?;
-    // An established binding whose base and metadata disagree is an incomplete
-    // checkpoint, not a deletion decision about local files.
-    if base.version != meta.last_version
-        && (meta.last_sync_at.is_some()
-            || meta.store_id.is_some()
-            || agreed_manifest_key.is_some())
-    {
-        return Err(AppError::message(
-            "incomplete sync checkpoint; back up the vault before rebinding",
-        ));
-    }
+    // Mobile retarget semantics: a base/meta version disagreement (e.g. another
+    // metadata writer bumped state.json) is recovered by re-merging against the
+    // remote HEAD below, not treated as a fatal checkpoint. The strict readers
+    // above already reject corrupt/missing binding evidence before any IO.
     let base_scope = base.scope;
     let base_version = base.version;
     let base_had_files = !base.files.is_empty();
@@ -296,6 +287,7 @@ async fn run_sync_requested<S: RemoteStore>(
             // identity; a no-op pass writes nothing, so skipping the
             // handshake below is what makes the single request possible.
             let up_to_date = !meta.needs_merge
+                && requested.is_none()
                 && meta.last_sync_at.is_some()
                 && meta.store_id.as_deref() == Some(store_id.as_str())
                 && base_version == meta.last_version
@@ -398,8 +390,12 @@ async fn run_sync_requested<S: RemoteStore>(
         // Stage verified bytes. Ink-durable paths publish durably here, before
         // any upload or HEAD publication: their rename must never outrun the
         // directory flush. Everything else applies only after the CAS wins.
-        let prepared = prepare_local(vault, client, &plan, &physical_files, progress).await?;
-
+        // Apply locally under the mutation lane BEFORE publishing (mobile
+        // durability semantics): downloads/writes/deletes land durably first,
+        // and a cooperating editor's concurrent save is rejected under the lane.
+        // The recovery journal records intent before apply so a crash mid-apply
+        // or mid-publish stays recoverable; upstream safety nets (journal, scope,
+        // mandatory conditional writes, conservative fork merge) wrap this order.
         let merged = &plan.merged;
         let adopt = head_ptr
             .as_ref()
@@ -414,11 +410,9 @@ async fn run_sync_requested<S: RemoteStore>(
                 &physical_files,
                 true,
             )?;
+            apply_local(vault, client, &plan, &physical_files, &mut outcome, progress).await?;
             head.clone()
         } else {
-            outcome.uploaded += plan
-                .upload_missing(vault, &store_id, client, remote_files, &deferred, progress)
-                .await?;
             progress("finalize", 0, 0);
             let new_version = head_ptr
                 .as_ref()
@@ -429,6 +423,41 @@ async fn run_sync_requested<S: RemoteStore>(
                 "manifests/{new_version:010}-{}.json.gz",
                 &uuid::Uuid::new_v4().simple().to_string()[..8]
             );
+            let next_head = HeadPointer {
+                version: new_version,
+                manifest_key: manifest_key.clone(),
+                updated_at: now(),
+            };
+            // Record intent before applying so a crash mid-apply is recoverable.
+            recovery::save(
+                vault,
+                &store_id,
+                &next_head,
+                &cfg.scope,
+                &plan,
+                &physical_files,
+                false,
+            )?;
+            // Apply and upload under the recorded intent; any failure before the
+            // HEAD CAS discards the pending journal so recovery does not treat an
+            // unpublished pass as accepted (local edits already landed durably
+            // and re-merge on the next pass).
+            if let Err(e) =
+                apply_local(vault, client, &plan, &physical_files, &mut outcome, progress).await
+            {
+                recovery::discard(vault)?;
+                return Err(e);
+            }
+            match plan
+                .upload_missing(vault, &store_id, client, remote_files, &deferred, progress)
+                .await
+            {
+                Ok(n) => outcome.uploaded += n,
+                Err(e) => {
+                    recovery::discard(vault)?;
+                    return Err(e);
+                }
+            }
             let manifest = Manifest {
                 version: new_version,
                 files: merged.clone(),
@@ -446,41 +475,36 @@ async fn run_sync_requested<S: RemoteStore>(
                 .await?
                 != PutOutcome::Ok
             {
+                recovery::discard(vault)?;
+                base_files = remote_files.clone();
+                local_files = merged.clone();
+                physical_files = merged
+                    .iter()
+                    .filter(|(path, _)| !deferred.contains(*path))
+                    .map(|(path, entry)| (path.clone(), entry.clone()))
+                    .collect();
                 continue;
             }
-            let next_head = HeadPointer {
-                version: new_version,
-                manifest_key,
-                updated_at: now(),
-            };
             let condition = match head_etag {
                 Some(etag) => PutCondition::IfMatch(etag),
                 None => PutCondition::IfNoneMatch,
             };
-            recovery::save(
-                vault,
-                &store_id,
-                &next_head,
-                &cfg.scope,
-                &plan,
-                &physical_files,
-                false,
-            )?;
             if client
                 .put(HEAD_KEY, serde_json::to_vec(&next_head)?, condition)
                 .await?
                 == PutOutcome::PreconditionFailed
             {
-                // Another device won the race. Ink already published durably
-                // becomes the new local truth for the retry; staged bytes were
-                // never applied and their temp files drop here.
+                // Another device won the race. Local files already applied under
+                // the lane become the new local truth for the retry; the winner's
+                // manifest is the new remote baseline.
                 recovery::discard(vault)?;
-                for rel in prepared.applied_ink() {
-                    if let Some(entry) = plan.merged.get(rel) {
-                        physical_files.insert(rel.clone(), entry.clone());
-                        local_files.insert(rel.clone(), entry.clone());
-                    }
-                }
+                base_files = remote_files.clone();
+                local_files = merged.clone();
+                physical_files = merged
+                    .iter()
+                    .filter(|(path, _)| !deferred.contains(*path))
+                    .map(|(path, entry)| (path.clone(), entry.clone()))
+                    .collect();
                 ancestor_version = head_ptr.as_ref().map_or(0, |ptr| ptr.version);
                 ancestor_manifest_key = head_ptr.as_ref().map(|ptr| ptr.manifest_key.clone());
                 continue;
@@ -488,7 +512,6 @@ async fn run_sync_requested<S: RemoteStore>(
             recovery::accept(vault)?;
             next_head
         };
-        prepared.apply(vault, &plan, &physical_files, &mut outcome)?;
         outcome.removed_remote = remote_files
             .keys()
             .filter(|path| !merged.contains_key(*path))
@@ -735,7 +758,13 @@ fn plan_asset_downloads(
 ) -> BTreeSet<String> {
     let mut deferred = BTreeSet::new();
     for (path, entry) in &plan.merged {
-        if availability::asset(path).is_none() || physical.contains_key(path) {
+        let Some((paper, _)) = availability::asset(path) else {
+            continue;
+        };
+        // An explicit fetch verifies the requested paper's blobs even when the
+        // asset is already materialized, so a corrupt remote blob is caught.
+        let forced = requested.is_some_and(|id| paper == id);
+        if physical.contains_key(path) && !forced {
             continue;
         }
         if snapshot::is_scope_excluded(sync_scope, path) {
@@ -1317,6 +1346,70 @@ fn merge_ink(
         merged.to_json().map_err(|e| e.to_string())?.into_bytes(),
         conflicted,
     ))
+}
+
+/// Apply the merged plan locally under the file-mutation lane, BEFORE remote
+/// publication (mobile durability order). Each download/write/delete rechecks
+/// the scanned baseline inside the lane so a cooperating editor's concurrent
+/// save is rejected ("changed during sync") rather than silently overwritten.
+/// Ink replacements fsync before rename and flush their directories (see
+/// `write_atomic`); a failed flush aborts the pass before any upload/HEAD.
+async fn apply_local<S: RemoteStore>(
+    vault: &Path,
+    client: &S,
+    plan: &MergePlan,
+    scanned: &BTreeMap<String, FileEntry>,
+    outcome: &mut SyncOutcome,
+    progress: Progress<'_>,
+) -> Result<(), AppError> {
+    for (from, to) in &plan.preserve_local {
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, from, scanned.get(from))?;
+            ensure_current(vault, to, scanned.get(to))?;
+            fs::copy(vault.join(from), vault.join(to))?;
+            Ok(())
+        })?;
+        outcome.conflict_copies.push(to.clone());
+    }
+    let total = plan.downloads.len();
+    for (i, (rel, entry)) in plan.downloads.iter().enumerate() {
+        progress("download", i + 1, total);
+        let raw = fetch_blob(client, rel, entry)
+            .await?
+            .ok_or_else(|| AppError::message(format!("blob missing for {rel}")))?;
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            write_atomic(vault, rel, &raw)
+        })?;
+        outcome.downloaded += 1;
+    }
+    for (i, (rel, raw)) in plan.writes.iter().enumerate() {
+        progress("download", i + 1, plan.writes.len());
+        crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            write_atomic(vault, rel, raw)
+        })?;
+        outcome.downloaded += 1;
+    }
+    for copy in &plan.mark_conflicts {
+        if !outcome.conflict_copies.contains(copy) {
+            outcome.conflict_copies.push(copy.clone());
+        }
+    }
+    for rel in &plan.delete_local {
+        let removed = crate::fs::with_file_mutation(|| {
+            ensure_current(vault, rel, scanned.get(rel))?;
+            match fs::remove_file(vault.join(rel)) {
+                Ok(()) => Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(e) => Err(AppError::message(format!("delete {rel}: {e}"))),
+            }
+        })?;
+        if removed {
+            outcome.deleted_local += 1;
+        }
+    }
+    Ok(())
 }
 
 async fn fetch_blob<S: RemoteStore>(
