@@ -68,14 +68,18 @@ export const PdfViewModeSwitch = memo(function PdfViewModeSwitch({
 			<legend className="sr-only">{t("pdf.viewMode.label")}</legend>
 			{MODES.map((value) => {
 				const selected = value === mode;
+				// A blocked 对照 used to be a silently dead button; say why instead.
+				const blocked = value === "dual" && dualDisabled;
 				return (
 					<button
 						key={value}
 						type="button"
 						aria-pressed={selected}
-						title={t(HINT_KEYS[value])}
+						title={
+							blocked ? t("pdf.viewMode.dualUnavailable") : t(HINT_KEYS[value])
+						}
 						data-view-mode={value}
-						disabled={disabled || (value === "dual" && dualDisabled)}
+						disabled={disabled || blocked}
 						onClick={() => onSelect(value)}
 						className={cn(
 							"h-5 rounded-[5px] px-1.5 text-caption leading-none font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",

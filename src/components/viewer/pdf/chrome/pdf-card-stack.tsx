@@ -8,7 +8,6 @@ import {
 } from "@/components/viewer/pdf/cards/citation-preview";
 import { PdfCrossrefPreview } from "@/components/viewer/pdf/cards/crossref-preview";
 import { PdfLinkUrlTip } from "@/components/viewer/pdf/cards/link-url-tip";
-import { SelectionMenu } from "@/components/viewer/pdf/cards/selection-menu";
 import { TranslateCard } from "@/components/viewer/pdf/cards/translate-card";
 import { VisualTraceCard } from "@/components/viewer/pdf/cards/visual-trace-card";
 import type { LinkUrlTipState } from "@/components/viewer/pdf/hooks/use-pdf-link-url-tip";
@@ -16,32 +15,13 @@ import type {
 	CardScreenPoint,
 	CitationPreviewState,
 	CrossrefPreviewState,
-	SelectionMenuState,
 } from "@/components/viewer/pdf/types";
 import type { PdfVisualSessionTrace } from "@/lib/pdf/agent-trace";
 import type { PdfAskThread } from "@/lib/pdf/ask";
-import type { HighlightColor } from "@/lib/pdf/highlight/palette";
-import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import type { PdfTranslateRecord } from "@/lib/pdf/translate/types";
-import type { MenuContext } from "@/lib/shell/commands/menu-contributions";
 import type { SelectionTranslateMode } from "@/lib/translate/types";
 
 type PdfCardStackProps = {
-	selectionMenu: {
-		state: SelectionMenuState | null;
-		onHighlight: (color: HighlightColor, shape: PdfTextMarkupKind) => void;
-		onAsk?: () => void;
-		onAddToChat?: () => void;
-		onTranslate: () => void;
-		onCopy?: () => Promise<boolean>;
-		onBookmark?: () => void;
-		onNote?: (shape: PdfTextMarkupKind) => void;
-		/** Hide highlight / translate (no marks/ to persist into); keep Ask. */
-		showHighlight?: boolean;
-		showTranslate?: boolean;
-		/** Passed through to the PDF toolbar. Omitted by other SelectionMenu callers. */
-		contributionContext?: MenuContext;
-	};
 	citationPreview: {
 		state: CitationPreviewState | null;
 		importMenu?: CitationPreviewImportMenu;
@@ -93,13 +73,6 @@ type PdfCardStackProps = {
 	};
 };
 
-/** Stable across scroll re-place; changes when the selection itself changes. */
-function selectionMenuInstanceKey(state: SelectionMenuState): string {
-	const rect = state.anchor.rects[0];
-	if (!rect) return String(state.anchor.page);
-	return `${state.anchor.page}:${rect.x}:${rect.y}:${rect.w}:${rect.h}`;
-}
-
 /**
  * Clip page-anchored cards to the reading area. The wrapper is window-sized
  * (`inset-0`) so the card keeps its client coordinates, and `clip-path` makes
@@ -132,7 +105,6 @@ function PageClip({
  * type scale at any PDF zoom; their screen anchors still follow the page.
  */
 export const PdfCardStack = memo(function PdfCardStack({
-	selectionMenu,
 	citationPreview,
 	crossrefPreview,
 	linkUrlTip,
@@ -147,24 +119,6 @@ export const PdfCardStack = memo(function PdfCardStack({
 
 	return createPortal(
 		<div>
-			{selectionMenu.state ? (
-				<SelectionMenu
-					key={selectionMenuInstanceKey(selectionMenu.state)}
-					screen={selectionMenu.state.screen}
-					onHighlight={selectionMenu.onHighlight}
-					onAsk={selectionMenu.onAsk}
-					onAddToChat={selectionMenu.onAddToChat}
-					onTranslate={selectionMenu.onTranslate}
-					onCopy={selectionMenu.onCopy}
-					onBookmark={selectionMenu.onBookmark}
-					onNote={selectionMenu.onNote}
-					showHighlight={selectionMenu.showHighlight}
-					showTranslate={selectionMenu.showTranslate}
-					selectionText={selectionMenu.state.anchor.quote}
-					contributionContext={selectionMenu.contributionContext}
-				/>
-			) : null}
-
 			{citationPreview.state ? (
 				<PdfCitationPreview
 					screen={citationPreview.state.screen}

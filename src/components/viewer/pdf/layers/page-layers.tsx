@@ -7,12 +7,12 @@
  * Memoized because the scroller re-renders every mounted page whenever its
  * layout changes; without a bail-out a single scroll frame rebuilds ten page
  * subtrees. Props are grouped into bundles the parent memoizes, so the shallow
- * comparison stays maintainable — a flat prop list would make it far too easy
+ * comparison stays maintainable 鈥?a flat prop list would make it far too easy
  * to silently break memoization.
  */
 
 import { useDocumentState } from "@embedpdf/core/react";
-import type { PdfLinkAnnoObject, Rect } from "@embedpdf/models";
+import type { PdfLinkAnnoObject } from "@embedpdf/models";
 import {
 	AnnotationLayer,
 	type BoxedAnnotationRenderer,
@@ -36,11 +36,9 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type RefObject,
 	useCallback,
-	useEffect,
 	useMemo,
 	useRef,
 	useState,
-	useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { PDF_CHROME_CHIP } from "@/components/viewer/pdf/chrome/pdf-chrome-surface";
@@ -49,7 +47,6 @@ import {
 	EMPTY_COMMENTS,
 	EMPTY_PINS,
 	PAGE_LAYER_STYLE,
-	PDF_WORKER_SETTLE_MS,
 	pdfTileDpr,
 } from "@/components/viewer/pdf/constants";
 import { EMBED_PAGE_ATTR } from "@/components/viewer/pdf/coords";
@@ -70,7 +67,6 @@ import { LayoutElementSelectionLayer } from "@/components/viewer/pdf/layers/layo
 import { LayoutTranslateOverlay } from "@/components/viewer/pdf/layers/layout-translate-overlay";
 import { PASSIVE_LINK_RENDERER } from "@/components/viewer/pdf/layers/link-annotation";
 import { PdfInkLayer } from "@/components/viewer/pdf/layers/pdf-ink-layer";
-import { PdfTextSelectionLayer } from "@/components/viewer/pdf/layers/pdf-text-selection-layer";
 import {
 	PASSIVE_HIGHLIGHT_RENDERER,
 	PASSIVE_UNDERLINE_RENDERER,
@@ -133,10 +129,6 @@ import type {
 	PreservedLinkAssignment,
 	TranslateLinkBox,
 } from "@/lib/pdf/layout/translated-links";
-import {
-	subscribeTranslationSelectionBands,
-	translationSelectionBandsFor,
-} from "@/lib/pdf/layout/translation-selection-bands";
 import {
 	pageQuarterTurns,
 	shellFractionToUnrotatedPdf,
@@ -248,96 +240,6 @@ function TranslatedHighlightLayer({
 	);
 }
 
-/**
- * Text-selection highlight tint follows the paper tone (`--pdf-paper-ink` in
- * index.css), not the UI theme: a dark UI theme turns `--primary` near-white,
- * so the band vanished on white / sepia / green paper. Module-level so every
- * page shares one stable value.
- */
-const PDF_TEXT_SELECTION_BACKGROUND = "var(--pdf-paper-ink)";
-const EMPTY_SELECTION_BANDS: readonly PdfAskNormalizedRect[] = [];
-
-/**
- * English draws one rectangle per line under the glyphs. This is that
- * rectangle for a translation drag. It stays under the Chinese, so the
- * characters remain readable, and it is one box so the gap between two
- * characters is not painted twice.
- */
-function TranslationLiveSelection({
-	documentId,
-	pageIndex,
-}: {
-	documentId: string;
-	pageIndex: number;
-}) {
-	const rects = useSyncExternalStore(
-		subscribeTranslationSelectionBands,
-		() => translationSelectionBandsFor(documentId, pageIndex),
-		() => EMPTY_SELECTION_BANDS,
-	);
-	if (!rects.length) return null;
-	return (
-		<div
-			aria-hidden="true"
-			className="pointer-events-none absolute inset-0 z-[5]"
-			style={{ opacity: 0.28, isolation: "isolate" }}
-		>
-			{rects.map((rect) => (
-				<div
-					key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}`}
-					className="pdf-live-selection-band"
-					style={{
-						position: "absolute",
-						left: `${rect.x * 100}%`,
-						top: `${rect.y * 100}%`,
-						width: `${rect.w * 100}%`,
-						height: `${rect.h * 100}%`,
-						background: PDF_TEXT_SELECTION_BACKGROUND,
-					}}
-				/>
-			))}
-		</div>
-	);
-}
-
-/**
- * Keeps a translation selection visible after focus moves into the note chip.
- * Sits with the English selection tint: above the translation paper, under
- * the glyphs, so the characters stay readable.
- */
-function TranslationSelectionVeil({
-	pages,
-	pageIndex,
-}: {
-	pages: SelectionCommentDraft["visiblePages"];
-	pageIndex: number;
-}) {
-	const rects = pages?.find((page) => page.pageIndex === pageIndex)?.rects;
-	if (!rects?.length) return null;
-	return (
-		<div
-			aria-hidden="true"
-			className="pointer-events-none absolute inset-0 z-[5]"
-			style={{ isolation: "isolate", opacity: 0.28 }}
-		>
-			{rects.map((rect) => (
-				<div
-					key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}`}
-					className="pdf-live-selection-band"
-					style={{
-						position: "absolute",
-						left: `${rect.x * 100}%`,
-						top: `${rect.y * 100}%`,
-						width: `${rect.w * 100}%`,
-						height: `${rect.h * 100}%`,
-						background: PDF_TEXT_SELECTION_BACKGROUND,
-					}}
-				/>
-			))}
-		</div>
-	);
-}
-
 /** A mark region pinned to a page (visual draft frame / formula legend frame). */
 /**
  * Anchor geometry of an open ask / translate card. Anchor-only: it keeps its
@@ -423,9 +325,6 @@ export type PdfPageMarksSlice = {
 
 /** Layout-analysis derived overlays (element selection, debug boxes, translations). */
 export type PdfPageLayoutSlice = {
-	selectionStartPageIndex?: number | null;
-	selectionInsertionRegions?: readonly PdfLayoutRegion[];
-	selectionTextExclusionsByPage?: ReadonlyMap<number, readonly Rect[]>;
 	/** Post-merge elements, every kind, largest first. Empty when analysis is absent. */
 	selectableRegionsByPage: ReadonlyMap<number, PdfLayoutRegion[]>;
 	rawRegionsByPage: ReadonlyMap<number, PdfLayoutRegion[]>;
@@ -466,7 +365,6 @@ export type PdfPageModeSlice = {
 	inkEditing?: boolean;
 	regionSelecting: boolean;
 	visualCropPending: boolean;
-	visualDraftOpen: boolean;
 	elementSelecting?: boolean;
 	/**
 	 * Dual-pane translation companion: native translated selection and saved
@@ -497,7 +395,7 @@ export type PdfPageHandlers = {
 		clientPoint?: ScreenPoint | null,
 	) => void;
 	onRegionSelect: (page: number, region: PdfAskNormalizedRect) => void;
-	/** Mobile lasso: click a figure / table / algorithm / formula hit target → crop + draft card. */
+	/** Mobile lasso: click a figure / table / algorithm / formula hit target 鈫?crop + draft card. */
 	onLayoutRegionClick?: (region: PdfLayoutRegion) => void;
 	onTogglePageLayoutTranslate: (pageIndex: number) => void;
 	/** Paragraph warning: retry a failed page's blocks without hiding it. */
@@ -543,7 +441,7 @@ export type PdfPageHandlers = {
  * with `useAnnotationCapability()` here: the slim dual-pane translation
  * viewer can render `PdfPageLayers` without registering the annotation plugin,
  * and that hook throws ("Plugin annotation not found") when the plugin is
- * absent — hooks run before the `mode.translationOnly` early return.
+ * absent 鈥?hooks run before the `mode.translationOnly` early return.
  */
 type AnnotationCapabilityProvides = ReturnType<
 	typeof useAnnotationCapability
@@ -605,10 +503,10 @@ type PageTranslateTabProps = {
  * margin, under the floating left toolbar (the toolbar owns the top-left
  * corner). It is pinned to the page, not the viewport: the tab scrolls with
  * its page and disappears with it instead of being clamped to the visible
- * edge. It stays a labelled button, not a status badge: `翻译本页` translates
- * this page, `隐藏本页` hides a page that already shows a translation. While a
- * page works the tab keeps the loading ring and reports the stage (`翻译中` /
- * `排版中`), so the page also knows what it waits for.
+ * edge. It stays a labelled button, not a status badge: `缈昏瘧鏈〉` translates
+ * this page, `闅愯棌鏈〉` hides a page that already shows a translation. While a
+ * page works the tab keeps the loading ring and reports the stage (`缈昏瘧涓璥 /
+ * `鎺掔増涓璥), so the page also knows what it waits for.
  */
 const PageTranslateTab = memo(function PageTranslateTab({
 	pageIndex,
@@ -743,46 +641,6 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 	 * page selectable the moment the user reaches for it while leaving
 	 * off-screen buffer pages unloaded.
 	 */
-	const [selectionArmed, setSelectionArmed] = useState(false);
-	/** Show the in-page translate/hide tab only while the pointer is on this page. */
-	const [pageHovered, setPageHovered] = useState(false);
-	const armSelection = () => {
-		if (!selectionArmed) setSelectionArmed(true);
-	};
-	/**
-	 * Prefetch selection geometry only after the page stays visible. Arming on
-	 * the first intersection queued `getPageGeometry` for every page a fling
-	 * crosses, and that extraction shares the single PDFium worker with the
-	 * raster. Pointer entry still arms immediately.
-	 */
-	useEffect(() => {
-		if (selectionArmed) return;
-		const el = pageShellRef.current;
-		if (!el) return;
-		if (typeof IntersectionObserver === "undefined") {
-			setSelectionArmed(true);
-			return;
-		}
-		let timer = 0;
-		const observer = new IntersectionObserver((entries) => {
-			const visible = entries.some((entry) => entry.isIntersecting);
-			if (!visible) {
-				window.clearTimeout(timer);
-				timer = 0;
-				return;
-			}
-			if (timer) return;
-			timer = window.setTimeout(() => {
-				observer.disconnect();
-				setSelectionArmed(true);
-			}, PDF_WORKER_SETTLE_MS);
-		});
-		observer.observe(el);
-		return () => {
-			window.clearTimeout(timer);
-			observer.disconnect();
-		};
-	}, [selectionArmed]);
 	const pageNumber = pageIndex + 1;
 	const selectableOnPage =
 		mode.elementSelecting && !mode.plainViewer
@@ -831,6 +689,8 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 	const activeSearchDocumentId = searchDocumentId ?? docId;
 	const searchAboveTranslation =
 		translationVisible || activeSearchDocumentId !== docId;
+	/** Show the in-page translate/hide tab only while the pointer is on this page. */
+	const [pageHovered, setPageHovered] = useState(false);
 	const shownComments = translationVisible
 		? comments.map((comment) => commentForVisibleTranslation(comment, true))
 		: comments;
@@ -1029,10 +889,6 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 	};
 
 	const handlePagePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-		// Any movement over the page is selection intent: arm the geometry load
-		// even if `pointerenter` was missed (e.g. a page scrolled under a
-		// stationary cursor).
-		armSelection();
 		if ((event.target as Element | null)?.closest("[data-pdf-chrome]")) return;
 		const comment = textCommentAtPoint(event.clientX, event.clientY);
 		if (comment?.id === hoveredCommentId) return;
@@ -1322,12 +1178,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					<PdfSentenceHighlight docId={docId} pageIndex={pageIndex} />
 				) : null}
 				{translateOverlay}
-				<TranslationLiveSelection documentId={docId} pageIndex={pageIndex} />
 				<TranslatedHighlightLayer paints={translatedPaints} />
-				<TranslationSelectionVeil
-					pages={marks.selectionCommentDraft?.visiblePages}
-					pageIndex={pageIndex}
-				/>
 				{selectionDraftOnPage ? (
 					<CommentCardsLayer
 						items={EMPTY_COMMENTS}
@@ -1399,7 +1250,6 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 			)}
 			style={{ width, height }}
 			onPointerEnter={() => {
-				armSelection();
 				setPageHovered(true);
 			}}
 			onPointerMove={handlePagePointerMove}
@@ -1502,7 +1352,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				/>
 			) : null}
 			{/*
-			 * EmbedPDF raw bbox layer — kept mounted for plugin state, but
+			 * EmbedPDF raw bbox layer 鈥?kept mounted for plugin state, but
 			 * visibility is forced off (see effect). Store-backed boxes below.
 			 */}
 			<LayoutAnalysisLayer
@@ -1521,27 +1371,6 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 					heightPx={frameHeight}
 					className="z-[5]"
 				>
-					{/* Keep one SDK geometry/selection registration for pen/finger holds.
-					    The viewport's native input boundary consumes ink gestures.
-					    The mobile marquee disarms text selection while armed. */}
-					{mode.regionSelecting ? null : (
-						<PdfTextSelectionLayer
-							documentId={docId}
-							pageIndex={pageIndex}
-							background={PDF_TEXT_SELECTION_BACKGROUND}
-							armed={selectionArmed}
-							insertionRegions={layout.selectionInsertionRegions}
-							selectionStartPageIndex={layout.selectionStartPageIndex}
-							excludedTextRects={layout.selectionTextExclusionsByPage?.get(
-								pageIndex,
-							)}
-							draftPages={
-								marks.selectionCommentDraft?.visiblePages?.length
-									? undefined
-									: marks.selectionCommentDraft?.pages
-							}
-						/>
-					)}
 					{/*
 					 * AnnotationLayer is not inverted with the page rasters. In PDF dark
 					 * mode its bright highlight colors look glaring on dark paper, so
@@ -1595,7 +1424,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 
 				{/*
 				 * Debug Eye overlay: pre-merge detections (all kinds, no NMS),
-				 * score ≥ LAYOUT_SIDEBAR_MIN_SCORE (30%). Label = kind + conf.
+				 * score 鈮?LAYOUT_SIDEBAR_MIN_SCORE (30%). Label = kind + conf.
 				 */}
 				{layout.layoutOverlayVisible
 					? layout.rawRegionsByPage.get(pageIndex)?.map((region) => {
@@ -1646,14 +1475,9 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 						style={TRANSLATION_SEARCH_LAYER_STYLE}
 					/>
 				) : null}
-				<TranslationLiveSelection documentId={docId} pageIndex={pageIndex} />
 				{translationVisible ? (
 					<TranslatedHighlightLayer paints={translatedPaints} />
 				) : null}
-				<TranslationSelectionVeil
-					pages={marks.selectionCommentDraft?.visiblePages}
-					pageIndex={pageIndex}
-				/>
 				{/*
 				 * Selection-translate spans stay tinted after the result card
 				 * closes, above the opaque translation paper (z-3) and under
@@ -1715,7 +1539,7 @@ export const PdfPageLayers = memo(function PdfPageLayers({
 				) : null}
 				{/*
 				 * Element selection. Frames are pointer-events: none; the layer
-				 * hit-tests the page shell. Hidden while ⌘. marquee is active and
+				 * hit-tests the page shell. Hidden while 鈱? marquee is active and
 				 * on PDFs outside papers/. Absent analysis yields no regions.
 				 */}
 				{!immersiveReading &&

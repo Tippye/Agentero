@@ -47,7 +47,6 @@ let render: ReturnType<typeof vi.fn>,
 	apply: ReturnType<typeof vi.fn>;
 let documents: Map<string, ReturnType<typeof documentObject>>;
 const onPrompt = vi.fn(),
-	onVisualDraft = vi.fn(),
 	clear = vi.fn(),
 	setSelectionMenu = vi.fn();
 let engine: { renderPageRect: ReturnType<typeof vi.fn> };
@@ -69,9 +68,7 @@ function Harness({
 		selectionCap: { clear } as never,
 		interactionCap: null,
 		setSelectionMenu,
-		onVisualDraft,
 		onRegionPrompt: callback ? onPrompt : undefined,
-		screenPointForRegion: () => ({ x: 10, y: 20 }),
 	});
 	return createElement(PdfInkToolbar, {
 		editor,
@@ -198,7 +195,6 @@ describe("lasso to reviewed source-PDF context draft", () => {
 			image: { data: "iVBORw==", mimeType: "image/png" },
 		});
 		expect(apply).not.toHaveBeenCalled();
-		expect(onVisualDraft).not.toHaveBeenCalled();
 		expect(framing.visualCropPending).toBe(false);
 	});
 
@@ -298,20 +294,18 @@ describe("lasso to reviewed source-PDF context draft", () => {
 		expect(onPrompt.mock.calls[0][0].page).toBe(2);
 	});
 
-	it("keeps the existing visual-note destination separate from prompt drafts", async () => {
-		await act(() => framing.beginVisualAnnotation(1, region));
-		expect(onVisualDraft).toHaveBeenCalledWith({
-			screen: { x: 10, y: 20 },
-			page: 1,
-			region: {
-				x: 0.2,
-				y: 0.2,
-				w: expect.closeTo(0.5, 10),
-				h: expect.closeTo(0.4, 10),
-			},
-			image: { data: "iVBORw==", mimeType: "image/png" },
-		});
-		expect(onPrompt).not.toHaveBeenCalled();
+	it("keeps framed regions on the prompt destination only", async () => {
+		// A drawn region never creates a note / visual mark: the removed
+		// onVisualDraft + beginVisualAnnotation chain must not come back.
+		expect(Object.keys(framing).sort()).toEqual([
+			"beginRegionPrompt",
+			"regionSelecting",
+			"toggleRegionSelect",
+			"visualCropPending",
+			"visualCropRegion",
+		]);
+		await act(() => framing.beginRegionPrompt(1, region));
+		expect(onPrompt).toHaveBeenCalledOnce();
 	});
 
 	it("reports crop failure without emitting a draft, then releases the guard for an explicit retry", async () => {
@@ -322,7 +316,6 @@ describe("lasso to reviewed source-PDF context draft", () => {
 		});
 		await act(() => framing.beginRegionPrompt(1, region));
 		expect(onPrompt).not.toHaveBeenCalled();
-		expect(onVisualDraft).not.toHaveBeenCalled();
 		expect(framing.visualCropPending).toBe(false);
 		expect(mocks.notifyError).toHaveBeenCalledWith("pdfExplain.cropFailed", {
 			description: "renderer failed",

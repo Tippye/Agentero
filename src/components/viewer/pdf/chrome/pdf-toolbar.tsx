@@ -1,21 +1,14 @@
 import type { PdfEngine } from "@embedpdf/models";
 import {
 	Columns2,
-	Download,
 	Highlighter,
+	Languages,
 	Library,
 	Loader2,
-	ScanSearch,
 } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
 	Tooltip,
 	TooltipContent,
@@ -32,7 +25,6 @@ import { cn } from "@/lib/core/utils";
 import type { PdfViewMode } from "@/lib/pdf/view-mode";
 
 type PdfToolbarProps = {
-	onExportTranslatedPdf?: (dual?: boolean) => void;
 	engine: PdfEngine | null;
 	layoutTranslateRunning: boolean;
 	/** Final corrected preview is still building after items settled. */
@@ -69,17 +61,10 @@ type PdfToolbarProps = {
 	onImportToLibrary?: () => void;
 	/** True while the import is running. */
 	importBusy?: boolean;
-	/** Mobile lasso marquee armed (mobile-paper-context); desktop omits this. */
-	regionSelecting?: boolean;
-	/** A region crop is in flight; disable re-entry. */
-	visualCropPending?: boolean;
-	/** Toggle the mobile lasso marquee; absent on desktop surfaces. */
-	onToggleRegionSelect?: () => void;
 };
 
 /** Top-right toolbar: reading view switch, bulk translate and smart highlight. */
 export const PdfToolbar = memo(function PdfToolbar({
-	onExportTranslatedPdf,
 	engine,
 	layoutTranslateRunning,
 	layoutTranslatePreparing = false,
@@ -99,13 +84,10 @@ export const PdfToolbar = memo(function PdfToolbar({
 	isRemotePaper = false,
 	onImportToLibrary,
 	importBusy = false,
-	regionSelecting = false,
-	visualCropPending = false,
-	onToggleRegionSelect,
 }: PdfToolbarProps) {
 	const { t } = useTranslation("viewer");
-	// 原文 has no translation task, so none of its progress / failure / export
-	// surfaces belong there. They appear only in 译文 and 对照.
+	// 原文 has no translation task, so none of its progress / failure /
+	// export surfaces belong there. They appear only in 译文 and 对照.
 	const translationView = viewMode !== "original";
 
 	const translateMeter = useTranslateMeter({
@@ -169,33 +151,23 @@ export const PdfToolbar = memo(function PdfToolbar({
 							<PdfTranslatePartialButton partial={layoutTranslatePartial} />
 						</div>
 					) : null}
-					{translationView && onExportTranslatedPdf ? (
+					{translationView && !isRemotePaper ? (
+						/* Export lives on the handwriting toolbar now. This is a
+						   non-interactive marker only: it tells the reader the
+						   current view is the translated/compare surface. */
 						<div className={asideClass} inert={meterOpen}>
 							<div className="min-w-0 overflow-hidden">
-								<DropdownMenu>
-									<DropdownMenuTrigger asChild>
-										<Button
-											type="button"
-											size="icon-xs"
-											variant="ghost"
-											aria-label={t("pdf.layoutTranslate.exportPdf")}
-										>
-											<Download className="size-3.5" />
-										</Button>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent>
-										<DropdownMenuItem
-											onSelect={() => onExportTranslatedPdf(false)}
-										>
-											{t("pdf.layoutTranslate.exportPdf")}
-										</DropdownMenuItem>
-										<DropdownMenuItem
-											onSelect={() => onExportTranslatedPdf(true)}
-										>
-											{t("pdf.layoutTranslate.exportDualPdf")}
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
+								<Button
+									type="button"
+									size="icon-xs"
+									variant="ghost"
+									disabled
+									aria-hidden
+									tabIndex={-1}
+									className="shrink-0 self-center text-muted-foreground"
+								>
+									<Languages className="size-3.5" />
+								</Button>
 							</div>
 						</div>
 					) : null}
@@ -265,31 +237,6 @@ export const PdfToolbar = memo(function PdfToolbar({
 								disabled={!engine}
 								dualDisabled={!canCompare}
 							/>
-						</div>
-					) : null}
-					{!isRemotePaper && onToggleRegionSelect ? (
-						<div className={asideClass} inert={meterOpen}>
-							<div className="min-w-0 overflow-hidden">
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<Button
-											type="button"
-											size="icon-xs"
-											variant={regionSelecting ? "secondary" : "ghost"}
-											className="shrink-0 self-center"
-											aria-label={t("ink.lasso")}
-											aria-pressed={regionSelecting}
-											disabled={!engine || visualCropPending}
-											onClick={onToggleRegionSelect}
-										>
-											<ScanSearch className="size-3.5" aria-hidden />
-										</Button>
-									</TooltipTrigger>
-									<TooltipContent side="bottom">
-										{t("ink.lasso")}
-									</TooltipContent>
-								</Tooltip>
-							</div>
 						</div>
 					) : null}
 					{!isRemotePaper && onToggleTranslationLayout ? (
