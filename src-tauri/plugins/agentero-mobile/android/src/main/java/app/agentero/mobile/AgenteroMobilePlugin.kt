@@ -30,6 +30,9 @@ class AgenteroMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val stylus by lazy { StylusAdapterRegistry(activity, this) }
 
     override fun load(webView: WebView) {
+        // Typesetting a translated PDF needs embedded font bytes; stage the
+        // bundled fallback off the UI thread before the reader can ask for it.
+        ReflowFontAssets.warm(activity.applicationContext)
         activity.runOnUiThread {
             controller.attach(activity, events); stylus.attach(webView)
             // Android 14+ turns barrel-button presses into KeyEvents and sends
