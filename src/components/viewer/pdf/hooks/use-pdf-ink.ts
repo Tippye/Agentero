@@ -13,6 +13,11 @@ const retained = new Map<
 	string,
 	{ controller: InkController; readers: number }
 >();
+// Editable panes (original + translated companion) share one InkEditor per
+// paper so the single original toolbar also controls ink on the translated
+// page. Read-only embeds never join this map.
+const sharedEditors = new Map<string, InkEditor>();
+
 const IDLE: InkOverview = {
 	dirty: false,
 	saving: false,
@@ -30,12 +35,22 @@ export function usePdfInk({
 	enabled,
 	editable,
 	isActive,
+	sharedEditor = false,
+	controlsMode = true,
 	onInkDirtyChange,
 	onInkModeChange,
 }: Pick<
 	PdfViewerProps,
 	"vaultPath" | "paperRelPath" | "onInkDirtyChange" | "onInkModeChange"
-> & { enabled: boolean; editable: boolean; isActive: boolean }) {
+> & {
+	enabled: boolean;
+	editable: boolean;
+	isActive: boolean;
+	/** Reuse one tool/selection state for both panes of the same paper. */
+	sharedEditor?: boolean;
+	/** A shared editor is driven by the toolbar owner; panes must not reset it. */
+	controlsMode?: boolean;
+}) {
 	const { t } = useTranslation("viewer");
 	const folder = paperRelPath?.replace(/\\/g, "/");
 	const key =
@@ -66,8 +81,18 @@ export function usePdfInk({
 		}
 		// Persistence is shared per paper; tool/selection state belongs to this
 		// viewer so a read-only note embed cannot disarm the active reader's pen.
+		// Editable panes explicitly opt into one shared editor so the original
+		// toolbar is the only toolbar and drives ink on both documents.
+		if (sharedEditor && key) {
+			let shared = sharedEditors.get(key);
+			if (!shared) {
+				shared = new InkEditor(value.controller);
+				sharedEditors.set(key, shared);
+			}
+			return shared;
+		}
 		return new InkEditor(value.controller);
-	}, [key, vaultPath, folder]);
+	}, [key, vaultPath, folder, sharedEditor]);
 	const overview = useSyncExternalStore(
 		editor?.controller.subscribe ?? noopSubscribe,
 		editor?.controller.getOverview ?? idle,
@@ -115,8 +140,9 @@ export function usePdfInk({
 		return editor?.subscribe(report);
 	}, [editor, editable, isActive]);
 	useEffect(() => {
-		if (!editable || !isActive) editor?.setMode("read");
-	}, [editable, isActive, editor]);
+		if (!controlsMode || !editable || !isActive) return;
+		editor?.setMode("read");
+	}, [editable, isActive, editor, controlsMode]);
 	useEffect(() => {
 		let entry = key ? retained.get(key) : undefined;
 		if (!entry && key && editor) {
@@ -128,8 +154,10 @@ export function usePdfInk({
 			editor?.cancel();
 			callbacks.current.onInkModeChange?.(false);
 			if (entry) entry.readers--;
-			if (key && entry?.readers === 0 && !entry.controller.getOverview().dirty)
-				retained.delete(key);
+			if (key && entry?.readers === 0) {
+				if (!entry.controller.getOverview().dirty) retained.delete(key);
+				sharedEditors.delete(key);
+			}
 		};
 	}, [key, editor]);
 	useEffect(() => {
