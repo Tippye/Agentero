@@ -37,7 +37,7 @@ vi.mock("@embedpdf/plugin-document-manager/react", () => ({
 	useDocumentManagerCapability: () => ({ provides: null }),
 }));
 vi.mock("@embedpdf/plugin-interaction-manager/react", () => ({
-	useInteractionManagerCapability: () => {},
+	useInteractionManagerCapability: () => ({ provides: null }),
 	GlobalPointerProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@embedpdf/plugin-scroll/react", () => ({
@@ -46,9 +46,11 @@ vi.mock("@embedpdf/plugin-scroll/react", () => ({
 }));
 vi.mock("@embedpdf/plugin-viewport/react", () => ({
 	useViewportElement: () => null,
+	useViewportCapability: () => ({ provides: null }),
 }));
 vi.mock("@embedpdf/plugin-zoom/react", () => ({
 	useZoom: () => ({ state: { zoomLevel: 1 } }),
+	useZoomCapability: () => ({ provides: null }),
 	ZoomGestureWrapper: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/components/viewer/pdf/engine-provider", () => ({
