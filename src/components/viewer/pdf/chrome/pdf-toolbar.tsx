@@ -1,4 +1,4 @@
-import type { PdfEngine } from "@embedpdf/models";
+﻿import type { PdfEngine } from "@embedpdf/models";
 import {
 	Columns2,
 	Highlighter,
@@ -40,11 +40,11 @@ type PdfToolbarProps = {
 	/** Partial-translation entry; hidden while the meter is running. */
 	layoutTranslatePartial?: PdfLayoutTranslatePartial | null;
 	/**
-	 * 0–1 fill. Stays under full while the reflow preview is still blank.
+	 * 0鈥? fill. Stays under full while the reflow preview is still blank.
 	 * Null before the total is known.
 	 */
 	layoutTranslateProgress?: number | null;
-	/** Pages done ÷ pages in the current stage, when the stage has a count. */
+	/** Pages done 梅 pages in the current stage, when the stage has a count. */
 	layoutTranslatePageCounts?: { done: number; total: number } | null;
 	onToggleLayoutTranslate?: () => void;
 	/** Desktop dual-pane layout control: open / close the translation pane. */
@@ -86,8 +86,8 @@ export const PdfToolbar = memo(function PdfToolbar({
 	importBusy = false,
 }: PdfToolbarProps) {
 	const { t } = useTranslation("viewer");
-	// 原文 has no translation task, so none of its progress / failure /
-	// export surfaces belong there. They appear only in 译文 and 对照.
+	// 鍘熸枃 has no translation task, so none of its progress / failure /
+	// export surfaces belong there. They appear only in 璇戞枃 and 瀵圭収.
 	const translationView = viewMode !== "original";
 
 	const translateMeter = useTranslateMeter({
@@ -237,31 +237,6 @@ export const PdfToolbar = memo(function PdfToolbar({
 								disabled={!engine}
 								dualDisabled={!canCompare}
 							/>
-						</div>
-					) : null}
-					{!isRemotePaper && onToggleTranslationLayout ? (
-						<div className={asideClass} inert={meterOpen}>
-							<div className="min-w-0 overflow-hidden">
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<Button
-											type="button"
-											size="icon-xs"
-											variant={translationLayoutActive ? "secondary" : "ghost"}
-											className="shrink-0 self-center"
-											aria-label={t("pdf.layoutTranslate.dualPane")}
-											aria-pressed={translationLayoutActive}
-											disabled={!engine}
-											onClick={onToggleTranslationLayout}
-										>
-											<Columns2 className="size-3.5" aria-hidden />
-										</Button>
-									</TooltipTrigger>
-									<TooltipContent side="bottom">
-										{t("pdf.layoutTranslate.dualPane")}
-									</TooltipContent>
-								</Tooltip>
-							</div>
 						</div>
 					) : null}
 					{!isRemotePaper && onToggleTranslationLayout ? (
