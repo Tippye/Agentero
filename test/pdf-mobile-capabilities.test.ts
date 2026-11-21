@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pdfViewerCapabilities } from "@/components/viewer/pdf/capabilities";
 import { SelectionMenu } from "@/components/viewer/pdf/cards/selection-menu";
 import { usePdfLayoutRun } from "@/components/viewer/pdf/hooks/use-pdf-layout-run";
-import { usePdfSelectionActions } from "@/components/viewer/pdf/hooks/use-pdf-selection-actions";
 
 const mocks = vi.hoisted(() => ({
 	mobile: false,
@@ -126,50 +125,6 @@ describe("PDF viewer host capabilities", () => {
 		expect(html).toContain('aria-label="selection.translate T"');
 		expect(html).not.toContain("selection.addToChat");
 		expect(html).not.toContain("selection.chatActions");
-	});
-
-	it("blocks stale chat callbacks and the quick-chat shortcut while preserving highlight writes", async () => {
-		const startFromAnchor = vi.fn();
-		const createHighlights = vi.fn().mockReturnValue([]);
-		let actions: ReturnType<typeof usePdfSelectionActions> | undefined;
-		function Harness() {
-			actions = usePdfSelectionActions({
-				capabilities: pdfViewerCapabilities("mobile"),
-				selectionMenu: {
-					screen: { x: 1, y: 1 },
-					anchor: {
-						page: 1,
-						rects: [],
-						quote: "keep this quote",
-						trigger: "selection",
-					},
-					pages: [
-						{
-							pageIndex: 0,
-							rect: { origin: { x: 0, y: 0 }, size: { width: 1, height: 1 } },
-							segmentRects: [],
-						},
-					],
-				},
-				closeSelectionMenu: vi.fn(),
-				createHighlights,
-				updateHighlightComment: vi.fn(),
-				docId: "mobile-paper",
-				startFromAnchor,
-				translateSelection: vi.fn(),
-				paperAbsPath: "/vault/papers/a",
-				paperRelPath: "papers/a",
-			});
-			return null;
-		}
-		await act(() => root.render(createElement(Harness)));
-		actions?.handleMenuAsk();
-		actions?.handleMenuAddToChat();
-		expect(mocks.quickChatArmed?.()).toBe(false);
-		expect(startFromAnchor).not.toHaveBeenCalled();
-		expect(mocks.chat).not.toHaveBeenCalled();
-		actions?.handleHighlight("yellow");
-		expect(createHighlights).toHaveBeenCalledOnce();
 	});
 
 	it("only enqueues mobile parsing after a manual action, keeping the job outside reader teardown", async () => {

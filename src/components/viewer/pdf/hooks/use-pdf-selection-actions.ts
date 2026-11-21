@@ -1,29 +1,5 @@
-import {
-	normalizeQuoteContext,
-	quoteContextFromText,
-} from "@/lib/agent/selection-context";
-import { layoutAnalysisStore } from "@/lib/pdf/layout/store";
-/**
- * Selection actions (highlight / note / copy / ask / add-to-chat / translate).
- *
- * The floating toolbar opens actions; notes are edited in the right rail.
- * Copy leaves the toolbar open.
- * Detection and menu state stay in {@link usePdfTextSelection}; each action's
- * real work belongs to its own cluster.
- */
-
 import type { FormattedSelection } from "@embedpdf/plugin-selection/react";
-import { useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
-import { addSelectionToChat } from "@/components/selection/add-selection-to-chat";
-import { useSelectionQuickChat } from "@/components/selection/use-selection-quick-chat";
-import {
-	type PdfViewerCapabilities,
-	pdfViewerCapabilities,
-} from "@/components/viewer/pdf/capabilities";
-import type { SelectionMenuState } from "@/components/viewer/pdf/types";
-import { copyTextToClipboard } from "@/lib/core/clipboard";
-import type { PdfAskAnchor } from "@/lib/pdf/ask/types";
+import { useCallback } from "react";
 import {
 	DEFAULT_HIGHLIGHT_COLOR,
 	type HighlightColor,
@@ -31,12 +7,18 @@ import {
 import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import type { VisibleSelectionPage } from "@/lib/pdf/layout/visible-selection-rects";
 
+/**
+ * Quote-based note action.
+ *
+ * The PDF text selection toolbar was removed, so the only remaining caller is
+ * the region/element selection path: framing a region or picking a layout
+ * element opens the note editor, and committing that draft must create the
+ * highlight plus its comment. Highlight colours, ask, add-to-chat, translate
+ * and copy each live with their own owners
+ * (`layout-element-actions.tsx`, `use-pdf-selection-translate`, …).
+ */
 export type UsePdfSelectionActionsOptions = {
-	capabilities?: PdfViewerCapabilities;
 	runAnnotationBatch: (action: () => void) => void;
-	/** Placed menu; every action no-ops when null. */
-	selectionMenu: SelectionMenuState | null;
-	closeSelectionMenu: () => void;
 	/** Highlights cluster writer. */
 	createHighlights: (
 		pages: FormattedSelection[],
@@ -51,20 +33,13 @@ export type UsePdfSelectionActionsOptions = {
 		id: string,
 		comment: string,
 	) => void;
-	docId: string;
-	/** Ask cluster entry (creates an empty thread from the anchor). */
-	startFromAnchor: (anchor: PdfAskAnchor, translation?: string) => void;
-	/** Translate cluster entry (creates the record and starts the run). */
-	translateSelection: (anchor: PdfAskAnchor) => void;
-	paperRelPath: string | null;
-	paperAbsPath: string | null;
 };
 
 export type PdfSelectionActions = {
-	handleHighlight: (color: HighlightColor, shape: PdfTextMarkupKind) => void;
 	/**
-	 * Create a highlight + comment from a snapped selection draft. Used by the
-	 * right-rail editor so typing can survive EmbedPDF clearing the live selection.
+	 * Create a highlight + comment from a snapped note draft. Used by the
+	 * region/element note editor so typing survives the page selection
+	 * clearing.
 	 */
 	handleCommitSelectionNote: (
 		draft: {
@@ -75,49 +50,13 @@ export type PdfSelectionActions = {
 		},
 		comment: string,
 	) => void;
-	handleMenuAsk: () => void;
-	handleMenuAddToChat: () => void;
-	handleMenuTranslate: () => void;
-	/** Copies without a success toast. False when there is nothing to copy or the write fails. */
-	handleMenuCopy: () => Promise<boolean>;
 };
 
 export function usePdfSelectionActions({
-	capabilities = pdfViewerCapabilities(),
 	runAnnotationBatch,
-	selectionMenu,
-	closeSelectionMenu,
 	createHighlights,
 	updateHighlightComment,
-	docId,
-	startFromAnchor,
-	translateSelection,
-	paperRelPath,
-	paperAbsPath,
 }: UsePdfSelectionActionsOptions): PdfSelectionActions {
-	// The right-rail note editor lives inside the page DOM. EmbedPDF often
-	// clears the live selection on pointerdown before React re-renders, so
-	// action handlers read this snapshot instead of the possibly-null state.
-	const { t } = useTranslation("viewer");
-	const selectionMenuRef = useRef(selectionMenu);
-	selectionMenuRef.current = selectionMenu;
-
-	const handleHighlight = useCallback(
-		(color: HighlightColor, shape: PdfTextMarkupKind) => {
-			const menu = selectionMenuRef.current;
-			if (!menu?.pages.length) return;
-			createHighlights(
-				menu.pages,
-				color,
-				menu.anchor.quote ?? "",
-				menu.visiblePages,
-				shape,
-			);
-			closeSelectionMenu();
-		},
-		[createHighlights, closeSelectionMenu],
-	);
-
 	const handleCommitSelectionNote = useCallback(
 		(
 			draft: {
@@ -139,108 +78,12 @@ export function usePdfSelectionActions({
 					draft.shape,
 				);
 				const first = created[0];
-				closeSelectionMenu();
 				if (!first) return;
 				updateHighlightComment(first.pageIndex, first.id, trimmed);
 			});
 		},
-		[
-			createHighlights,
-			updateHighlightComment,
-			closeSelectionMenu,
-			runAnnotationBatch,
-		],
+		[createHighlights, updateHighlightComment, runAnnotationBatch],
 	);
 
-	const handleMenuAsk = useCallback(() => {
-		if (!capabilities.ask) return;
-		const menu = selectionMenuRef.current;
-		if (!menu) return;
-		const translatedRects = menu.visiblePages?.find(
-			(page) => page.pageIndex === menu.anchor.page - 1,
-		)?.rects;
-		const anchor =
-			translatedRects && translatedRects.length > 0
-				? { ...menu.anchor, translatedRects }
-				: menu.anchor;
-		const translation = menu.pairedTranslation;
-		closeSelectionMenu();
-		startFromAnchor(anchor, translation);
-	}, [capabilities.ask, startFromAnchor, closeSelectionMenu]);
-
-	// ⌘K Quick chat — only while this viewer's selection toolbar is armed.
-	useSelectionQuickChat(
-		() => capabilities.ask && selectionMenuRef.current != null,
-		handleMenuAsk,
-	);
-
-	const handleMenuAddToChat = useCallback(() => {
-		if (!capabilities.addToChat) return;
-		const menu = selectionMenuRef.current;
-		if (!menu) return;
-		const anchor = menu.anchor;
-		const quote = anchor.quote?.trim();
-		const paired = menu.pairedTranslation;
-		closeSelectionMenu();
-		if (!quote) return;
-		const regions =
-			layoutAnalysisStore.getState().byDocument[docId]?.regions ?? [];
-		const matches = regions.filter(
-			(region) =>
-				region.pageIndex === anchor.page - 1 && region.text?.includes(quote),
-		);
-		const regionContext =
-			matches.length === 1
-				? quoteContextFromText(matches[0]?.text ?? "", quote)
-				: { status: "unavailable" as const };
-		const context = paired
-			? normalizeQuoteContext({ ...regionContext, translation: paired })
-			: regionContext;
-		// Pin the quote directly: no intermediate comment step. Page geometry
-		// travels with the chip so the next Agent turn can write its pin.
-		addSelectionToChat({
-			text: quote,
-			sourcePath: paperRelPath ?? paperAbsPath ?? "PDF",
-			origin: "pdf",
-			context,
-			page: anchor.page,
-			rects: anchor.rects,
-			paperAbsPath: paperAbsPath ?? undefined,
-		});
-	}, [
-		capabilities.addToChat,
-		closeSelectionMenu,
-		docId,
-		paperRelPath,
-		paperAbsPath,
-	]);
-
-	const handleMenuTranslate = useCallback(() => {
-		const menu = selectionMenuRef.current;
-		if (!menu || menu.fromTranslation) return;
-		const anchor = menu.anchor;
-		closeSelectionMenu();
-		translateSelection(anchor);
-	}, [closeSelectionMenu, translateSelection]);
-
-	const handleMenuCopy = useCallback(async () => {
-		const menu = selectionMenuRef.current;
-		if (!menu) return false;
-		const quote = (menu.copyText ?? menu.anchor.quote)?.trim();
-		if (!quote) return false;
-		// Leave the toolbar and the PDFium selection in place. The button
-		// swaps to a check; do not toast success or clear the selection.
-		return copyTextToClipboard(quote, {
-			errorMessage: t("selection.copyFailed"),
-		});
-	}, [t]);
-
-	return {
-		handleHighlight,
-		handleCommitSelectionNote,
-		handleMenuAsk,
-		handleMenuAddToChat,
-		handleMenuTranslate,
-		handleMenuCopy,
-	};
+	return { handleCommitSelectionNote };
 }

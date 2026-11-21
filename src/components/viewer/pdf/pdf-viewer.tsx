@@ -31,10 +31,7 @@ import {
 	useScroll,
 } from "@embedpdf/plugin-scroll/react";
 import { SearchPluginPackage, useSearch } from "@embedpdf/plugin-search/react";
-import {
-	SelectionPluginPackage,
-	useSelectionCapability,
-} from "@embedpdf/plugin-selection/react";
+import { SelectionPluginPackage } from "@embedpdf/plugin-selection/react";
 import { SpreadMode, SpreadPluginPackage } from "@embedpdf/plugin-spread/react";
 import { TilingPluginPackage } from "@embedpdf/plugin-tiling/react";
 import { ViewportPluginPackage } from "@embedpdf/plugin-viewport/react";
@@ -52,18 +49,13 @@ import { PdfBottomBar } from "@/components/viewer/pdf/chrome/pdf-bottom-bar";
 import { PdfCardStack } from "@/components/viewer/pdf/chrome/pdf-card-stack";
 import { PdfFiguresPanel } from "@/components/viewer/pdf/chrome/pdf-figures-panel";
 import { PdfFindBar } from "@/components/viewer/pdf/chrome/pdf-find-bar";
+import type { PdfInkExportOptions } from "@/components/viewer/pdf/chrome/pdf-ink-toolbar";
 import { PdfInkToolbar } from "@/components/viewer/pdf/chrome/pdf-ink-toolbar";
 import { PdfJumpBackChip } from "@/components/viewer/pdf/chrome/pdf-jump-back-chip";
 import { PdfLeftToolbar } from "@/components/viewer/pdf/chrome/pdf-left-toolbar";
 import { PdfOutlinePanel } from "@/components/viewer/pdf/chrome/pdf-outline-panel";
 import { PdfReferencesPanel } from "@/components/viewer/pdf/chrome/pdf-references-panel";
 import { PdfToolbar } from "@/components/viewer/pdf/chrome/pdf-toolbar";
-import {
-	anchorFromEmbedSelection,
-	formattedSelectionPage,
-	pageElByIndex,
-	selectionBoundsOnScreen,
-} from "@/components/viewer/pdf/coords";
 import { usePdfEngineContext } from "@/components/viewer/pdf/engine-provider";
 import { usePdfActiveAnchors } from "@/components/viewer/pdf/hooks/use-pdf-active-anchors";
 import { usePdfAskThreads } from "@/components/viewer/pdf/hooks/use-pdf-ask-threads";
@@ -100,8 +92,6 @@ import { useSentenceGlyphRects } from "@/components/viewer/pdf/hooks/use-pdf-sen
 import { usePdfSidebarPanels } from "@/components/viewer/pdf/hooks/use-pdf-sidebar-panels";
 import { usePdfSmartHighlights } from "@/components/viewer/pdf/hooks/use-pdf-smart-highlights";
 import { usePdfSyncTex } from "@/components/viewer/pdf/hooks/use-pdf-synctex";
-import { usePdfTextSelection } from "@/components/viewer/pdf/hooks/use-pdf-text-selection";
-import { usePdfTranslationSelection } from "@/components/viewer/pdf/hooks/use-pdf-translation-selection";
 import { usePdfViewerHandle } from "@/components/viewer/pdf/hooks/use-pdf-viewer-handle";
 import { usePdfVisualMarks } from "@/components/viewer/pdf/hooks/use-pdf-visual-marks";
 import { usePdfZoomControls } from "@/components/viewer/pdf/hooks/use-pdf-zoom-controls";
@@ -128,9 +118,7 @@ import {
 } from "@/components/viewer/pdf/layout-element-action-store";
 import {
 	bindLayoutSentenceGlyphs,
-	holdLayoutSentenceHover,
 	publishLayoutSentenceCatalog,
-	suppressLayoutSentenceHover,
 } from "@/components/viewer/pdf/layout-sentence-hover";
 import { usePdfSentenceInteraction } from "@/components/viewer/pdf/layout-sentence-pairing";
 import { buildMarksIndex } from "@/components/viewer/pdf/marks-index";
@@ -142,7 +130,6 @@ import type {
 	PdfViewerProps,
 	ScreenPoint,
 	SelectionCommentDraft,
-	SelectionMenuState,
 } from "@/components/viewer/pdf/types";
 import { ActiveCardScrollSync } from "@/components/viewer/pdf/viewport/active-card-scroll-sync";
 import { DockviewViewport } from "@/components/viewer/pdf/viewport/dockview-viewport";
@@ -188,7 +175,6 @@ import { embedPdfDocumentId } from "@/lib/pdf/document-id";
 import { PdfHistoryPluginPackage } from "@/lib/pdf/highlight/history";
 import { HIGHLIGHT_HEX_LIST } from "@/lib/pdf/highlight/palette";
 import { partitionHighlightPaint } from "@/lib/pdf/highlight/translated-geometry";
-import type { PdfTextMarkupKind } from "@/lib/pdf/highlight/types";
 import {
 	exportInkPdfCopy,
 	inkExportDestinationAllowed,
@@ -206,7 +192,6 @@ import {
 	clearTranslatedLinkSource,
 	publishTranslatedLinkSource,
 } from "@/lib/pdf/layout/translated-link-source";
-import { selectionAnchorFromVisible } from "@/lib/pdf/layout/visible-selection-rects";
 import {
 	linkPreviewDragActive,
 	subscribeLinkPreviewDrag,
@@ -216,11 +201,7 @@ import {
 	seedPdfReadingSnapshot,
 } from "@/lib/pdf/reading-position";
 import { pickPdfSearchDocumentId } from "@/lib/pdf/search-target";
-import {
-	type ActiveSelectionCard,
-	selectionAnchorKey,
-} from "@/lib/pdf/selection";
-import { isSelectionInsertionRegion } from "@/lib/pdf/selection-appearance";
+import type { ActiveSelectionCard } from "@/lib/pdf/selection";
 import {
 	tintedTranslateRecords,
 	translateHighlightsByPage as translateHighlightsByPageOf,
@@ -233,13 +214,8 @@ import {
 } from "@/lib/pdf/view-mode";
 import { PDF_ZOOM_MAX, PDF_ZOOM_MIN } from "@/lib/pdf/zoom";
 import { loadSettings } from "@/lib/settings";
-import type { MenuContext } from "@/lib/shell/commands/menu-contributions";
 import { layout } from "@/lib/shell/ui-store";
-import {
-	basenameOf,
-	normalizePathKey,
-	vaultRelativePath,
-} from "@/lib/vault/path";
+import { basenameOf, normalizePathKey } from "@/lib/vault/path";
 import { workspaceStore } from "@/lib/workspace/store";
 
 export type {
@@ -254,6 +230,9 @@ function PdfReadyMark({ ok }: { ok: boolean }) {
 	}, [ok]);
 	return null;
 }
+
+/** Stable callback: the selection comment chip has no draft-engagement state. */
+const NOOP_SELECTION_DRAFT_ACTIVE = (_active: boolean) => undefined;
 
 /**
  * PDF viewer built on EmbedPDF (headless, PDFium/WASM). The engine is shared
@@ -529,55 +508,6 @@ export const PdfViewer = memo(function PdfViewer(props: PdfViewerProps) {
 	);
 });
 
-/** Identity of the selected text. Screen position is not part of it, so scrolling does not look like a new selection. */
-function selectionCommentKey(menu: SelectionMenuState | null): string {
-	if (!menu) return "";
-	const glyph = menu.pages
-		.map((page) => {
-			const { origin, size } = page.rect;
-			return `${page.pageIndex}:${origin.x}:${origin.y}:${size.width}:${size.height}`;
-		})
-		.join(";");
-	const visible =
-		menu.visiblePages
-			?.map((page) =>
-				page.rects
-					.map(
-						(rect) =>
-							`${page.pageIndex}:${rect.x}:${rect.y}:${rect.w}:${rect.h}`,
-					)
-					.join(","),
-			)
-			.join(";") ?? "";
-	return `${menu.anchor.quote}\u0000${menu.anchor.page}\u0000${glyph}\u0000${visible}`;
-}
-
-/** Context for `pdf.selection`. Paper id only when this viewer already has one. */
-function pdfSelectionMenuContext(input: {
-	vaultPath: string | null;
-	paperRelPath: string | null;
-	paperAbsPath: string | null;
-	paperId: string | undefined;
-	selectionMenu: SelectionMenuState | null;
-}): MenuContext {
-	const direct = input.paperRelPath?.trim();
-	let relPath = direct || undefined;
-	if (!relPath && input.vaultPath && input.paperAbsPath) {
-		relPath =
-			vaultRelativePath(input.vaultPath, input.paperAbsPath) || undefined;
-	}
-	const selectionText =
-		(
-			input.selectionMenu?.copyText ?? input.selectionMenu?.anchor.quote
-		)?.trim() || undefined;
-	return {
-		vaultPath: input.vaultPath,
-		...(relPath ? { relPath } : {}),
-		...(input.paperId ? { paperId: input.paperId } : {}),
-		...(selectionText ? { selectionText } : {}),
-	};
-}
-
 function PdfViewerInner({
 	runtime,
 	onInkDirtyChange,
@@ -638,7 +568,6 @@ function PdfViewerInner({
 	const { provides: scroll, state: scrollState } = useScroll(docId);
 	usePdfScrollSync(docId);
 	usePdfReadingMode(docId);
-	const { provides: selectionCap } = useSelectionCapability();
 	const { provides: annotationCap } = useAnnotationCapability();
 	const { provides: docCap } = useDocumentManagerCapability();
 	const { provides: bookmarkCap } = useBookmarkCapability();
@@ -723,9 +652,6 @@ function PdfViewerInner({
 	const canTranslateSelection =
 		capabilities.ask || selectionTranslateProvider !== "agent";
 	const pdfScrollStrategy = useSettings((s) => s.pdfScrollStrategy);
-	const autoTranslateSelection = useSettings(
-		(s) => s.translate.autoTranslateSelection,
-	);
 	// Reading view: 原文 / 译文 / 对照. Only the two single-pane choices persist;
 	// 对照 is derived from the translation tab being open. While it is open the
 	// single-pane underlay is pinned to 原文, so closing the tab falls back to
@@ -756,7 +682,11 @@ function PdfViewerInner({
 				normalizePathKey(tab.path) === translationPaneKey,
 		);
 	});
-	const viewMode: PdfViewMode = translationPaneOpen ? "dual" : singleViewMode;
+	// 对照 is either a workspace tab (desktop) or the mobile translation
+	// companion prop. Both must report 对照: otherwise the switch keeps showing
+	// 原文 while the split is already open, and 原文 can no longer close it.
+	const companionOpen = translationPaneOpen || translationCompanionOpen;
+	const viewMode: PdfViewMode = companionOpen ? "dual" : singleViewMode;
 	const showTranslatedPages = translationPane || viewMode === "translated";
 	// 对照 is a comparison view: the left pane is the original, not 译文. Keep the
 	// stored single-pane view at 原文 while the pane is open so closing the pane
@@ -933,25 +863,18 @@ function PdfViewerInner({
 	 * Per-page 0–1 text rects from PDFium `getPageTextRects` — used to decide
 	 * whether a gutter pin sits on real glyphs (translucent) vs in a free gutter.
 	 */
-	const {
-		pageTextMap,
-		pageTextRects,
-		pageTextLinkMap,
-		pageTextMapRef,
-		selectionTextExclusionsByPage,
-		ensureSelectionTextExclusions,
-	} = usePdfPageText({
-		engine,
-		docCap,
-		docId,
-		totalPages,
-		currentPage,
-		paperTitle,
-		translates,
-		threads,
-		highlights,
-		visualTraces,
-	});
+	const { pageTextMap, pageTextRects, pageTextLinkMap, pageTextMapRef } =
+		usePdfPageText({
+			engine,
+			docCap,
+			docId,
+			totalPages,
+			currentPage,
+			translates,
+			threads,
+			highlights,
+			visualTraces,
+		});
 	/**
 	 * Text links per page with native-link overlap excluded. Array identities
 	 * are reused per page when that page's set did not change (the source maps
@@ -1036,43 +959,6 @@ function PdfViewerInner({
 		navigate: goToRegion,
 		docCapRef,
 	});
-	const selectionCommentEngagedRef = useRef(false);
-
-	// ---- Text selection → floating action menu ----
-	// Placed after hostRef/zoomRef: the hook anchors the menu against the page
-	// element and needs both refs injected.
-	const {
-		selectionMenu,
-		setSelectionMenu,
-		isSelecting,
-		selectionStartPageIndex,
-		closeSelectionMenu,
-		rePlaceSelectionMenu,
-	} = usePdfTextSelection({
-		ensureSelectionTextExclusions,
-		engine,
-		selectionTextExclusionsByPage,
-		selectionCap,
-		docCap,
-		docId,
-		hostRef,
-		zoomRef,
-		isActive,
-		sideBySide: viewMode === "dual" && !translationPane,
-		paperRelPath,
-		paperAbsPath,
-		isCommentDraftActive: () => selectionCommentEngagedRef.current,
-		// A double-click in element selection opens the element action card; the
-		// instant word/line selection of that same gesture must not open a second
-		// toolbar underneath it (#1175).
-		suppressSelectionMenu: () => {
-			const action = layoutElementActionStore.getState().action;
-			return (
-				action != null &&
-				layoutSentenceScope(action.docId) === layoutSentenceScope(docId)
-			);
-		},
-	});
 
 	useEffect(() => {
 		// Read the capability through the ref. The provides object is replaced
@@ -1085,13 +971,6 @@ function PdfViewerInner({
 			getDocument: () => docCapRef.current?.getDocument(docId) ?? null,
 		});
 	}, [docId, engine]);
-
-	useEffect(() => {
-		const root = hostRef.current;
-		if (!root) return;
-		root.toggleAttribute("data-pdf-selecting", isSelecting);
-		if (isSelecting) suppressLayoutSentenceHover();
-	}, [isSelecting]);
 
 	/**
 	 * Session token of the single in-flight PDF agent run. Shared by ask and
@@ -1486,7 +1365,6 @@ function PdfViewerInner({
 	const {
 		layoutOverlayVisible,
 		layoutRawRegions,
-		layoutDocRegions,
 		selectableRegionsByPage,
 		rawRegionsByPage,
 		startLayoutAnalysisRef,
@@ -1636,6 +1514,52 @@ function PdfViewerInner({
 		mobileInk,
 	]);
 
+	/** Original PDF bytes only: a plain copy, never the annotation sidecars. */
+	const handleExportOriginalPdf = useCallback(async () => {
+		const document = docCapRef.current?.getDocument(docId);
+		if (!engine || !document) throw new Error(t("figures.viewerUnavailable"));
+		const bytes = new Uint8Array(await engine.saveAsCopy(document).toPromise());
+		const name = `${paperAbsPath ? basenameOf(paperAbsPath) : "paper"}-copy.pdf`;
+		if (onInkExport) await onInkExport(bytes, name);
+		else if (!mobileInk) {
+			const { save } = await import("@tauri-apps/plugin-dialog");
+			const path = await save({
+				defaultPath: name,
+				filters: [{ name: "PDF", extensions: ["pdf"] }],
+			});
+			if (!path) return;
+			if (!paperAbsPath || !inkExportDestinationAllowed(path, paperAbsPath))
+				throw new Error(t("ink.exportCopyOnly"));
+			const { writeVaultBytes } = await import("@/lib/vault/fs");
+			await writeVaultBytes(path, bytes);
+		}
+	}, [docId, engine, t, paperAbsPath, onInkExport, mobileInk]);
+
+	/** Ink-toolbar export menu:原文/译文 × 是否带笔迹. */
+	const handleExportPdfChoice = useCallback(
+		async (options: PdfInkExportOptions) => {
+			try {
+				if (options.source === "translated") {
+					if (!options.ink && reflowReady) await exportTranslatedPdf(false);
+					return;
+				}
+				if (options.ink) await handleExportInk();
+				else await handleExportOriginalPdf();
+			} catch (error) {
+				notifyError(t("ink.exportFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
+		},
+		[
+			handleExportInk,
+			handleExportOriginalPdf,
+			exportTranslatedPdf,
+			reflowReady,
+			t,
+		],
+	);
+
 	const translationShown =
 		showTranslatedPages && layoutTranslatePageStateByPage.size > 0;
 	const searchDocumentId = pickPdfSearchDocumentId({
@@ -1675,25 +1599,6 @@ function PdfViewerInner({
 	const handleCloseFind = useCallback(() => {
 		closeFindRef.current();
 	}, []);
-
-	usePdfTranslationSelection({
-		enabled:
-			showTranslatedPages &&
-			layoutTranslateActive &&
-			!translationOnly &&
-			!plainViewer,
-		hostRef,
-		zoomRef,
-		engineRef,
-		docCapRef,
-		docId,
-		itemsByPage: layoutTranslateItemsByPage,
-		selectionMenu,
-		setSelectionMenu,
-		closeSelectionMenu,
-		paperRelPath,
-		paperAbsPath,
-	});
 
 	// The view switch owns the single-pane / compare choice. The toolbar's task
 	// surface (the expanding meter) only stops or cancels, never toggles views.
@@ -1749,9 +1654,15 @@ function PdfViewerInner({
 			}
 			if (next === "original") {
 				// 原文 is the "no translation" mode: close the comparison pane and
-				// kill the running job so the view and the task state agree.
+				// kill the running job so the view and the task state agree. On
+				// mobile the comparison pane is a prop-owned companion, so the
+				// reader has to close it through the callback.
 				paneCloseKeepsJobRef.current = false;
-				if (translationPaneOpen) onCloseTranslationTab?.(baseDocId);
+				if (capabilities.apiOnly) {
+					if (translationCompanionOpen) onCloseTranslationPane?.();
+				} else if (translationPaneOpen) {
+					onCloseTranslationTab?.(baseDocId);
+				}
 				setSingleViewMode("original");
 				writePdfViewMode(paperKey, "original");
 				cancelLayoutTranslate();
@@ -1759,7 +1670,9 @@ function PdfViewerInner({
 			}
 			// 译文: close the comparison pane but let the translation keep running
 			// (cached pages show immediately; a running job keeps streaming).
-			if (translationPaneOpen) {
+			if (capabilities.apiOnly) {
+				if (translationCompanionOpen) onCloseTranslationPane?.();
+			} else if (translationPaneOpen) {
 				paneCloseKeepsJobRef.current = true;
 				onCloseTranslationTab?.(baseDocId);
 			}
@@ -1773,9 +1686,11 @@ function PdfViewerInner({
 			plainViewer,
 			isRemotePaper,
 			translationPaneOpen,
+			translationCompanionOpen,
 			paperAbsPath,
 			onOpenTranslationTab,
 			onOpenTranslationPane,
+			onCloseTranslationPane,
 			capabilities.apiOnly,
 			baseDocId,
 			paperTitle,
@@ -1942,15 +1857,7 @@ function PdfViewerInner({
 		toggleLayoutTranslate,
 	]);
 
-	// Drag-select and pin cards suppress ephemeral link previews so the pointer
-	// cannot stack cards while sweeping across citation / crossref hit targets
-	// (#430). Translation drags are DOM selections, so EmbedPDF never sets
-	// `isSelecting`; handlers also read `linkPreviewDragActive`, which flips
-	// synchronously and must not be copied into this render snapshot. Keep
-	// previews suppressed while the selection action menu remains open so
-	// reference cards cannot stack on top of the selection controls.
-	const suppressLinkPreviews =
-		Boolean(activeCard) || Boolean(selectionMenu) || isSelecting;
+	const suppressLinkPreviews = Boolean(activeCard);
 
 	useEffect(() => {
 		return subscribeLinkPreviewDrag(() => {
@@ -2145,8 +2052,6 @@ function PdfViewerInner({
 		docId,
 		engine,
 		docCap,
-		selectionCap,
-		setSelectionMenu,
 		onRegionPrompt,
 		plainViewer,
 	});
@@ -2165,8 +2070,6 @@ function PdfViewerInner({
 			(!elementSelectionEnabled && selectableRegionsByPage.size === 0)
 		)
 			return;
-		closeSelectionMenu();
-		selectionCap?.clear(docId);
 		setLayoutElementSelection(docId, !elementSelectionEnabled);
 	}, [
 		docId,
@@ -2175,8 +2078,6 @@ function PdfViewerInner({
 		isRemotePaper,
 		engine,
 		selectableRegionsByPage,
-		closeSelectionMenu,
-		selectionCap,
 	]);
 
 	// The two inspection modes never arm together: entering element selection
@@ -2199,82 +2100,15 @@ function PdfViewerInner({
 			// The first Escape dismisses an open element menu; the next leaves inspection.
 			if (layoutElementActionStore.getState().action) return;
 			event.preventDefault();
-			closeSelectionMenu();
 			setLayoutElementSelection(docId, false);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [docId, elementSelecting, closeSelectionMenu]);
+	}, [docId, elementSelecting]);
 
-	usePdfSentenceInteraction(docId, hostRef, (sentence, event) => {
-		const doc = docCapRef.current?.getDocument(docId);
-		// The document manager can still be opening. Fall back to the rendered
-		// page box so the source pane's double-click is not a no-op.
-		const zoom = zoomRef.current > 0 ? zoomRef.current : 1;
-		const sizeFor = (pageIndex: number) => {
-			const size = doc?.pages[pageIndex]?.size;
-			if (size) return size;
-			const box = pageElByIndex(
-				hostRef.current,
-				pageIndex,
-			)?.getBoundingClientRect();
-			return box && box.width > 0 && box.height > 0
-				? { width: box.width / zoom, height: box.height / zoom }
-				: null;
-		};
-		const pages = [
-			...new Set(sentence.members.map((member) => member.pageIndex)),
-		].flatMap((pageIndex) => {
-			const size = sizeFor(pageIndex);
-			if (!size) return [];
-			return formattedSelectionPage(
-				pageIndex,
-				sentence.members
-					.filter((member) => member.pageIndex === pageIndex)
-					.flatMap((member) => member.rects),
-				size,
-			);
-		});
-		const rects = sentence.members
-			.filter((member) => member.pageIndex === sentence.pageIndex)
-			.flatMap((member) => member.rects);
-		// Page-fraction rects are enough for the toolbar anchor, so a missing
-		// document size only disables highlight creation, not the menu.
-		const anchor =
-			anchorFromEmbedSelection(
-				pages,
-				sentence.quote,
-				sizeFor,
-				"selection",
-				sentence.pageIndex,
-			) ??
-			(rects.length
-				? {
-						page: sentence.pageIndex + 1,
-						rects,
-						quote: sentence.quote,
-						trigger: "selection" as const,
-					}
-				: null);
-		const bounds = selectionBoundsOnScreen(
-			pageElByIndex(hostRef.current, sentence.pageIndex),
-			rects,
-		);
-		if (!anchor || !bounds) return;
-		selectionCap?.clear(docId);
-		holdLayoutSentenceHover(docId);
-		setSelectionMenu({
-			anchor,
-			pages,
-			screen: {
-				x: (bounds.left + bounds.right) / 2,
-				y: bounds.top,
-				top: bounds.top,
-				bottom: bounds.bottom,
-				cursorX: event.clientX,
-			},
-		});
-	});
+	// Text selection is not part of the mobile reader: a double-click on a
+	// sentence keeps its hover pairing only, with no floating action menu.
+	usePdfSentenceInteraction(docId, hostRef);
 
 	const handleAskInkRegion = useCallback(
 		async (page: number, region: PdfAskNormalizedRect) => {
@@ -2298,137 +2132,36 @@ function PdfViewerInner({
 	}, [inkEditor, toggleRegionSelect]);
 	useEffect(() => {
 		if (inkMode === "read") return;
-		closeSelectionMenu();
 		if (regionSelecting) toggleRegionSelect();
-	}, [inkMode, regionSelecting, toggleRegionSelect, closeSelectionMenu]);
+	}, [inkMode, regionSelecting, toggleRegionSelect]);
 
 	// ---- Selection action menu ----
 
-	const {
-		handleHighlight,
-		handleCommitSelectionNote,
-		handleMenuAsk,
-		handleMenuAddToChat,
-		handleMenuTranslate,
-		handleMenuCopy,
-	} = usePdfSelectionActions({
-		capabilities,
+	const { handleCommitSelectionNote } = usePdfSelectionActions({
 		runAnnotationBatch,
-		selectionMenu,
-		closeSelectionMenu,
 		createHighlights,
 		updateHighlightComment,
-		docId,
-		startFromAnchor,
-		translateSelection,
-		paperRelPath,
-		paperAbsPath,
 	});
-
-	const autoTranslatedSelectionRef = useRef<string | null>(null);
-
-	// A new drag-select is a fresh intent even when it covers text that was
-	// already auto-translated: the anchor key alone would collide with the last
-	// run and silently skip the new selection.
-	useEffect(() => {
-		if (isSelecting) autoTranslatedSelectionRef.current = null;
-	}, [isSelecting]);
-
-	// When enabled, translate as soon as text extraction has produced a usable
-	// selection anchor. Keep the toolbar open so the other selection actions stay
-	// available while the result card streams beside it.
-	//
-	// Keyed on the anchor, not on the menu object: re-placing the menu on scroll
-	// replaces the object (its `screen` moved) while keeping the anchor, so a
-	// menu-identity key re-translated once per wheel tick and stacked a 文A pin
-	// per tick.
-	useEffect(() => {
-		const anchorKey = selectionAnchorKey(selectionMenu?.anchor);
-		if (!isActive) {
-			autoTranslatedSelectionRef.current = anchorKey;
-			return;
-		}
-		// The translation overlay already has this sentence's translation.
-		// Sending the recovered English back would open another translate card.
-		if (selectionMenu?.fromTranslation) return;
-		if (
-			!selectionMenu ||
-			plainViewer ||
-			!canTranslateSelection ||
-			!autoTranslateSelection ||
-			!anchorKey
-		) {
-			autoTranslatedSelectionRef.current = null;
-			return;
-		}
-		if (autoTranslatedSelectionRef.current === anchorKey) return;
-		autoTranslatedSelectionRef.current = anchorKey;
-		translateSelection(selectionMenu.anchor);
-	}, [
-		canTranslateSelection,
-		autoTranslateSelection,
-		isActive,
-		plainViewer,
-		selectionMenu,
-		translateSelection,
-	]);
 
 	// Keep the clicked selection while focusing the comment editor clears it.
 	const [selectionCommentDraft, setSelectionCommentDraft] =
 		useState<SelectionCommentDraft | null>(null);
 	const selectionCommentDraftRef = useRef(selectionCommentDraft);
 	selectionCommentDraftRef.current = selectionCommentDraft;
-	const selectionMenuRef = useRef(selectionMenu);
-	selectionMenuRef.current = selectionMenu;
-	const selectionCommentKeyValue = selectionCommentKey(selectionMenu);
-
-	useEffect(() => {
-		if (isRemotePaper || plainViewer || selectionCommentKeyValue) {
-			selectionCommentEngagedRef.current = false;
-			setSelectionCommentDraft(null);
-		}
-	}, [isRemotePaper, plainViewer, selectionCommentKeyValue]);
 
 	const beginSelectionComment = useCallback((draft: SelectionCommentDraft) => {
-		selectionCommentEngagedRef.current = true;
 		setSelectionCommentDraft(draft);
 	}, []);
 
-	const handleMenuNote = useCallback(
-		(shape: PdfTextMarkupKind = "highlight") => {
-			const menu = selectionMenuRef.current;
-			if (!menu?.pages.length || isRemotePaper || plainViewer) return;
-			const visible = selectionAnchorFromVisible(menu.visiblePages ?? []);
-			beginSelectionComment({
-				page: visible?.page ?? menu.anchor.page,
-				anchorY: visible?.anchorY ?? menu.anchor.rects[0]?.y ?? 0,
-				quote: menu.anchor.quote ?? "",
-				shape,
-				pages: menu.pages,
-				visiblePages: menu.visiblePages,
-			});
-			closeSelectionMenu();
-		},
-		[isRemotePaper, plainViewer, beginSelectionComment, closeSelectionMenu],
-	);
-
-	const handleSelectionCommentActiveChange = useCallback((active: boolean) => {
-		selectionCommentEngagedRef.current = active;
-	}, []);
-
 	const handleDismissSelectionComment = useCallback(() => {
-		selectionCommentEngagedRef.current = false;
 		setSelectionCommentDraft(null);
-		closeSelectionMenu();
-	}, [closeSelectionMenu]);
+	}, []);
 
 	const handleCommitSelectionComment = useCallback(
 		(comment: string) => {
 			const draft = selectionCommentDraftRef.current;
-			selectionCommentEngagedRef.current = false;
 			selectionCommentDraftRef.current = null;
 			setSelectionCommentDraft(null);
-			closeSelectionMenu();
 			if (!draft) return;
 			if (draft.visualRegion) {
 				const region = draft.visualRegion;
@@ -2451,26 +2184,16 @@ function PdfViewerInner({
 				comment,
 			);
 		},
-		[
-			captureRegion,
-			saveVisualNote,
-			handleCommitSelectionNote,
-			closeSelectionMenu,
-			t,
-		],
+		[captureRegion, saveVisualNote, handleCommitSelectionNote, t],
 	);
 
 	// ---- In-PDF highlight selection menu ----
 
 	const rePlaceFloatingOnScroll = useCallback(() => {
 		syncActiveCardPosition();
-		rePlaceSelectionMenu();
-	}, [syncActiveCardPosition, rePlaceSelectionMenu]);
+	}, [syncActiveCardPosition]);
 
-	// Boolean only — do not depend on selectionMenu.screen or re-place loops.
-	const selectionMenuOpen = selectionMenu != null;
-
-	// Update page-anchored cards and the selection toolbar on scroll and zoom.
+	// Update page-anchored cards on scroll and zoom.
 	// Use scrollReady (boolean)
 	// — not `scroll` — because EmbedPDF returns a new scope object every render;
 	// depending on it re-fired this effect → setCardScreen → re-render →
@@ -2478,7 +2201,7 @@ function PdfViewerInner({
 	// Native wheel scroll is handled by ActiveCardScrollSync (viewport element).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollReady/zoomLevel are intentional re-place triggers
 	useEffect(() => {
-		if (!activeCard && !selectionMenuOpen) return;
+		if (!activeCard) return;
 		rePlaceFloatingOnScroll();
 		let raf: number | null = null;
 		const rePlace = () => {
@@ -2494,13 +2217,7 @@ function PdfViewerInner({
 			if (raf != null) cancelAnimationFrame(raf);
 			offPlugin();
 		};
-	}, [
-		activeCard,
-		selectionMenuOpen,
-		scrollReady,
-		zoomLevel,
-		rePlaceFloatingOnScroll,
-	]);
+	}, [activeCard, scrollReady, zoomLevel, rePlaceFloatingOnScroll]);
 
 	usePdfViewerHandle({
 		docId,
@@ -2628,18 +2345,8 @@ function PdfViewerInner({
 		],
 	);
 
-	const selectionInsertionRegions = useMemo(
-		() =>
-			[...(layoutRawRegions ?? []), ...(layoutDocRegions ?? [])].filter(
-				isSelectionInsertionRegion,
-			),
-		[layoutRawRegions, layoutDocRegions],
-	);
 	const pageLayout = useMemo<PdfPageLayoutSlice>(
 		() => ({
-			selectionInsertionRegions,
-			selectionStartPageIndex,
-			selectionTextExclusionsByPage,
 			selectableRegionsByPage,
 			rawRegionsByPage,
 			layoutOverlayVisible,
@@ -2656,10 +2363,7 @@ function PdfViewerInner({
 		[
 			selectableRegionsByPage,
 			rawRegionsByPage,
-			selectionTextExclusionsByPage,
-			selectionInsertionRegions,
 			layoutOverlayVisible,
-			selectionStartPageIndex,
 			layoutTranslateItemsByPage,
 			layoutTranslatePageStateByPage,
 			showTranslatedPages,
@@ -2674,7 +2378,6 @@ function PdfViewerInner({
 			elementSelecting,
 			regionSelecting,
 			visualCropPending,
-			visualDraftOpen: false,
 			insetCommentCards,
 			inkEditing: inkEditable && inkMode !== "read",
 			translationOnly,
@@ -2808,7 +2511,9 @@ function PdfViewerInner({
 			onHoverComment: (comment) => setHoveredCommentId(comment.id),
 			onLeaveComment: () => setHoveredCommentId(null),
 			onCommitSelectionComment: handleCommitSelectionComment,
-			onSelectionCommentActiveChange: handleSelectionCommentActiveChange,
+			// The chip only needs to keep its draft alive; drafts now clear on
+			// commit/dismiss alone, so no engagement tracking is required.
+			onSelectionCommentActiveChange: NOOP_SELECTION_DRAFT_ACTIVE,
 			onDismissSelectionComment: handleDismissSelectionComment,
 		}),
 		[
@@ -2834,7 +2539,6 @@ function PdfViewerInner({
 			handleAddCommentToChat,
 			setHoveredCommentId,
 			handleCommitSelectionComment,
-			handleSelectionCommentActiveChange,
 			handleDismissSelectionComment,
 		],
 	);
@@ -2952,67 +2656,6 @@ function PdfViewerInner({
 			if (!showOutline) handleToggleOutline();
 		},
 		[t, canBookmark, bookmarkEditor, showOutline, handleToggleOutline],
-	);
-	const handleBookmarkSelection = useCallback(() => {
-		if (!selectionMenu?.pages.length) return;
-		bookmarkSelection(
-			selectionMenu.anchor.page,
-			selectionMenu.anchor.quote ?? selectionMenu.copyText ?? "",
-		);
-		closeSelectionMenu();
-	}, [selectionMenu, bookmarkSelection, closeSelectionMenu]);
-	const contributionPaperId = paperMeta?.id?.trim() || undefined;
-	const canMarkSelection =
-		!isRemotePaper && !plainViewer && Boolean(selectionMenu?.pages.length);
-	const cardSelectionMenu = useMemo(
-		() => ({
-			state: selectionMenu,
-			onHighlight: handleHighlight,
-			onNote: canMarkSelection ? handleMenuNote : undefined,
-			onAsk: capabilities.ask ? handleMenuAsk : undefined,
-			onAddToChat: capabilities.addToChat ? handleMenuAddToChat : undefined,
-			onTranslate: handleMenuTranslate,
-			onCopy: handleMenuCopy,
-			onBookmark:
-				canBookmark && selectionMenu?.pages.length
-					? handleBookmarkSelection
-					: undefined,
-			showHighlight: canMarkSelection,
-			showTranslate:
-				canTranslateSelection &&
-				!selectionMenu?.fromTranslation &&
-				!isRemotePaper &&
-				!plainViewer,
-			contributionContext: capabilities.menuContributions
-				? pdfSelectionMenuContext({
-						vaultPath,
-						paperRelPath,
-						paperAbsPath,
-						paperId: contributionPaperId,
-						selectionMenu,
-					})
-				: undefined,
-		}),
-		[
-			capabilities,
-			plainViewer,
-			selectionMenu,
-			canMarkSelection,
-			canTranslateSelection,
-			handleHighlight,
-			handleMenuNote,
-			handleMenuAsk,
-			handleMenuAddToChat,
-			handleMenuTranslate,
-			handleMenuCopy,
-			canBookmark,
-			handleBookmarkSelection,
-			isRemotePaper,
-			vaultPath,
-			paperRelPath,
-			paperAbsPath,
-			contributionPaperId,
-		],
 	);
 	const cardCitationPreview = useMemo(
 		() => ({
@@ -3250,11 +2893,7 @@ function PdfViewerInner({
 			)}
 			{!translationOnly && !plainViewer && !immersiveReading && (
 				<PdfToolbar
-					onExportTranslatedPdf={reflowReady ? exportTranslatedPdf : undefined}
-					regionSelecting={regionSelecting}
-					visualCropPending={visualCropPending}
 					engine={engine}
-					onToggleRegionSelect={handleToggleReaderRegion}
 					layoutTranslateRunning={layoutTranslateRunning}
 					layoutTranslatePreparing={layoutTranslatePreparing}
 					layoutTranslateWaiting={layoutTranslateWaiting}
@@ -3262,9 +2901,8 @@ function PdfViewerInner({
 					viewMode={viewMode}
 					onSelectViewMode={handleSelectViewMode}
 					canCompare={
-						Boolean(onOpenTranslationTab) &&
-						Boolean(paperAbsPath) &&
-						isWorkspaceDoc
+						Boolean(onOpenTranslationTab || onOpenTranslationPane) &&
+						Boolean(paperAbsPath)
 					}
 					layoutTranslatePartial={layoutTranslatePartial}
 					layoutTranslateProgress={layoutTranslateProgress}
@@ -3355,7 +2993,7 @@ function PdfViewerInner({
 					/>
 				) : null}
 				<ActiveCardScrollSync
-					active={Boolean(activeCard) || Boolean(selectionMenu)}
+					active={Boolean(activeCard)}
 					onScroll={rePlaceFloatingOnScroll}
 				/>
 				{/* Ctrl+wheel and trackpad pinch are handled by WheelZoomHandler (WebKit
@@ -3389,7 +3027,6 @@ function PdfViewerInner({
 
 			{!translationOnly && !immersiveReading && (
 				<PdfCardStack
-					selectionMenu={cardSelectionMenu}
 					citationPreview={cardCitationPreview}
 					crossrefPreview={cardCrossrefPreview}
 					linkUrlTip={cardLinkUrlTip}
@@ -3407,13 +3044,18 @@ function PdfViewerInner({
 					editor={inkEditor}
 					editable={inkEditable}
 					pageSize={inkPageSize}
+					regionSelecting={regionSelecting}
+					onToggleRegionSelect={handleToggleReaderRegion}
+					canExportTranslated={Boolean(reflowReady && !mobileInk)}
 					cropPending={visualCropPending}
 					onAskRegion={
 						onRegionPrompt && inkEditable && isActive
 							? handleAskInkRegion
 							: undefined
 					}
-					onExport={!mobileInk || onInkExport ? handleExportInk : undefined}
+					onExport={
+						!mobileInk || onInkExport ? handleExportPdfChoice : undefined
+					}
 				/>
 			)}
 			{!translationOnly && (!plainViewer || showBottomBar) && (

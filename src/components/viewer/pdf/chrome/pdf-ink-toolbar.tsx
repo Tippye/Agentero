@@ -10,6 +10,7 @@ import {
 	PenLine,
 	Redo2,
 	RotateCcw,
+	ScanSearch,
 	Trash2,
 	Undo2,
 	X,
@@ -17,6 +18,12 @@ import {
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Popover,
 	PopoverContent,
@@ -36,6 +43,15 @@ const TOOLS = [
 	{ mode: "lasso", Icon: LassoSelect },
 ] as const;
 const HIT = "size-11 min-h-11 min-w-11 shrink-0";
+
+/** What the export menu asks the host to save. Ink is flattened on request. */
+export type PdfInkExportOptions = {
+	/** Document the copy is based on: the source PDF or its translation. */
+	source: "original" | "translated";
+	/** Flatten the handwritten strokes into the exported copy. */
+	ink: boolean;
+};
+
 export function PdfInkToolbar({
 	editor,
 	editable,
@@ -43,13 +59,24 @@ export function PdfInkToolbar({
 	onAskRegion,
 	cropPending = false,
 	pageSize,
+	regionSelecting = false,
+	onToggleRegionSelect,
+	canExportTranslated = false,
 }: {
 	editor: InkEditor;
 	editable: boolean;
-	onExport?: () => Promise<void>;
+	onExport?: (options: PdfInkExportOptions) => Promise<void>;
 	onAskRegion?: (page: number, region: PdfAskNormalizedRect) => Promise<void>;
 	cropPending?: boolean;
 	pageSize: (page: number) => { width: number; height: number } | null;
+	/** Lasso marquee for a page region; it lives on this toolbar, not the top one. */
+	regionSelecting?: boolean;
+	onToggleRegionSelect?: () => void;
+	/**
+	 * The host can save a finished translated PDF as a copy. Off while the
+	 * reflow is still building or when the platform has no save pipeline.
+	 */
+	canExportTranslated?: boolean;
 }) {
 	const { t } = useTranslation("viewer");
 	const state = useSyncExternalStore(editor.subscribe, editor.getState);
@@ -84,7 +111,12 @@ export function PdfInkToolbar({
 		editor.setMode(mode);
 		setOpen(false);
 	};
-	if (!editable && !onExport) return null;
+	const runExport = (options: PdfInkExportOptions) => {
+		if (!onExport || exporting || busy || overview.dirty) return;
+		setExporting(true);
+		void onExport(options).finally(() => setExporting(false));
+	};
+	if (!editable && !onExport && !onToggleRegionSelect) return null;
 	return (
 		<div
 			data-pdf-chrome
@@ -232,6 +264,20 @@ export function PdfInkToolbar({
 						)}
 					</>
 				)}
+				{onToggleRegionSelect && (
+					<Button
+						className={HIT}
+						size="icon"
+						variant={regionSelecting ? "secondary" : "ghost"}
+						disabled={busy || exporting}
+						aria-label={t("ink.regionSelect")}
+						title={t("ink.regionSelect")}
+						aria-pressed={regionSelecting}
+						onClick={onToggleRegionSelect}
+					>
+						<ScanSearch className="size-5" />
+					</Button>
+				)}
 				{editable && onAskRegion && (canAsk || asking) && (
 					<Button
 						className={HIT}
@@ -313,24 +359,57 @@ export function PdfInkToolbar({
 					</>
 				)}
 				{onExport && (
-					<Button
-						className={HIT}
-						size="icon"
-						variant="ghost"
-						disabled={busy || overview.dirty || exporting}
-						aria-label={t("ink.export")}
-						title={t("ink.export")}
-						onClick={() => {
-							setExporting(true);
-							void onExport().finally(() => setExporting(false));
-						}}
-					>
-						{exporting ? (
-							<Loader2 className="size-5 animate-spin" />
-						) : (
-							<Download className="size-5" />
-						)}
-					</Button>
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								className={HIT}
+								size="icon"
+								variant="ghost"
+								disabled={busy || overview.dirty || exporting}
+								aria-label={t("ink.export")}
+								title={t("ink.export")}
+								aria-busy={exporting}
+							>
+								{exporting ? (
+									<Loader2 className="size-5 animate-spin" />
+								) : (
+									<Download className="size-5" />
+								)}
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent
+							side="top"
+							align="end"
+							className="w-auto max-w-[min(18rem,calc(100vw-2rem))]"
+						>
+							<DropdownMenuItem
+								className="min-h-11"
+								disabled={busy || exporting}
+								onSelect={() => runExport({ source: "original", ink: false })}
+							>
+								{t("ink.exportOriginalNoInk")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								className="min-h-11"
+								disabled={busy || exporting}
+								onSelect={() => runExport({ source: "original", ink: true })}
+							>
+								{t("ink.exportOriginalInk")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								className="min-h-11"
+								disabled={busy || exporting || !canExportTranslated}
+								onSelect={() => runExport({ source: "translated", ink: false })}
+							>
+								{t("ink.exportTranslatedNoInk")}
+							</DropdownMenuItem>
+							{/* No pipeline flattens strokes onto the translated reflow
+							    yet, so this combination stays unavailable. */}
+							<DropdownMenuItem className="min-h-11" disabled>
+								{t("ink.exportTranslatedInk")}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				)}
 				{overview.saving && (
 					<Loader2

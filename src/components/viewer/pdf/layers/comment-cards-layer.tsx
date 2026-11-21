@@ -31,6 +31,7 @@ import {
 	MessageSquarePlus,
 	Trash2,
 	Underline,
+	X,
 } from "lucide-react";
 import {
 	memo,
@@ -105,10 +106,31 @@ const EDIT_MAX_COMMENT_LINES = 12;
 const COMMENT_CARD_SURFACE_CLASS =
 	"pointer-events-auto w-full select-none rounded-lg border border-white/55 bg-background/88 shadow-overlay ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 transition-[box-shadow,background-color,transform] duration-150 ease-out supports-backdrop-blur:bg-background/70 dark:border-white/10";
 const COMMENT_DRAFT_SURFACE_CLASS =
-	"group/draft pointer-events-auto absolute z-[6] cursor-text overflow-hidden rounded-lg border border-white/55 bg-background/88 text-left shadow-overlay ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 outline-none supports-backdrop-blur:bg-background/70 dark:border-white/10";
+	"group/draft pointer-events-auto absolute z-[6] cursor-text rounded-lg border border-white/55 bg-background/88 text-left shadow-overlay ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 outline-none supports-backdrop-blur:bg-background/70 dark:border-white/10";
 /** Horizontal action bar floating just above the card's top-right corner. */
 const COMMENT_ACTION_BAR_CLASS =
 	"pointer-events-none absolute right-0 bottom-full z-[1] flex items-center gap-0.5 rounded-md border border-white/50 bg-background/82 p-0.5 shadow-raised ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 transition-opacity duration-150 group-hover:pointer-events-auto dark:border-white/10";
+/**
+ * Close / delete affordance pinned to the card's top-right corner. The hit area
+ * is a touch-sized 44px square (Android has no hover or Escape key) while the
+ * painted chip stays compact; the chip rides the card's top edge above the text
+ * baseline so it never covers the note.
+ */
+const COMMENT_DISMISS_HIT_CLASS =
+	"absolute -top-2 right-0 z-[2] grid size-11 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50";
+const COMMENT_DISMISS_CHIP_CLASS =
+	"grid size-6 place-items-center rounded-full border border-white/55 bg-background/92 shadow-raised ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 dark:border-white/10";
+/** True when the card holds a stored note, a conversation, or the given draft. */
+function hasNoteContent(
+	item: PageAnnotationComment,
+	pendingText?: string,
+): boolean {
+	return (
+		item.comment.trim().length > 0 ||
+		(item.messages?.length ?? 0) > 0 ||
+		Boolean(pendingText?.trim())
+	);
+}
 
 type CommentCardsLayerProps = {
 	inset?: boolean;
@@ -417,6 +439,11 @@ const CommentCard = memo(function CommentCard({
 	const bodyRef = useRef<HTMLDivElement>(null);
 	const editorHandleRef = useRef<CommentMarkdownEditorHandle | null>(null);
 	const cancelledRef = useRef(false);
+	/**
+	 * The corner "x" was pressed. Its pointerdown lands before the editor blurs,
+	 * so the blur handler must not commit / cancel behind the button's back.
+	 */
+	const dismissingRef = useRef(false);
 	const itemRef = useRef(item);
 	itemRef.current = item;
 	const onSaveRef = useRef(onSave);
@@ -443,6 +470,7 @@ const CommentCard = memo(function CommentCard({
 	useLayoutEffect(() => {
 		if (!editing) return;
 		cancelledRef.current = false;
+		dismissingRef.current = false;
 		editorFocusedRef.current = false;
 		draftRef.current = commentSeedRef.current;
 	}, [editing]);
@@ -509,6 +537,22 @@ const CommentCard = memo(function CommentCard({
 		onCancel();
 	};
 
+	/**
+	 * Corner "x": an empty brand-new box is closed and discarded (never left
+	 * behind as an empty mark), anything holding a note / conversation / crop is
+	 * deleted — deleting closes the in-place editor with the card.
+	 */
+	const dismissOrDelete = () => {
+		dismissingRef.current = false;
+		cancelledRef.current = true;
+		const pending = editing ? readDraft() : undefined;
+		if (item.isNew && !hasNoteContent(item, pending)) {
+			onCancel();
+			return;
+		}
+		onDelete(item);
+	};
+
 	// Clicking the page does not always blur the editor. A new empty note
 	// should disappear on that click; typed text still commits.
 	useEffect(() => {
@@ -573,6 +617,8 @@ const CommentCard = memo(function CommentCard({
 					onBlur={
 						editing
 							? (e) => {
+									// The corner "x" owns the outcome of this click-away.
+									if (dismissingRef.current) return;
 									const next = e.relatedTarget as Node | null;
 									if (
 										next &&
@@ -696,6 +742,26 @@ const CommentCard = memo(function CommentCard({
 					)}
 				</div>
 			</div>
+			<button
+				type="button"
+				data-comment-card-dismiss
+				aria-label={t("annotations.delete")}
+				title={t("annotations.delete")}
+				className={COMMENT_DISMISS_HIT_CLASS}
+				onPointerDown={(e) => {
+					// Runs before the editor's blur; the click below decides the outcome.
+					e.stopPropagation();
+					dismissingRef.current = true;
+				}}
+				onClick={(e) => {
+					e.stopPropagation();
+					dismissOrDelete();
+				}}
+			>
+				<span className={COMMENT_DISMISS_CHIP_CLASS}>
+					<X className="size-3.5" aria-hidden />
+				</span>
+			</button>
 			<div
 				className={cn(
 					COMMENT_ACTION_BAR_CLASS,
@@ -806,6 +872,8 @@ const SelectionCommentAffordance = memo(function SelectionCommentAffordance({
 	onDismissRef.current = onDismiss;
 	const aliveRef = useRef(true);
 	const closingRef = useRef(false);
+	/** The corner "x" was pressed; its pointerdown lands before the editor blurs. */
+	const dismissingRef = useRef(false);
 	const { isBlockedByIme } = useImeGuard();
 	const kind = draft.visualRegion ? "visual" : "highlight";
 
@@ -846,6 +914,14 @@ const SelectionCommentAffordance = memo(function SelectionCommentAffordance({
 		() => editorHandleRef.current?.getMarkdown() ?? draftRef.current,
 		[],
 	);
+
+	/** Corner "x" on a brand-new note: close the box and drop the unsent draft. */
+	const dismissDraft = () => {
+		dismissingRef.current = false;
+		closingRef.current = true;
+		onActiveChangeRef.current?.(false);
+		onDismissRef.current?.();
+	};
 
 	useEffect(() => {
 		aliveRef.current = true;
@@ -925,6 +1001,8 @@ const SelectionCommentAffordance = memo(function SelectionCommentAffordance({
 					}}
 					onBlur={(e) => {
 						if (!aliveRef.current || closingRef.current) return;
+						// The corner "x" owns the outcome of this click-away.
+						if (dismissingRef.current) return;
 						const next = e.relatedTarget as Node | null;
 						if (next && rootRef.current?.contains(next)) return;
 						const text = readDraft();
@@ -958,6 +1036,25 @@ const SelectionCommentAffordance = memo(function SelectionCommentAffordance({
 					}}
 				/>
 			</div>
+			<button
+				type="button"
+				data-selection-comment-dismiss
+				aria-label={t("annotations.delete")}
+				title={t("annotations.delete")}
+				className={COMMENT_DISMISS_HIT_CLASS}
+				onPointerDown={(e) => {
+					e.stopPropagation();
+					dismissingRef.current = true;
+				}}
+				onClick={(e) => {
+					e.stopPropagation();
+					dismissDraft();
+				}}
+			>
+				<span className={COMMENT_DISMISS_CHIP_CLASS}>
+					<X className="size-3.5" aria-hidden />
+				</span>
+			</button>
 		</div>
 	);
 });

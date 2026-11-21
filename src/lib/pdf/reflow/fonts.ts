@@ -1,5 +1,6 @@
 import { appCacheDir, join } from "@tauri-apps/api/path";
 import { logOp } from "@/lib/core/logger";
+import { isMobileApp } from "@/lib/core/tauri";
 import { readVaultBytes, writeVaultBytes } from "@/lib/vault/fs";
 import type { FontKey } from "./types";
 export type ReflowFontBytes = Record<FontKey, Uint8Array>;
@@ -39,11 +40,46 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 }
 let pending: Promise<ReflowFontBytes> | undefined;
 let idle: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Bundled CJK serif materialized by the Android plugin. One family stands in
+ * for all six: it carries Latin glyphs too, and a fallback that typesets at all
+ * beats a translated PDF that never gets built. Bold and italic shapes are not
+ * synthesized. `null` means "checked, not available" so a missing asset is
+ * looked up once rather than per family.
+ */
+let bundled: Uint8Array | null | undefined;
+
+async function bundledFallback(): Promise<Uint8Array | null> {
+	if (bundled !== undefined) return bundled;
+	if (!isMobileApp()) {
+		bundled = null;
+		return bundled;
+	}
+	const path = await join(
+		await appCacheDir(),
+		"pdf-reflow-fallback",
+		"fallback.ttf",
+	);
+	// The native side extracts the asset on its own thread; a reader can open
+	// before that copy lands, so retry briefly instead of falling through to a
+	// download that cannot succeed.
+	for (let attempt = 0; attempt < 4; attempt++) {
+		try {
+			bundled = await readVaultBytes(path);
+			return bundled;
+		} catch {
+			if (attempt < 3) await new Promise((r) => setTimeout(r, 250));
+		}
+	}
+	bundled = null;
+	return bundled;
+}
 
 export function loadReflowFonts(): Promise<ReflowFontBytes> {
 	clearTimeout(idle);
 	pending ??= logOp("pdf.reflow.fonts", undefined, async () => {
 		const root = await join(await appCacheDir(), "pdf-fonts", revision);
+		const fallback = await bundledFallback();
 		const entries = await Promise.all(
 			(Object.entries(assets) as [FontKey, [string, string]][]).map(
 				async ([key, [name, hash]]) => {
@@ -54,6 +90,9 @@ export function loadReflowFonts(): Promise<ReflowFontBytes> {
 					} catch {
 						/* Missing cache: fetch a pinned public font. */
 					}
+					// Without network the pinned host is unreachable on a phone.
+					// The bundled fallback keeps typesetting available offline.
+					if (fallback) return [key, fallback] as const;
 					const response = await fetch(
 						`https://raw.githubusercontent.com/funstory-ai/BabelDOC-Assets/${revision}/fonts/${name}`,
 						{ credentials: "omit", signal: AbortSignal.timeout(60_000) },
