@@ -264,6 +264,31 @@ export const PdfToolbar = memo(function PdfToolbar({
 							</div>
 						</div>
 					) : null}
+					{!isRemotePaper && onToggleTranslationLayout ? (
+						<div className={asideClass} inert={meterOpen}>
+							<div className="min-w-0 overflow-hidden">
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											type="button"
+											size="icon-xs"
+											variant={translationLayoutActive ? "secondary" : "ghost"}
+											className="shrink-0 self-center"
+											aria-label={t("pdf.layoutTranslate.dualPane")}
+											aria-pressed={translationLayoutActive}
+											disabled={!engine}
+											onClick={onToggleTranslationLayout}
+										>
+											<Columns2 className="size-3.5" aria-hidden />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent side="bottom">
+										{t("pdf.layoutTranslate.dualPane")}
+									</TooltipContent>
+								</Tooltip>
+							</div>
+						</div>
+					) : null}
 					{!isRemotePaper && onSmartHighlight ? (
 						<div className={asideClass} inert={meterOpen}>
 							<div className="min-w-0 overflow-hidden">
